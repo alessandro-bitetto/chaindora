@@ -23,6 +23,10 @@ const (
 	EcosystemBrowserExt     Ecosystem = "Browser Extension"
 	EcosystemIDEExt         Ecosystem = "IDE Extension"
 	EcosystemGoModules      Ecosystem = "Go"
+	// v0.11 ecosystems
+	EcosystemRubyGems     Ecosystem = "RubyGems"
+	EcosystemCrates       Ecosystem = "crates.io"
+	EcosystemMavenCentral Ecosystem = "Maven Central"
 )
 
 // Package represents one resolved dependency discovered in a manifest or lockfile.
@@ -182,6 +186,30 @@ func Scan(root string, opts ...ScanOption) (*Inventory, error) {
 			}
 			inv.Packages = append(inv.Packages, pkgs...)
 			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemGoModules, Kind: "go.mod"})
+		case "Gemfile.lock":
+			pkgs, perr := parseGemfileLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "Gemfile.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemRubyGems, Kind: "Gemfile.lock"})
+		case "Cargo.lock":
+			pkgs, perr := parseCargoLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "Cargo.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemCrates, Kind: "Cargo.lock"})
+		case "pom.xml":
+			pkgs, perr := parseMavenPOM(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "pom.xml "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemMavenCentral, Kind: "pom.xml"})
 		case ".gitlab-ci.yml", ".gitlab-ci.yaml":
 			pkgs, perr := parseGitLabCI(path)
 			if perr != nil {

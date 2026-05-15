@@ -22,10 +22,9 @@ func buildGateProbes() *gate.Probes {
 	p := gate.NewProbes()
 	p.Register("npm", registries.NewNPM())
 	p.Register("pypi", registries.NewPyPI())
-	// More ecosystems register here as their probes land:
-	//   p.Register("rubygems", registries.NewRubyGems())
-	//   p.Register("crates",   registries.NewCrates())
-	//   p.Register("maven",    registries.NewMavenCentral())
+	p.Register("rubygems", registries.NewRubyGems())
+	p.Register("crates", registries.NewCrates())
+	p.Register("maven", registries.NewMavenCentral())
 	p.RegisterProvenance("npm", registries.NewNPM())
 	return p
 }

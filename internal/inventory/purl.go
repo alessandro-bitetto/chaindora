@@ -35,6 +35,12 @@ func PURL(eco Ecosystem, name, version string) string {
 		typ = "docker"
 	case EcosystemGoModules:
 		typ = "golang"
+	case EcosystemRubyGems:
+		typ = "gem"
+	case EcosystemCrates:
+		typ = "cargo"
+	case EcosystemMavenCentral:
+		typ = "maven"
 	case EcosystemHomebrew:
 		typ = "brew"
 	case EcosystemDebian:

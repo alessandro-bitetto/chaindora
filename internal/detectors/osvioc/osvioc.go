@@ -136,6 +136,12 @@ func osvEcosystem(e inventory.Ecosystem) string {
 		return "PyPI"
 	case inventory.EcosystemGoModules:
 		return "Go"
+	case inventory.EcosystemRubyGems:
+		return "RubyGems"
+	case inventory.EcosystemCrates:
+		return "crates.io"
+	case inventory.EcosystemMavenCentral:
+		return "Maven"
 	}
 	// Docker images: OSV's container-image story uses per-registry ecosystem
 	// names (e.g. "OCI:gcr.io/distroless") and the bare "OCI" form is
