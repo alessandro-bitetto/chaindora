@@ -77,10 +77,312 @@ func installedVersionCached(cache map[string]map[string]string, projectDir, pkgN
 		v, found := dir[pkgName]
 		return v, found
 	}
-	versions := readNPMInstalled(projectDir)
+	// Dispatch by which lockfile exists in projectDir.
+	// One-time per directory: read whichever family's lockfile
+	// is present, cache the result. We don't try to combine
+	// state across ecosystems — a project rarely mixes them in
+	// the same dir.
+	versions := readInstalledForProject(projectDir)
 	cache[projectDir] = versions
 	v, found := versions[pkgName]
 	return v, found
+}
+
+// readInstalledForProject picks the right parser based on which
+// lockfile is present in projectDir. Tries in order: npm,
+// pnpm, yarn, poetry, Pipfile, uv, Cargo, Gemfile. First match
+// wins. Returns empty map when nothing is recognized (preflight
+// then falls through; the regular command runs).
+func readInstalledForProject(projectDir string) map[string]string {
+	type readFn func(string) map[string]string
+	candidates := []struct {
+		file string
+		read readFn
+	}{
+		{"package-lock.json", readNPMInstalled},
+		{"pnpm-lock.yaml", readPnpmInstalled},
+		{"yarn.lock", readYarnInstalled},
+		{"poetry.lock", readPoetryInstalled},
+		{"Pipfile.lock", readPipfileInstalled},
+		{"uv.lock", readUVInstalled},
+		{"Cargo.lock", readCargoInstalled},
+		{"Gemfile.lock", readGemfileInstalled},
+	}
+	for _, c := range candidates {
+		path := filepath.Join(projectDir, c.file)
+		if _, err := os.Stat(path); err == nil {
+			out := c.read(projectDir)
+			if len(out) > 0 {
+				return out
+			}
+		}
+	}
+	return map[string]string{}
+}
+
+// readPnpmInstalled parses pnpm-lock.yaml. The `packages:` map
+// keys are `/name@version` (pnpm v7+) or `/name/version` (v5-6).
+func readPnpmInstalled(projectDir string) map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(projectDir, "pnpm-lock.yaml"))
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Two indented spaces, ends with ':' — package key line.
+		if !strings.HasPrefix(line, "  ") || !strings.HasSuffix(trimmed, ":") {
+			continue
+		}
+		key := strings.TrimSuffix(trimmed, ":")
+		key = strings.TrimSpace(key)
+		key = strings.Trim(key, `"'`)
+		if !strings.HasPrefix(key, "/") {
+			continue
+		}
+		k := strings.TrimPrefix(key, "/")
+		if i := strings.IndexAny(k, " ("); i >= 0 {
+			k = k[:i]
+		}
+		// v7+ "/<name>@<version>" or v5-6 "/<name>/<version>".
+		atIdx := -1
+		if strings.HasPrefix(k, "@") {
+			if i := strings.LastIndex(k[1:], "@"); i > 0 {
+				atIdx = i + 1
+			}
+		} else {
+			atIdx = strings.LastIndex(k, "@")
+		}
+		var name, version string
+		if atIdx > 0 {
+			name, version = k[:atIdx], k[atIdx+1:]
+		} else if i := strings.LastIndex(k, "/"); i > 0 {
+			name, version = k[:i], k[i+1:]
+		}
+		if name == "" || version == "" {
+			continue
+		}
+		if _, exists := out[name]; !exists {
+			out[name] = version
+		}
+	}
+	return out
+}
+
+// readYarnInstalled parses yarn classic v1 lockfile. Same logic
+// as the gate's parseYarnClassicLock but narrower (just the
+// (name, version) pair).
+func readYarnInstalled(projectDir string) map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(projectDir, "yarn.lock"))
+	if err != nil {
+		return out
+	}
+	var currentName string
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(line, " ") && strings.HasSuffix(trimmed, ":") {
+			spec := strings.TrimSuffix(trimmed, ":")
+			if i := strings.Index(spec, ","); i >= 0 {
+				spec = spec[:i]
+			}
+			spec = strings.Trim(spec, `"`)
+			atIdx := -1
+			if strings.HasPrefix(spec, "@") {
+				if i := strings.Index(spec[1:], "@"); i >= 0 {
+					atIdx = i + 1
+				}
+			} else {
+				atIdx = strings.LastIndex(spec, "@")
+			}
+			if atIdx > 0 {
+				currentName = spec[:atIdx]
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "version ") {
+			ver := strings.TrimSpace(strings.TrimPrefix(trimmed, "version"))
+			ver = strings.Trim(ver, `"`)
+			if currentName == "" || ver == "" {
+				continue
+			}
+			if _, exists := out[currentName]; !exists {
+				out[currentName] = ver
+			}
+		}
+	}
+	return out
+}
+
+// readPoetryInstalled parses poetry.lock's `[[package]]` stanzas.
+// Same TOML-by-hand strategy as the gate's Cargo parser.
+func readPoetryInstalled(projectDir string) map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(projectDir, "poetry.lock"))
+	if err != nil {
+		return out
+	}
+	blocks := strings.Split(string(data), "[[package]]")
+	for _, b := range blocks[1:] {
+		name := tomlField(b, "name")
+		version := tomlField(b, "version")
+		if name != "" && version != "" {
+			if _, exists := out[name]; !exists {
+				out[name] = version
+			}
+		}
+	}
+	return out
+}
+
+// readUVInstalled parses uv.lock — uv uses TOML-shaped lockfile
+// with `[[package]]` blocks like poetry.
+func readUVInstalled(projectDir string) map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(projectDir, "uv.lock"))
+	if err != nil {
+		return out
+	}
+	blocks := strings.Split(string(data), "[[package]]")
+	for _, b := range blocks[1:] {
+		name := tomlField(b, "name")
+		version := tomlField(b, "version")
+		if name != "" && version != "" {
+			if _, exists := out[name]; !exists {
+				out[name] = version
+			}
+		}
+	}
+	return out
+}
+
+// readPipfileInstalled parses Pipfile.lock (JSON, with `default`
+// and `develop` sections each keyed by package name).
+func readPipfileInstalled(projectDir string) map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(projectDir, "Pipfile.lock"))
+	if err != nil {
+		return out
+	}
+	var lock struct {
+		Default map[string]struct {
+			Version string `json:"version"`
+		} `json:"default"`
+		Develop map[string]struct {
+			Version string `json:"version"`
+		} `json:"develop"`
+	}
+	if err := json.Unmarshal(data, &lock); err != nil {
+		return out
+	}
+	for name, entry := range lock.Default {
+		v := strings.TrimPrefix(entry.Version, "==")
+		if v != "" {
+			out[name] = v
+		}
+	}
+	for name, entry := range lock.Develop {
+		v := strings.TrimPrefix(entry.Version, "==")
+		if _, exists := out[name]; !exists && v != "" {
+			out[name] = v
+		}
+	}
+	return out
+}
+
+// readCargoInstalled parses Cargo.lock's [[package]] blocks.
+func readCargoInstalled(projectDir string) map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(projectDir, "Cargo.lock"))
+	if err != nil {
+		return out
+	}
+	blocks := strings.Split(string(data), "[[package]]")
+	for _, b := range blocks[1:] {
+		name := tomlField(b, "name")
+		version := tomlField(b, "version")
+		// Skip non-crates.io sources (local path, git deps).
+		source := tomlField(b, "source")
+		if !strings.Contains(source, "crates.io") {
+			continue
+		}
+		if name != "" && version != "" {
+			if _, exists := out[name]; !exists {
+				out[name] = version
+			}
+		}
+	}
+	return out
+}
+
+// readGemfileInstalled parses Bundler's Gemfile.lock. Same
+// indentation-based parsing as the inventory module.
+func readGemfileInstalled(projectDir string) map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(filepath.Join(projectDir, "Gemfile.lock"))
+	if err != nil {
+		return out
+	}
+	inGEM := false
+	inSpecs := false
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if len(line) > 0 && line[0] != ' ' {
+			inGEM = trimmed == "GEM"
+			inSpecs = false
+			continue
+		}
+		if !inGEM {
+			continue
+		}
+		if trimmed == "specs:" {
+			inSpecs = true
+			continue
+		}
+		if !inSpecs {
+			continue
+		}
+		// 4-space indent + "name (version)" line.
+		if !strings.HasPrefix(line, "    ") || strings.HasPrefix(line, "      ") {
+			continue
+		}
+		open := strings.LastIndex(trimmed, "(")
+		closeIdx := strings.LastIndex(trimmed, ")")
+		if open < 0 || closeIdx < open {
+			continue
+		}
+		name := strings.TrimSpace(trimmed[:open])
+		version := strings.TrimSpace(trimmed[open+1 : closeIdx])
+		if name == "" || version == "" {
+			continue
+		}
+		if strings.ContainsAny(version, "~<>=") {
+			continue // dependency constraint, not resolved version
+		}
+		if _, exists := out[name]; !exists {
+			out[name] = version
+		}
+	}
+	return out
+}
+
+// tomlField extracts `key = "value"` from a stanza body. Shared
+// helper for poetry/uv/Cargo. Stops at the next `[` line.
+func tomlField(block, key string) string {
+	for _, line := range strings.Split(block, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			break
+		}
+		if !strings.HasPrefix(trimmed, key+" = ") && !strings.HasPrefix(trimmed, key+"=") {
+			continue
+		}
+		eq := strings.Index(trimmed, "=")
+		v := strings.TrimSpace(trimmed[eq+1:])
+		v = strings.Trim(v, `"`)
+		return v
+	}
+	return ""
 }
 
 // readNPMInstalled reads <projectDir>/package-lock.json and returns a

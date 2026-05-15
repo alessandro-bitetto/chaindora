@@ -112,6 +112,36 @@ Examples:
 			}
 			installArgs = pmArgs[1:]
 			resolve = gate.ResolvePnpmTree
+		case "pip", "pip3":
+			if len(pmArgs) == 0 || !isPipInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
+				return execReal(realBin, pmArgs)
+			}
+			installArgs = pmArgs[1:]
+			resolve = gate.ResolvePipTree
+		case "cargo":
+			if len(pmArgs) == 0 || !isCargoInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
+				return execReal(realBin, pmArgs)
+			}
+			installArgs = pmArgs[1:]
+			resolve = gate.ResolveCargoTree
+		case "bundle":
+			if len(pmArgs) == 0 || !isBundleInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
+				return execReal(realBin, pmArgs)
+			}
+			installArgs = pmArgs[1:]
+			resolve = gate.ResolveBundlerTree
+		case "gem":
+			if len(pmArgs) == 0 || !isGemInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
+				return execReal(realBin, pmArgs)
+			}
+			installArgs = pmArgs[1:]
+			resolve = gate.ResolveBundlerTree
+		case "mvn":
+			if len(pmArgs) == 0 || !isMavenInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
+				return execReal(realBin, pmArgs)
+			}
+			installArgs = pmArgs[1:]
+			resolve = gate.ResolveMavenTree
 		default:
 			return passThroughToReal(pm, pmArgs)
 		}
@@ -277,6 +307,38 @@ func isYarnInstallVerb(v string) bool {
 // `install` for restoring from lockfile (not gated).
 func isPnpmInstallVerb(v string) bool {
 	return v == "add"
+}
+
+// isPipInstallVerb covers pip / pip3.
+func isPipInstallVerb(v string) bool {
+	return v == "install"
+}
+
+// isCargoInstallVerb — `cargo add` adds to manifest;
+// `cargo install` installs binaries globally (separate trust
+// model, gate anyway).
+func isCargoInstallVerb(v string) bool {
+	return v == "add" || v == "install"
+}
+
+// isBundleInstallVerb — `bundle add` adds to Gemfile;
+// `bundle install` restores from existing Gemfile.lock (not
+// gated — already-vetted state).
+func isBundleInstallVerb(v string) bool {
+	return v == "add"
+}
+
+// isGemInstallVerb — `gem install` installs a gem.
+func isGemInstallVerb(v string) bool {
+	return v == "install"
+}
+
+// isMavenInstallVerb — Maven doesn't have a clean equivalent;
+// `mvn install` runs the full build cycle. We gate `mvn dependency:get`
+// and `mvn dependency:tree` is read-only. For now, gate on
+// `dependency:get` which is the explicit "fetch this dep" verb.
+func isMavenInstallVerb(v string) bool {
+	return v == "dependency:get" || strings.HasPrefix(v, "dependency:") && strings.Contains(v, "get")
 }
 
 // findRealPackageManager looks up the binary on $PATH while skipping

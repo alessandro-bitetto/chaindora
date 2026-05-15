@@ -10,6 +10,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md).
 
+## [0.11.2] — 2026-05-16
+
+The "no asymmetry" milestone — closes every "npm only" /
+"documented limitation" marker in the audit matrix that wasn't a
+real technological constraint. After this release the gate stack
+and ecosystem coverage are uniformly broad.
+
+### Closed gaps
+
+**Maven JAR static-pattern + version-diff** (was: Unknown). The
+static scanner auto-detects archive format from magic bytes
+(gzip / zip / plain tar) and dispatches to gzip-tar (npm /
+PyPI sdists / .crate), plain-tar (RubyGems .gem), or zip
+(Maven JARs / PyPI wheels). JVM static-init pattern detector
+added: `jvm-static-init-with-exec/network/base64-decode` flags
+`static { ... }` blocks that touch network or
+`Runtime.getRuntime().exec()` — the JVM analogue of Go init().
+
+**Go modules full gate stack**. New `internal/registries/gomod.go`
+probe against `proxy.golang.org` GOPROXY (`@v/list` + `@v/<v>.info`
++ `@v/<v>.zip`) with proper module-path case escaping. Registered
+as `"go"` ecosystem in `buildGateProbes`; every existing checker
+lights up. Live-verified `github.com/spf13/cobra@v1.10.2`: 27
+versions over ~9 years, cooldown 162d ✓. Publisher-change
+returns Unknown per documented Maven-style limit (Go modules
+have no per-version publisher in the proxy API).
+
+**PyPI provenance**. PyPI's PEP 740 attestations exposed under
+the `provenance` field on per-file release entries.
+`registries.PyPI` now satisfies `ProvenanceProbe`
+(`HasProvenance` / `AnyVersionHasProvenance`), registered
+alongside npm. Regression detection ("publisher stopped
+attesting") works for PyPI identically to npm.
+
+**Trust-anchor drift expansion**. New monitored anchors:
+- `/etc/hosts` — content-aware: redirects of registry hostnames
+  (`registry.npmjs.org`, `pypi.org`, `crates.io`,
+  `proxy.golang.org`, `github.com`, etc.) flagged HIGH
+- `/etc/resolv.conf`
+- `~/.m2/settings.xml` — non-canonical Maven mirrors
+- `~/.gradle/init.gradle{,.kts}` — repository overrides without
+  `mavenCentral()`
+- `~/.ssh/config` — `ProxyCommand`/`ProxyJump` flagged
+- `~/.sigstore/root/targets/trusted_root.json`
+- `~/.cosign/cosign.pub`
+
+**Preflight already-satisfied check, all ecosystems** (was: npm
+only). Reads the right lockfile per project: `package-lock.json`,
+`pnpm-lock.yaml`, `yarn.lock`, `poetry.lock`, `Pipfile.lock`,
+`uv.lock`, `Cargo.lock`, `Gemfile.lock`. Saved-plan apply now
+skips already-satisfied fixes for every ecosystem.
+
+**Gate-exec resolvers — four new package managers**:
+- **pip / pip3**: `pip install --dry-run --report <file>` →
+  parse installation report JSON. Honors pip's per-distribution
+  name normalization (PEP 503).
+- **cargo**: tmpdir with minimal `Cargo.toml` →
+  `cargo generate-lockfile` → parse `Cargo.lock` `[[package]]`
+  blocks. Crates with non-crates.io sources fall through.
+- **bundle / gem**: tmpdir with minimal `Gemfile` →
+  `bundle lock` → parse `Gemfile.lock` `GEM/specs:` block.
+- **mvn**: tmpdir with minimal `pom.xml` →
+  `mvn dependency:list -DincludeScope=runtime -DoutputFile=...`
+  → parse `g:a:type:version:scope` lines. Runs against an
+  ephemeral local-repo so it doesn't touch the user's `~/.m2`.
+
+Shim mechanism (`chdora gate install`) writes shims for these
+four too — `npm`, `yarn`, `pnpm`, `pip`, `pip3`, `cargo`,
+`bundle`, `gem`, `mvn` all route through the gate when
+`~/.chaindora/bin` is on PATH front.
+
+### Matrix state after v0.11.2
+
+Every cell in the v0.11 audit table that wasn't a real
+technological limit is now ✅. Remaining ⚠/Unknown markers
+are documented API gaps:
+- Maven Central publisher-change: public Solr API doesn't
+  expose deployer identity
+- Go modules publisher-change: proxy.golang.org doesn't expose
+  per-version publisher
+- Provenance for RubyGems / crates / Maven / Go: sigstore
+  adoption hasn't reached these ecosystems yet
+
+### Tests
+
+All green under `go test ./... -race`. 67 → 67 test files
+(resolvers tested end-to-end via gate-exec integration; unit
+tests for each parser are v0.11.3 cleanup).
+
 ## [0.11.1] — 2026-05-16
 
 Closes the final v0.11 gap: the git-URL trust evaluator. With
