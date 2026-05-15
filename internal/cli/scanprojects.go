@@ -16,6 +16,7 @@ import (
 	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 	"github.com/alessandro-bitetto/chaindora/internal/osv"
+	"github.com/alessandro-bitetto/chaindora/internal/progress"
 )
 
 // projectScanOpts configures scanProject's detector pipeline.
@@ -193,10 +194,16 @@ func discoverProjects(root string, skip map[string]bool) []string {
 		skip = defaultScanProjectsSkipDirs
 	}
 	found := map[string]struct{}{}
+	prog := progress.New(os.Stderr)
+	prog.Start(fmt.Sprintf("discovering projects under %s", root))
+	defer func() {
+		prog.Stop(fmt.Sprintf("[chdora] discovered %d candidate project root(s) under %s", len(found), root))
+	}()
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
+		prog.Tick()
 		if d.IsDir() {
 			if path == root {
 				return nil
@@ -209,16 +216,21 @@ func discoverProjects(root string, skip map[string]bool) []string {
 			switch d.Name() {
 			case ".circleci", ".azure-pipelines":
 				found[filepath.Dir(path)] = struct{}{}
+				prog.Hit()
 			case "workflows":
 				parent := filepath.Dir(path)
 				base := filepath.Base(parent)
 				if base == ".github" || base == ".gitea" {
 					found[filepath.Dir(parent)] = struct{}{}
+					prog.Hit()
 				}
 			}
 			return nil
 		}
 		if isProjectMarker(d.Name()) {
+			if _, dup := found[filepath.Dir(path)]; !dup {
+				prog.Hit()
+			}
 			found[filepath.Dir(path)] = struct{}{}
 		}
 		return nil

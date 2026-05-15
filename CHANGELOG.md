@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.6] — 2026-05-15
+
+### Added
+
+- **`chdora audit --whole-machine`** — audits the entire filesystem
+  (`/`) instead of just `$HOME`. Auto-adds a curated set of skip
+  basenames covering macOS + Linux system / virtual / mount-point
+  paths that don't ship third-party manifests:
+  `System`, `private`, `Volumes`, `cores`, `.Spotlight-V100`,
+  `.Trashes`, `.fseventsd`, `.DocumentRevisions-V100`,
+  `.TemporaryItems`, `.PKInstallSandboxManager*`, `proc`, `sys`,
+  `dev`, `run`, `boot`, `net`, `mnt`, `media`. Warns when run
+  without `sudo` since some paths (other users' homes, `/var`,
+  `/etc`) will be silently skipped without it.
+
+- **Multi-root audit.** `chdora audit --root <path>` now accepts
+  multiple values, either repeated or comma-separated:
+  `chdora audit --root /Users --root /opt --root /Applications`.
+  Host-state-bound detectors (`--deep`, `--extensions`,
+  `--persistence`, `--ssh-check`) run once against `$HOME`;
+  per-root filesystem walks (project discovery + incident artifact
+  hunt) run once per root and concatenate findings.
+
+- **`internal/progress`** — TTY-aware progress reporter wired into
+  the two slowest walks (incident artifact hunt + project
+  discovery). When stderr is a terminal, prints a self-overwriting
+  status line every 200ms with items-scanned and findings-hit
+  counters:
+
+  ```
+  [chdora] hunting incident artifacts under /: 234,567 items, 4 hits
+  ```
+
+  Final summary lands as a single normal stderr line. When stderr
+  is piped / redirected / `NO_COLOR` is set, the reporter is a
+  no-op so machine-readable outputs stay clean. Cheap to call from
+  hot paths — `Tick()` is a lock-free atomic increment, screen
+  refresh happens on a single background goroutine.
+
 ## [0.5.5] — 2026-05-15
 
 ### Added

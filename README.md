@@ -113,12 +113,24 @@ artifact hunt). Equivalent to a fully-flagged `chdora forensics
 --scan-projects $HOME --deep --extensions --persistence --ssh-check`.
 
 ```sh
-chdora audit                              # full audit, all detectors on
-chdora audit --root /Users/me/code        # narrower root
-chdora audit --skip-deep --skip-extensions   # disable individual detectors
-chdora audit --format json > audit.json   # pipe-friendly
-chdora audit --fix-plan                   # show remediation plan
+chdora audit                                # full audit under $HOME
+chdora audit --root /Users/me/code          # narrower root
+sudo chdora audit --whole-machine           # entire filesystem ('/' with curated system-noise skips)
+chdora audit --root /Users --root /opt --root /Applications   # multi-root
+chdora audit --skip-deep --skip-extensions  # disable individual detectors
+chdora audit --format json > audit.json     # pipe-friendly
+chdora audit --fix-plan                     # show remediation plan
 ```
+
+`--whole-machine` adds a curated skip list (`System`, `private`, `Volumes`,
+`.Spotlight-V100`, `proc`, `sys`, `dev`, `run`, `boot`, ...) so the walk
+ignores macOS / Linux system + virtual filesystems. Use `sudo` for full
+coverage of other users' homes + `/var` + `/etc`; without it those paths
+are silently skipped.
+
+When stderr is a TTY, a `[chdora] hunting under /: 234,567 items, 4 hits`
+status line refreshes every 200ms during the slow walks so you know it's
+not frozen. `NO_COLOR=1` or piping to a file disables the indicator.
 
 Each detector can be individually disabled with its `--skip-X` flag (see
 `chdora audit --help`).

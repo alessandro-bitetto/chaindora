@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -14,24 +15,43 @@ import (
 // remember five flags.
 
 var (
-	auditRoot          string
-	auditFormat        string
-	auditIncidentsDir  string
-	auditExcludes      []string
-	auditSkipDeep      bool
-	auditSkipPersist   bool
-	auditSkipExt       bool
-	auditSkipSSH       bool
-	auditSkipOSV       bool
-	auditSkipHeur      bool
-	auditSkipHunt      bool
-	auditVerbose       bool
-	auditFixPlan       bool
-	auditFix           bool
-	auditYes           bool
-	auditAggressive    bool
-	auditSSHBaseline   string
+	auditRoots        []string
+	auditWholeMachine bool
+	auditFormat       string
+	auditIncidentsDir string
+	auditExcludes     []string
+	auditSkipDeep     bool
+	auditSkipPersist  bool
+	auditSkipExt      bool
+	auditSkipSSH      bool
+	auditSkipOSV      bool
+	auditSkipHeur     bool
+	auditSkipHunt     bool
+	auditVerbose      bool
+	auditFixPlan      bool
+	auditFix          bool
+	auditYes          bool
+	auditAggressive   bool
+	auditSSHBaseline  string
 )
+
+// wholeMachineExcludes adds curated directory-basename skips on top of the
+// existing defaults (node_modules, .venv, etc.) when --whole-machine is set.
+// Each entry is a basename that's matched anywhere in the tree — there are
+// edge cases (a user's "Documents/System Architecture/" would also be
+// skipped) but in practice these are the macOS / Linux system / virtual
+// filesystem paths that contain no third-party manifests, and the cost of
+// over-matching is far less than the cost of walking them.
+var wholeMachineExcludes = []string{
+	// macOS / FreeBSD
+	"System", "private", "Volumes", "cores",
+	".Spotlight-V100", ".Trashes", ".fseventsd", ".DocumentRevisions-V100",
+	".TemporaryItems", ".PKInstallSandboxManager", ".PKInstallSandboxManager-SystemSoftware",
+	// Linux virtual + system
+	"proc", "sys", "dev", "run", "boot",
+	// Network / mount points
+	"net", "mnt", "media",
+}
 
 var auditCmd = &cobra.Command{
 	Use:   "audit",
@@ -57,47 +77,100 @@ Equivalent to:
 
 Each detector can be individually disabled with its --skip-X flag.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Wire audit's own flags into the shared forensics-* package vars
-		// that runForensicsFlow reads. Audit's defaults are the inverse of
-		// forensics': everything ON unless explicitly --skip-X'd.
-		root := auditRoot
-		if root == "" {
-			root, _ = os.UserHomeDir()
+		// Resolve effective roots. --whole-machine adds "/" and the curated
+		// system exclusions on top of whatever --root was given. If neither
+		// --root nor --whole-machine is set, default to $HOME (single-root).
+		roots := append([]string{}, auditRoots...)
+		excludes := append([]string{}, auditExcludes...)
+		if auditWholeMachine {
+			if !containsString(roots, "/") {
+				roots = append(roots, "/")
+			}
+			for _, e := range wholeMachineExcludes {
+				if !containsString(excludes, e) {
+					excludes = append(excludes, e)
+				}
+			}
+			if os.Geteuid() != 0 && os.Geteuid() != -1 {
+				fmt.Fprintln(os.Stderr, "[chdora] --whole-machine without root: some paths (other users' homes, /var, /etc) will be silently skipped. Re-run with `sudo` for full coverage.")
+			}
 		}
-		forensicsHome = root
-		forensicsHunt = root
-		forensicsScanProjects = root
+		if len(roots) == 0 {
+			home, _ := os.UserHomeDir()
+			roots = []string{home}
+		}
+
+		// Shared flag wiring (root-independent detectors).
 		forensicsIncidentsDir = auditIncidentsDir
 		forensicsFormat = auditFormat
 		forensicsJSON = false
-		forensicsExcludes = auditExcludes
+		forensicsExcludes = excludes
 		forensicsVerbose = auditVerbose
 		forensicsSSHBaseline = auditSSHBaseline
-
-		// Inverted opt-in flags.
 		forensicsDeep = !auditSkipDeep
 		forensicsPersistence = !auditSkipPersist
 		forensicsExtensions = !auditSkipExt
 		forensicsSSHCheck = !auditSkipSSH
-
-		// Forwarded skip flags.
 		forensicsSkipOSV = auditSkipOSV
 		forensicsSkipHeur = auditSkipHeur
 		forensicsSkipHunt = auditSkipHunt
-
-		// Fix-flow forwarding.
 		forensicsFixPlan = auditFixPlan
 		forensicsFix = auditFix
 		forensicsYes = auditYes
 		forensicsAggressive = auditAggressive
 
-		return runForensicsFlow(context.Background())
+		// Single-root case: identical to before, one full flow.
+		if len(roots) == 1 {
+			r := roots[0]
+			forensicsHome = r
+			forensicsHunt = r
+			forensicsScanProjects = r
+			return runForensicsFlow(context.Background())
+		}
+
+		// Multi-root case: run host-state-bound detectors ONCE against $HOME
+		// (the first root if it equals $HOME, else $HOME); then run the
+		// per-root filesystem walks for each additional root. Effectively the
+		// flow we want is "audit-once, then walk every requested tree."
+		home, _ := os.UserHomeDir()
+		forensicsHome = home
+		// First root: full flow including host-state.
+		fmt.Fprintf(os.Stderr, "[chdora] auditing %d root(s): %v\n", len(roots), roots)
+		forensicsHunt = roots[0]
+		forensicsScanProjects = roots[0]
+		if err := runForensicsFlow(context.Background()); err != nil {
+			return err
+		}
+		// Subsequent roots: walks only (host-state already covered).
+		forensicsSkipHunt = auditSkipHunt
+		auditSkipDeep, auditSkipExt, auditSkipPersist, auditSkipSSH = true, true, true, true
+		forensicsDeep, forensicsExtensions, forensicsPersistence, forensicsSSHCheck = false, false, false, false
+		for _, r := range roots[1:] {
+			fmt.Fprintf(os.Stderr, "\n[chdora] auditing additional root: %s\n", r)
+			forensicsHunt = r
+			forensicsScanProjects = r
+			if err := runForensicsFlow(context.Background()); err != nil {
+				return err
+			}
+		}
+		return nil
 	},
 }
 
+func containsString(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if h == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func init() {
-	auditCmd.Flags().StringVar(&auditRoot, "root", "",
-		"filesystem root to audit (default: $HOME). Used for both project discovery and the file-artifact hunt.")
+	auditCmd.Flags().StringSliceVar(&auditRoots, "root", nil,
+		"filesystem root(s) to audit (default: $HOME). Repeat for multiple roots: --root /Users --root /opt --root /Applications. Used for both project discovery and the file-artifact hunt.")
+	auditCmd.Flags().BoolVar(&auditWholeMachine, "whole-machine", false,
+		"audit the entire filesystem ('/'). Auto-skips macOS / Linux system / virtual paths (System, private, Volumes, proc, sys, dev, ...). Recommend `sudo` for full coverage of other users' homes + /var + /etc.")
 	auditCmd.Flags().StringVar(&auditFormat, "format", "text",
 		"output format: text|json|jsonl|sarif|github")
 	auditCmd.Flags().StringVar(&auditIncidentsDir, "incidents", "",

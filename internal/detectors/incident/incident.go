@@ -2,6 +2,7 @@ package incident
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -11,6 +12,7 @@ import (
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
+	"github.com/alessandro-bitetto/chaindora/internal/progress"
 )
 
 type Detector struct {
@@ -101,10 +103,17 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 		}
 	}
 	if len(artifacts) > 0 {
+		prog := progress.New(os.Stderr)
+		prog.Start(fmt.Sprintf("hunting incident artifacts under %s", scanRoot))
+		hitsAtStart := len(out)
+		defer func() {
+			prog.Stop(fmt.Sprintf("[chdora] artifact hunt complete: %d match(es) under %s", len(out)-hitsAtStart, scanRoot))
+		}()
 		_ = filepath.WalkDir(scanRoot, func(path string, dent fs.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
+			prog.Tick()
 			if dent.IsDir() {
 				name := dent.Name()
 				// Conventional skip-list. testdata is added because Go projects
@@ -148,6 +157,7 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 					SourcePath:     path,
 					PostCompromise: ar.Incident.PostCompromise,
 				})
+				prog.Hit()
 			}
 			return nil
 		})
