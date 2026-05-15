@@ -28,6 +28,7 @@ var (
 	ciSkipHeuristic  bool
 	ciFreshPopular   bool
 	ciVerbose        bool
+	ciExcludes       []string
 )
 
 var ciCmd = &cobra.Command{
@@ -62,7 +63,7 @@ continuous-integration use:
 			fmt.Fprintf(os.Stderr, "chaindora ci: detected env=%q, format=%q\n", ci, format)
 		}
 
-		inv, err := inventory.Scan(root)
+		inv, err := inventory.Scan(root, inventory.WithExcludes(ciExcludes...))
 		if err != nil {
 			return fmt.Errorf("inventory: %w", err)
 		}
@@ -99,7 +100,7 @@ continuous-integration use:
 						fmt.Fprintln(os.Stderr, "warn: incident pack load failed:", err)
 					}
 				} else {
-					det := incident.New(incs)
+					det := incident.New(incs, ciExcludes...)
 					results, err := det.Detect(ctx, inv, root)
 					if err != nil {
 						return fmt.Errorf("incident detector: %w", err)
@@ -112,6 +113,7 @@ continuous-integration use:
 		if !ciSkipHeuristic {
 			det := heuristic.New(heuristic.Config{
 				FreshPopular: heuristic.FreshPopularConfig{Enabled: ciFreshPopular},
+				Excludes:     ciExcludes,
 			})
 			results, err := det.Detect(ctx, inv, root)
 			if err != nil {
@@ -218,5 +220,6 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciSkipHeuristic, "skip-heuristic", false, "skip behavioral heuristics")
 	ciCmd.Flags().BoolVar(&ciFreshPopular, "fresh-popular", false, "also check publish dates of top-N popular npm/PyPI deps (requires network)")
 	ciCmd.Flags().BoolVar(&ciVerbose, "verbose", false, "emit diagnostic logs to stderr")
+	ciCmd.Flags().StringSliceVar(&ciExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated)")
 	rootCmd.AddCommand(ciCmd)
 }

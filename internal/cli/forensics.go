@@ -26,6 +26,7 @@ var (
 	forensicsSkipOSV      bool
 	forensicsSkipHeur     bool
 	forensicsVerbose      bool
+	forensicsExcludes     []string
 )
 
 var forensicsCmd = &cobra.Command{
@@ -72,7 +73,7 @@ var forensicsCmd = &cobra.Command{
 					fmt.Fprintln(os.Stderr, "warn: incident pack load failed:", err)
 				} else {
 					fmt.Fprintf(os.Stderr, "hunting %d incidents' file_artifacts under %s\n", len(incs), huntRoot)
-					iDet := incident.New(incs)
+					iDet := incident.New(incs, forensicsExcludes...)
 					empty := &inventory.Inventory{}
 					ires, err := iDet.Detect(ctx, empty, huntRoot)
 					if err != nil {
@@ -88,7 +89,7 @@ var forensicsCmd = &cobra.Command{
 			if forensicsVerbose {
 				fmt.Fprintf(os.Stderr, "discovering projects under %s\n", projRoot)
 			}
-			roots := discoverProjects(projRoot, nil)
+			roots := discoverProjects(projRoot, mergeExcludeMap(forensicsExcludes))
 			fmt.Fprintf(os.Stderr, "found %d project root(s) under %s\n", len(roots), projRoot)
 			opts := projectScanOpts{
 				IncidentsDir:  forensicsIncidentsDir,
@@ -97,6 +98,7 @@ var forensicsCmd = &cobra.Command{
 				SkipHeuristic: forensicsSkipHeur,
 				FreshPopular:  false,
 				Verbose:       forensicsVerbose,
+				Excludes:      forensicsExcludes,
 			}
 			for _, r := range roots {
 				results, err := scanProject(ctx, r, opts)
@@ -130,5 +132,6 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsSkipOSV, "skip-osv", false, "skip OSV.dev queries during --scan-projects")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipHeur, "skip-heuristic", false, "skip behavioral heuristics during --scan-projects")
 	forensicsCmd.Flags().BoolVar(&forensicsVerbose, "verbose", false, "log per-project scanned + per-host check counts to stderr")
+	forensicsCmd.Flags().StringSliceVar(&forensicsExcludes, "exclude", nil, "directory basename(s) to skip during the hunt / project scans")
 	rootCmd.AddCommand(forensicsCmd)
 }

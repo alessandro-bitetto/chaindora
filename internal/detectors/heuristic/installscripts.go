@@ -20,14 +20,20 @@ import (
 //   2. npm dependencies whose lockfile entry sets `hasInstallScript: true`
 //      (MEDIUM — most legitimate libraries don't ship install hooks; the
 //      Shai-Hulud worm relies on this hook to propagate).
-func detectInstallScripts(inv *inventory.Inventory, scanRoot string) []findings.Finding {
+func detectInstallScripts(inv *inventory.Inventory, scanRoot string, excludes []string) []findings.Finding {
 	var out []findings.Finding
-	out = append(out, scanRootPackageScripts(scanRoot)...)
+	out = append(out, scanRootPackageScripts(scanRoot, excludes)...)
 	out = append(out, scanDependencyInstallScripts(inv)...)
 	return out
 }
 
-func scanRootPackageScripts(scanRoot string) []findings.Finding {
+func scanRootPackageScripts(scanRoot string, excludes []string) []findings.Finding {
+	excludeSet := map[string]struct{}{}
+	for _, e := range excludes {
+		if e != "" {
+			excludeSet[e] = struct{}{}
+		}
+	}
 	var out []findings.Finding
 	_ = filepath.WalkDir(scanRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -36,6 +42,9 @@ func scanRootPackageScripts(scanRoot string) []findings.Finding {
 		if d.IsDir() {
 			name := d.Name()
 			if name == "node_modules" || name == ".git" || name == ".venv" || name == "venv" {
+				return filepath.SkipDir
+			}
+			if _, skip := excludeSet[name]; skip {
 				return filepath.SkipDir
 			}
 			return nil

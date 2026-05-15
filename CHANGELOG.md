@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--exclude <name>` flag on `scan`, `ci`, and `forensics` — comma-separated
+  or repeatable directory basenames to skip during all detector walks
+  (inventory, incident-pack file-artifact hunt, heuristic install-script
+  walk, and project discovery). Plumbed via a new
+  `inventory.WithExcludes(...)` option, `heuristic.Config{Excludes}`, and a
+  variadic `incident.New(incs, excludes...)` constructor.
+- Dogfood self-scan re-enabled in `.github/workflows/test.yml`: a
+  separate job runs `./chaindora ci . --exclude testdata --fail-on critical,high`
+  and uploads the SARIF sidecar to GitHub code-scanning. The `testdata/`
+  exclusion keeps the deliberately-malicious test fixtures out of the
+  results.
+
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
 ## [0.1.0] — 2026-05-15

@@ -26,13 +26,14 @@ type projectScanOpts struct {
 	SkipHeuristic bool
 	FreshPopular  bool
 	Verbose       bool
+	Excludes      []string
 }
 
 // scanProject runs the full chaindora scan pipeline against a single project
 // root and returns the aggregated findings. Returns nil for an empty inventory
 // (no project markers actually parseable at that root).
 func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]findings.Finding, error) {
-	inv, err := inventory.Scan(root)
+	inv, err := inventory.Scan(root, inventory.WithExcludes(opts.Excludes...))
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +59,7 @@ func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]find
 		})
 		if dir != "" {
 			if incs, err := incidents.LoadDir(dir); err == nil {
-				det := incident.New(incs)
+				det := incident.New(incs, opts.Excludes...)
 				if results, err := det.Detect(ctx, inv, root); err == nil {
 					all = append(all, results...)
 				}
@@ -68,6 +69,7 @@ func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]find
 	if !opts.SkipHeuristic {
 		det := heuristic.New(heuristic.Config{
 			FreshPopular: heuristic.FreshPopularConfig{Enabled: opts.FreshPopular},
+			Excludes:     opts.Excludes,
 		})
 		if results, err := det.Detect(ctx, inv, root); err == nil {
 			all = append(all, results...)
@@ -149,6 +151,21 @@ func isProjectMarker(name string) bool {
 		return true
 	}
 	return false
+}
+
+// mergeExcludeMap merges user-supplied directory names into the default skip
+// set so discoverProjects honors both.
+func mergeExcludeMap(userExcludes []string) map[string]bool {
+	out := make(map[string]bool, len(defaultScanProjectsSkipDirs)+len(userExcludes))
+	for k, v := range defaultScanProjectsSkipDirs {
+		out[k] = v
+	}
+	for _, e := range userExcludes {
+		if e != "" {
+			out[e] = true
+		}
+	}
+	return out
 }
 
 // discoverProjects walks root looking for files that mark a project root,

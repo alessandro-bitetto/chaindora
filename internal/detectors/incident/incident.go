@@ -13,11 +13,18 @@ import (
 )
 
 type Detector struct {
-	incs []*incidents.Incident
+	incs     []*incidents.Incident
+	excludes map[string]struct{}
 }
 
-func New(incs []*incidents.Incident) *Detector {
-	return &Detector{incs: incs}
+func New(incs []*incidents.Incident, excludes ...string) *Detector {
+	exSet := map[string]struct{}{}
+	for _, e := range excludes {
+		if e != "" {
+			exSet[e] = struct{}{}
+		}
+	}
+	return &Detector{incs: incs, excludes: exSet}
 }
 
 // Detect runs incident-pack matching against the inventory and a filesystem
@@ -91,6 +98,9 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 			if dent.IsDir() {
 				name := dent.Name()
 				if name == "node_modules" || name == ".venv" || name == "venv" || name == ".git" {
+					return filepath.SkipDir
+				}
+				if _, skip := d.excludes[name]; skip {
 					return filepath.SkipDir
 				}
 				return nil

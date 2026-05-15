@@ -12,6 +12,9 @@ import (
 // the registry-querying detector on (off by default for offline-safe scans).
 type Config struct {
 	FreshPopular FreshPopularConfig
+	// Excludes are directory basenames to skip during the install-script
+	// filesystem walk. Same semantics as inventory.WithExcludes.
+	Excludes []string
 }
 
 // Detector runs behavioral heuristics that don't depend on external IOC
@@ -28,7 +31,7 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 	var out []findings.Finding
 	out = append(out, detectUnpinnedRefs(inv)...)
 	out = append(out, detectCIShellPatterns(inv)...)
-	out = append(out, detectInstallScripts(inv, scanRoot)...)
+	out = append(out, detectInstallScripts(inv, scanRoot, d.cfg.Excludes)...)
 	out = append(out, detectTyposquats(inv)...)
 	out = append(out, detectDepConfusion(inv, scanRoot)...)
 	out = append(out, detectFreshPopular(inv, d.cfg.FreshPopular)...)

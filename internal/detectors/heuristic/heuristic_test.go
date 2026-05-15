@@ -86,7 +86,7 @@ func TestDetectInstallScriptsRoot(t *testing.T) {
 	if err := os.WriteFile(pkgPath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	fs := scanRootPackageScripts(tmp)
+	fs := scanRootPackageScripts(tmp, nil)
 	if len(fs) != 2 {
 		t.Fatalf("expected 2 findings (preinstall + postinstall), got %d: %+v", len(fs), fs)
 	}

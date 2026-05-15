@@ -51,8 +51,35 @@ type Inventory struct {
 	Errors   []string  `json:"errors,omitempty"`
 }
 
+// ScanOption configures behavior of Scan. See WithExcludes.
+type ScanOption func(*scanCfg)
+
+type scanCfg struct {
+	excludeNames map[string]struct{}
+}
+
+// WithExcludes adds directory basenames to skip during the walk. Useful for
+// ignoring vendored test fixtures, build outputs, or other paths not covered
+// by Scan's built-in skip list (node_modules / .venv / venv / .git).
+func WithExcludes(names ...string) ScanOption {
+	return func(c *scanCfg) {
+		if c.excludeNames == nil {
+			c.excludeNames = map[string]struct{}{}
+		}
+		for _, n := range names {
+			if n != "" {
+				c.excludeNames[n] = struct{}{}
+			}
+		}
+	}
+}
+
 // Scan walks root and parses any known lockfiles/manifests it finds.
-func Scan(root string) (*Inventory, error) {
+func Scan(root string, opts ...ScanOption) (*Inventory, error) {
+	cfg := &scanCfg{}
+	for _, o := range opts {
+		o(cfg)
+	}
 	inv := &Inventory{}
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -63,6 +90,9 @@ func Scan(root string) (*Inventory, error) {
 		if d.IsDir() {
 			name := d.Name()
 			if name == "node_modules" || name == ".venv" || name == "venv" || name == ".git" {
+				return filepath.SkipDir
+			}
+			if _, skip := cfg.excludeNames[name]; skip {
 				return filepath.SkipDir
 			}
 			return nil
