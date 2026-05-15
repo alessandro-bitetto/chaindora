@@ -31,9 +31,11 @@ var (
 	scanYes          bool
 	scanAggressive   bool
 	scanSkipRegistry bool
-	scanShowAllCVEs  bool
-	scanSupplyOnly   bool
-	scanOffline      bool
+	scanExcludeCVEs    bool
+	scanExcludeSupply  bool
+	scanExcludeConfig  bool
+	scanExcludeHost    bool
+	scanOffline        bool
 )
 
 var scanCmd = &cobra.Command{
@@ -125,8 +127,10 @@ var scanCmd = &cobra.Command{
 
 		tally.Print(os.Stderr)
 
-		ShowAllCVEs = scanShowAllCVEs
-		SupplyChainOnly = scanSupplyOnly
+		ExcludeCVEs = scanExcludeCVEs
+		ExcludeSupplyChain = scanExcludeSupply
+		ExcludeConfig = scanExcludeConfig
+		ExcludeHost = scanExcludeHost
 		if err := renderFindings(os.Stdout, all, effectiveFormat(scanFormat, jsonOut)); err != nil {
 			return err
 		}
@@ -163,8 +167,10 @@ func init() {
 	scanCmd.Flags().BoolVar(&skipHeuristic, "skip-heuristic", false, "skip behavioral heuristics (unpinned refs, CI shell patterns, install scripts, typosquat, dep-confusion)")
 	scanCmd.Flags().BoolVar(&scanFreshPopular, "fresh-popular", false, "also check whether popular npm/PyPI deps were published in the last 14 days (requires network)")
 	scanCmd.Flags().BoolVar(&scanSkipRegistry, "skip-registry", false, "do not query npm/PyPI for dep-confusion / typosquat / install-script evidence (offline mode; those heuristics become silent)")
-	scanCmd.Flags().BoolVar(&scanShowAllCVEs, "show-all-cves", false, "show every dependency-CVE finding (default: collapse to the top 5 with --show-all-cves hint)")
-	scanCmd.Flags().BoolVar(&scanSupplyOnly, "supply-chain-only", false, "hide the dependency-CVE section entirely (chdora-identity scan; show only supply-chain attack signals)")
+	scanCmd.Flags().BoolVar(&scanExcludeCVEs, "exclude-cves", false, "hide the dependency-CVE section (commodity OSV CVE matches)")
+	scanCmd.Flags().BoolVar(&scanExcludeSupply, "exclude-supply-chain", false, "hide the supply-chain attack section (incident pack, MAL-*, evidence-based heuristics)")
+	scanCmd.Flags().BoolVar(&scanExcludeConfig, "exclude-config", false, "hide the configuration-risks section (unpinned action refs, curl|bash CI patterns)")
+	scanCmd.Flags().BoolVar(&scanExcludeHost, "exclude-host", false, "hide the host-state section (credential files, shell-rc, persistence)")
 	scanCmd.Flags().BoolVar(&scanOffline, "offline", false, "no network calls at all — implies --skip-osv and --skip-registry. Uses only the local incident pack + cached registry data.")
 	scanCmd.Flags().StringSliceVar(&scanExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated, e.g. --exclude testdata,vendor)")
 	scanCmd.Flags().BoolVar(&scanFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")

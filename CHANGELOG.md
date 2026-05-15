@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.7.1] — 2026-05-15
+
+### Fixed
+
+- **Four-section renderer replaces v0.7.0's two-section split.**
+  v0.7.0 lumped supply-chain attacks + configuration findings +
+  host-state findings into one section labeled "SUPPLY-CHAIN ATTACK
+  SIGNALS". In real-world audits this lied: an audit with 0 actual
+  attacks but 33 unpinned-action-ref findings showed a "34 supply-
+  chain attack signals" banner that read as alarming when it was
+  really 33 configuration recommendations.
+
+  Now four honest sections, each clearly labeled and each shown
+  with its own count (or `✅ 0 findings` when clean):
+
+  ```
+  SUPPLY-CHAIN ATTACK SIGNALS  (✅ 0 findings — no incident matches, ...)
+  DEPENDENCY VULNERABILITIES (OSV.dev)  (153 findings — 1 critical, ...)
+  CONFIGURATION RISKS  (33 findings — 1 high, 32 low)
+  HOST STATE  (✅ 0 findings — no leaked credentials, ...)
+  ```
+
+  An empty supply-chain section is a positive signal ("chdora's
+  primary check came up clean") — the reassuring `✅` icon and
+  explanatory message make that legible.
+
+### Changed
+
+- **Render flags replaced (breaking).** The v0.7.0 `--show-all-cves`
+  + `--supply-chain-only` (opt-in to suppress) are gone. Replaced
+  with explicit opt-out per category:
+    - `--exclude-cves` — hide the dependency-CVE section
+    - `--exclude-supply-chain` — hide the supply-chain attack section
+    - `--exclude-config` — hide the configuration-risks section
+    - `--exclude-host` — hide the host-state section
+
+  **Default behavior**: show every section in full. "Audit" means
+  show me what was found; filtering is explicit opt-out. The old
+  v0.7.0 collapse-CVE-section-to-top-5 default is gone — every
+  finding renders unless excluded.
+
+  Flag changes apply to `scan`, `ci`, `forensics`, and `audit`.
+
+### Architecture note
+
+A "configuration risk" (unpinned action ref, curl|bash CI pattern)
+is not a supply-chain attack — it's *attack surface*. A "host state"
+finding (modified shell rc, persistence entry) is post-compromise
+*evidence* — not the attack itself. v0.7.0 conflated all three;
+v0.7.1 splits them so the user can tell at a glance: is something
+already attacking me, do I have known-bad dependencies, are my
+defaults hardened, and is my machine compromised. Four questions,
+four sections, four answers.
+
 ## [0.7.0] — 2026-05-15
 
 The identity release: chdora visibly distinguishes "deliberate supply-

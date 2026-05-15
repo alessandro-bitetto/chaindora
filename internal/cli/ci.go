@@ -34,8 +34,10 @@ var (
 	ciYes            bool
 	ciAggressive     bool
 	ciSkipRegistry   bool
-	ciShowAllCVEs    bool
-	ciSupplyOnly     bool
+	ciExcludeCVEs    bool
+	ciExcludeSupply  bool
+	ciExcludeConfig  bool
+	ciExcludeHost    bool
 	ciOffline        bool
 )
 
@@ -147,8 +149,10 @@ continuous-integration use:
 
 		tally.Print(os.Stderr)
 
-		ShowAllCVEs = ciShowAllCVEs
-		SupplyChainOnly = ciSupplyOnly
+		ExcludeCVEs = ciExcludeCVEs
+		ExcludeSupplyChain = ciExcludeSupply
+		ExcludeConfig = ciExcludeConfig
+		ExcludeHost = ciExcludeHost
 		if err := renderFindings(os.Stdout, all, format); err != nil {
 			return err
 		}
@@ -263,8 +267,10 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciSkipHeuristic, "skip-heuristic", false, "skip behavioral heuristics")
 	ciCmd.Flags().BoolVar(&ciFreshPopular, "fresh-popular", false, "also check publish dates of top-N popular npm/PyPI deps (requires network)")
 	ciCmd.Flags().BoolVar(&ciSkipRegistry, "skip-registry", false, "do not query npm/PyPI for evidence (offline mode; evidence-based heuristics become silent)")
-	ciCmd.Flags().BoolVar(&ciShowAllCVEs, "show-all-cves", false, "show every dependency-CVE finding (default: collapse to the top 5)")
-	ciCmd.Flags().BoolVar(&ciSupplyOnly, "supply-chain-only", false, "hide the dependency-CVE section entirely")
+	ciCmd.Flags().BoolVar(&ciExcludeCVEs, "exclude-cves", false, "hide the dependency-CVE section")
+	ciCmd.Flags().BoolVar(&ciExcludeSupply, "exclude-supply-chain", false, "hide the supply-chain attack section")
+	ciCmd.Flags().BoolVar(&ciExcludeConfig, "exclude-config", false, "hide the configuration-risks section")
+	ciCmd.Flags().BoolVar(&ciExcludeHost, "exclude-host", false, "hide the host-state section")
 	ciCmd.Flags().BoolVar(&ciOffline, "offline", false, "no network calls — implies --skip-osv and --skip-registry")
 	ciCmd.Flags().BoolVar(&ciVerbose, "verbose", false, "emit diagnostic logs to stderr")
 	ciCmd.Flags().StringSliceVar(&ciExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated)")

@@ -143,19 +143,17 @@ func isTerm(w io.Writer) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-// cveSectionPreviewSize controls how many dependency-CVE findings show
-// in the default text output. The rest collapse into a "+N more — use
-// --show-all-cves" line. The supply-chain section is always shown in
-// full because that's chdora's primary identity.
-const cveSectionPreviewSize = 5
-
-// ShowAllCVEs, when true, disables the collapse of the
-// dependency-CVE section. Set from the CLI's --show-all-cves flag.
-var ShowAllCVEs bool
-
-// SupplyChainOnly, when true, hides the dependency-CVE section
-// entirely. Set from the CLI's --supply-chain-only flag.
-var SupplyChainOnly bool
+// Exclude* package-level vars are toggled from CLI flags
+// (--exclude-cves, --exclude-supply-chain, --exclude-host,
+// --exclude-config). When true, the corresponding section is omitted
+// from the rendered output. Default = false everywhere = show
+// everything ("audit means tell me what you found").
+var (
+	ExcludeSupplyChain bool
+	ExcludeCVEs        bool
+	ExcludeConfig      bool
+	ExcludeHost        bool
+)
 
 func writeText(w io.Writer, fs []findings.Finding) {
 	if len(fs) == 0 {
@@ -166,14 +164,15 @@ func writeText(w io.Writer, fs []findings.Finding) {
 	p := newPalette(w)
 	rgs := groupForRender(fs)
 
-	// Partition by category. The supply-chain section comes first
-	// and gets the loud presentation; the dep-CVE section is
-	// collapsed by default. host-forensics + configuration findings
-	// fold into the supply-chain block because they're chdora-
-	// specific signals that don't appear in commodity SCA tools.
-	supplyChain, depCVE := partitionByCategory(rgs)
+	// Four-bucket partition (v0.7.1). The previous two-section model
+	// dumped unpinned-ref + curl|bash + host-state findings into the
+	// "SUPPLY-CHAIN ATTACK SIGNALS" bucket, which made the section
+	// banner lie when those were the only findings ("34 supply-chain
+	// signals!" when it was really 33 unpinned-ref + 1 OneDrive
+	// launchd agent). Splitting by Category produces honest banners.
+	supplyChain, depCVE, config, host := partitionByCategory(rgs)
 
-	// Top-line summary unchanged.
+	// Top-line summary.
 	totalUnique := len(rgs)
 	totalInstances := len(fs)
 	sevParts := summaryBySeverity(rgs)
@@ -186,64 +185,83 @@ func writeText(w io.Writer, fs []findings.Finding) {
 
 	idx := 0
 
-	// === SUPPLY-CHAIN ATTACK SIGNALS section ===
-	if len(supplyChain) > 0 {
-		writeBanner(w, p, "SUPPLY-CHAIN ATTACK SIGNALS", supplyChain, p.bold+p.red)
-		// Within the section, sort by severity.
-		grouped := groupAndSort(supplyChain)
-		for _, sev := range grouped.order {
-			group := grouped.bySev[sev]
-			if len(group) == 0 {
-				continue
-			}
-			writeSection(w, p, sev, group, &idx)
-		}
+	if !ExcludeSupplyChain {
+		writeCategorySection(w, p, "SUPPLY-CHAIN ATTACK SIGNALS",
+			"no incident matches, no malicious packages, no attack-shape dependencies — chdora's primary check came up clean",
+			p.bold+p.red, supplyChain, &idx)
 	}
-
-	// === DEPENDENCY VULNERABILITIES section ===
-	if !SupplyChainOnly && len(depCVE) > 0 {
-		writeBanner(w, p, "DEPENDENCY VULNERABILITIES (OSV.dev)", depCVE, p.bold+p.cyan)
-		grouped := groupAndSort(depCVE)
-		shown := 0
-		for _, sev := range grouped.order {
-			group := grouped.bySev[sev]
-			if len(group) == 0 {
-				continue
-			}
-			if !ShowAllCVEs {
-				// Collapse: show only up to cveSectionPreviewSize
-				// findings total across all severities, then bail.
-				remaining := cveSectionPreviewSize - shown
-				if remaining <= 0 {
-					break
-				}
-				if len(group) > remaining {
-					group = group[:remaining]
-				}
-			}
-			writeSection(w, p, sev, group, &idx)
-			shown += len(group)
-		}
-		if !ShowAllCVEs && shown < len(depCVE) {
-			fmt.Fprintf(w, "  %s... and %d more dependency CVE finding(s) — re-run with --show-all-cves%s\n",
-				p.gray, len(depCVE)-shown, p.reset)
-			fmt.Fprintln(w)
-		}
+	if !ExcludeCVEs {
+		writeCategorySection(w, p, "DEPENDENCY VULNERABILITIES (OSV.dev)",
+			"no known CVEs in scanned dependencies",
+			p.bold+p.cyan, depCVE, &idx)
+	}
+	if !ExcludeConfig {
+		writeCategorySection(w, p, "CONFIGURATION RISKS",
+			"no unpinned action refs, no curl|bash CI patterns — attack-surface is tight",
+			p.bold+p.yellow, config, &idx)
+	}
+	if !ExcludeHost {
+		writeCategorySection(w, p, "HOST STATE",
+			"no leaked credentials, no shell-rc tampering, no unexpected persistence",
+			p.bold+p.magenta, host, &idx)
 	}
 }
 
-func partitionByCategory(rgs []renderGroup) (supplyChain, depCVE []renderGroup) {
+// writeCategorySection renders one of the four top-level sections. When
+// the section has findings, the banner shows the per-severity counts
+// and every finding is rendered (sorted by severity within the section).
+// When the section is empty, a single "✅ no findings — <reassuring
+// message>" banner is shown so the user sees the section ran and came
+// up clean (the absence is a positive signal, not silence).
+func writeCategorySection(w io.Writer, p palette, title, emptyMessage, color string, group []renderGroup, idx *int) {
+	bar := strings.Repeat("=", wrapWidth+4)
+	fmt.Fprintln(w, bar)
+	if len(group) == 0 {
+		fmt.Fprintf(w, "%s%s%s  %s(✅ 0 findings — %s)%s\n",
+			color, title, p.reset, p.gray, emptyMessage, p.reset)
+		fmt.Fprintln(w, bar)
+		fmt.Fprintln(w)
+		return
+	}
+	sevParts := summaryBySeverity(group)
+	fmt.Fprintf(w, "%s%s%s  (%d finding%s — %s)\n",
+		color, title, p.reset,
+		len(group), pluralSuffix(len(group)), strings.Join(sevParts, ", "))
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w)
+	grouped := groupAndSort(group)
+	for _, sev := range grouped.order {
+		sub := grouped.bySev[sev]
+		if len(sub) == 0 {
+			continue
+		}
+		writeSection(w, p, sev, sub, idx)
+	}
+}
+
+// partitionByCategory splits findings into the four top-level sections.
+// Categories are derived from Finding.Category (set explicitly by some
+// detectors, e.g. osv-ioc for MAL-* vs CVE) or inferred via
+// findings.DeriveCategory from the Detector field.
+func partitionByCategory(rgs []renderGroup) (supplyChain, depCVE, config, host []renderGroup) {
 	for _, g := range rgs {
-		cat := findings.DeriveCategory(g.Finding)
-		if cat == findings.CategoryDependencyCVE {
+		switch findings.DeriveCategory(g.Finding) {
+		case findings.CategorySupplyChainAttack:
+			supplyChain = append(supplyChain, g)
+		case findings.CategoryDependencyCVE:
 			depCVE = append(depCVE, g)
-		} else {
-			// Supply-chain + host-forensics + configuration + unknown
-			// all land here. chdora's identity findings.
+		case findings.CategoryConfiguration:
+			config = append(config, g)
+		case findings.CategoryHostForensics:
+			host = append(host, g)
+		default:
+			// Unclassified — fold into supply-chain so it can't get
+			// lost. This shouldn't happen in normal operation since
+			// every detector should set or be derivable.
 			supplyChain = append(supplyChain, g)
 		}
 	}
-	return supplyChain, depCVE
+	return supplyChain, depCVE, config, host
 }
 
 func summaryBySeverity(rgs []renderGroup) []string {
@@ -269,16 +287,6 @@ func summaryBySeverity(rgs []renderGroup) []string {
 	return parts
 }
 
-func writeBanner(w io.Writer, p palette, title string, group []renderGroup, color string) {
-	bar := strings.Repeat("=", wrapWidth+4)
-	sevParts := summaryBySeverity(group)
-	fmt.Fprintln(w, bar)
-	fmt.Fprintf(w, "%s%s%s  (%d finding%s — %s)\n",
-		color, title, p.reset,
-		len(group), pluralSuffix(len(group)), strings.Join(sevParts, ", "))
-	fmt.Fprintln(w, bar)
-	fmt.Fprintln(w)
-}
 
 type grouped struct {
 	bySev map[findings.Severity][]renderGroup

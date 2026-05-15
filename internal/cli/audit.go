@@ -34,9 +34,11 @@ var (
 	auditAggressive   bool
 	auditSSHBaseline  string
 	auditSkipRegistry bool
-	auditShowAllCVEs  bool
-	auditSupplyOnly   bool
-	auditOffline      bool
+	auditExcludeCVEs   bool
+	auditExcludeSupply bool
+	auditExcludeConfig bool
+	auditExcludeHost   bool
+	auditOffline       bool
 )
 
 // wholeMachineExcludes adds curated directory-basename skips on top of the
@@ -119,8 +121,10 @@ Each detector can be individually disabled with its --skip-X flag.`,
 		forensicsSkipHeur = auditSkipHeur
 		forensicsSkipHunt = auditSkipHunt
 		forensicsSkipRegistry = auditSkipRegistry
-		forensicsShowAllCVEs = auditShowAllCVEs
-		forensicsSupplyOnly = auditSupplyOnly
+		forensicsExcludeCVEs = auditExcludeCVEs
+		forensicsExcludeSupply = auditExcludeSupply
+		forensicsExcludeConfig = auditExcludeConfig
+		forensicsExcludeHost = auditExcludeHost
 		forensicsOffline = auditOffline
 		forensicsFixPlan = auditFixPlan
 		forensicsFix = auditFix
@@ -202,10 +206,14 @@ func init() {
 		"do not run behavioural heuristics on discovered projects")
 	auditCmd.Flags().BoolVar(&auditSkipRegistry, "skip-registry", false,
 		"do not query npm/PyPI for evidence (offline mode; dep-confusion / typosquat / install-script heuristics become silent)")
-	auditCmd.Flags().BoolVar(&auditShowAllCVEs, "show-all-cves", false,
-		"show every dependency-CVE finding (default: collapse to the top 5 with --show-all-cves hint)")
-	auditCmd.Flags().BoolVar(&auditSupplyOnly, "supply-chain-only", false,
-		"hide the dependency-CVE section entirely (chdora-identity scan; show only supply-chain attack signals)")
+	auditCmd.Flags().BoolVar(&auditExcludeCVEs, "exclude-cves", false,
+		"hide the dependency-CVE section (commodity OSV CVE matches)")
+	auditCmd.Flags().BoolVar(&auditExcludeSupply, "exclude-supply-chain", false,
+		"hide the supply-chain attack section")
+	auditCmd.Flags().BoolVar(&auditExcludeConfig, "exclude-config", false,
+		"hide the configuration-risks section (unpinned action refs, curl|bash CI patterns)")
+	auditCmd.Flags().BoolVar(&auditExcludeHost, "exclude-host", false,
+		"hide the host-state section (credential files, shell-rc, persistence)")
 	auditCmd.Flags().BoolVar(&auditOffline, "offline", false,
 		"no network calls — implies --skip-osv and --skip-registry. Uses only the local incident pack + cached registry data.")
 
