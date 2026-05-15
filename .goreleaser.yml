@@ -1,0 +1,99 @@
+# .goreleaser.yml — cross-platform binary release config.
+# See https://goreleaser.com/customization/ for the full schema.
+version: 2
+
+project_name: chaindora
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: chaindora
+    main: ./cmd/chaindora
+    binary: chaindora
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/alessandro-bitetto/chaindora/internal/cli.Version={{.Version}}
+
+archives:
+  - id: chaindora
+    builds: [chaindora]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - SECURITY.md
+      - incidents/*.yaml
+
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+  groups:
+    - title: "Features"
+      regexp: '^.*?(feat|add)(\(.+\))??!?:.+$'
+      order: 0
+    - title: "Bug fixes"
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: "Other changes"
+      order: 999
+
+release:
+  github:
+    owner: alessandro-bitetto
+    name: chaindora
+  draft: false
+  prerelease: auto
+  header: |
+    ## chaindora {{ .Tag }}
+
+    Supply-chain compromise scanner. See
+    [CHANGELOG.md](https://github.com/alessandro-bitetto/chaindora/blob/{{ .Tag }}/CHANGELOG.md)
+    for the full list of changes in this release.
+
+    ### Verifying the download
+
+    Each archive has a corresponding SHA-256 entry in
+    `chaindora_{{ .Version }}_checksums.txt`. After downloading:
+
+    ```sh
+    shasum -a 256 -c chaindora_{{ .Version }}_checksums.txt
+    ```
+  footer: |
+    ---
+
+    **Full Changelog**: https://github.com/alessandro-bitetto/chaindora/compare/{{ .PreviousTag }}...{{ .Tag }}

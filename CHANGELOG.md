@@ -20,12 +20,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exclusion keeps the deliberately-malicious test fixtures out of the
   results.
 - `chaindora forensics --deep` — enumerates globally-installed packages
-  (`npm ls -g --json` and `pip list --format=json`, with `pip3` fallback)
-  and runs the full detector pipeline (OSV + incident pack + heuristics)
-  against them. Skips each package manager silently if its binary isn't
-  on PATH. Catches "I have a malicious npm tool installed globally that
-  I'm not even using in a project" scenarios. Homebrew and apt deferred
-  to a follow-up release.
+  via `npm ls -g --json`, `pip list --format=json` (with pip3 fallback),
+  `brew list --formula --versions`, and `dpkg-query -W -f='${Package}|${Version}\n'`.
+  Each package manager is silently skipped when its binary isn't on PATH.
+  Runs the full detector pipeline (OSV on npm/PyPI, incident pack on all,
+  heuristics where applicable) against the resulting inventory.
+- `chaindora forensics --ssh-check` — snapshots `~/.ssh/authorized_keys`
+  on first run into `~/.chaindora/ssh-baseline.txt`, then on subsequent
+  runs flags any new key (HIGH `HOST-SSH-KEY-ADDED`) or removed key
+  (MEDIUM `HOST-SSH-KEY-REMOVED`). Hashes are SHA-256, ignoring comments
+  and blank lines. Configurable baseline path via `--ssh-baseline`.
+- `chaindora forensics --persistence` — enumerates user-level persistence
+  mechanisms (cron via `crontab -l`, launchd `~/Library/LaunchAgents/*.plist`,
+  systemd user units `~/.config/systemd/user/*.service`, Windows Scheduled
+  Tasks via `schtasks /Query /FO CSV`). Each entry → LOW informational;
+  entries whose command matches a shellrc malware pattern → HIGH
+  `HOST-PERSISTENCE-SUSPICIOUS`.
+- `chaindora forensics --extensions` — enumerates installed extensions from
+  Chromium-based browsers (Chrome / Edge / Brave / Vivaldi / Arc) and from
+  VSCode-family editors (VSCode, VSCode Server, Cursor). New
+  `EcosystemBrowserExt` and `EcosystemIDEExt` constants thread through to
+  the existing detector pipeline so incident-pack entries can target
+  specific extension IDs.
+- Pre-built cross-platform binaries via goreleaser
+  (`.goreleaser.yml` + `.github/workflows/release.yml`): tagged pushes
+  build `linux/darwin/windows` × `amd64/arm64`, publish SHA-256
+  checksums, and create a GitHub Release with verification instructions.
 - `inventory.NormalizePyPIName` is now exported so the global-pip scanner
   applies the same PEP 503 normalization the lockfile parsers do.
 - `chaindora forensics --ssh-check` — snapshots `~/.ssh/authorized_keys`

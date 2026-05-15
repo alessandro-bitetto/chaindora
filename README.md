@@ -44,6 +44,26 @@ inventoried 142 packages from 11 sources
 
 ## Install
 
+### Pre-built binary (recommended)
+
+Download the archive for your OS/arch from the
+[Releases page](https://github.com/alessandro-bitetto/chaindora/releases),
+extract, and move `chaindora` somewhere on your `$PATH`:
+
+```sh
+# macOS / Linux example
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_<version>_<os>_<arch>.tar.gz | tar xz
+sudo mv chaindora /usr/local/bin/
+```
+
+Each release publishes a `chaindora_<version>_checksums.txt` for verification:
+
+```sh
+shasum -a 256 -c chaindora_<version>_checksums.txt
+```
+
+### From source
+
 ```sh
 go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest
 ```
@@ -60,7 +80,7 @@ export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
 If you see `command not found: chaindora` right after a successful install,
-this is the fix. Pre-built binaries via `goreleaser` are on the v0.2 roadmap.
+this is the fix.
 
 ## Commands
 
@@ -75,6 +95,7 @@ chaindora scan ./my-project --format sarif      # SARIF 2.1.0 to stdout
 chaindora scan . --skip-osv                     # offline (no OSV queries)
 chaindora scan . --fresh-popular                # also check publish dates
 chaindora scan . --incidents ./my-incidents     # custom incident pack
+chaindora scan . --exclude testdata,vendor      # skip directories by basename
 ```
 
 ### `chaindora forensics`
@@ -89,18 +110,25 @@ Manager blobs when present, and hunts incident-pack file artifacts
 (e.g. `shai-hulud-workflow.yml`) across `$HOME`.
 
 ```sh
-chaindora forensics                             # scan $HOME
+chaindora forensics                             # tokens + shell rc + PowerShell + artifact hunt
 chaindora forensics --hunt-root ~/code          # narrower artifact hunt
 chaindora forensics --skip-hunt                 # tokens + shell rc only
 chaindora forensics --format json | jq          # pipe to jq
+
+# Optional add-on detectors (each requires its own flag):
+chaindora forensics --ssh-check                 # baseline/diff ~/.ssh/authorized_keys
+chaindora forensics --persistence               # cron, launchd, systemd, Scheduled Tasks
+chaindora forensics --extensions                # Chromium + VSCode/Cursor extensions
 
 # Full-machine mode: discover EVERY project on disk and scan each.
 chaindora forensics --scan-projects ~ --verbose
 chaindora forensics --scan-projects ~/code --skip-osv --skip-heuristic
 
-# Deep mode: also enumerate globally-installed npm + pip packages.
+# Deep mode: also enumerate globally-installed npm/pip/brew/apt packages.
 chaindora forensics --deep --verbose
-chaindora forensics --scan-projects ~ --deep
+
+# Combine all add-ons for a comprehensive single-machine audit:
+chaindora forensics --scan-projects ~ --deep --extensions --persistence --ssh-check
 ```
 
 The `--scan-projects <root>` flag walks the filesystem for project
