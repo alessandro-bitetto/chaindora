@@ -55,7 +55,7 @@ func RunFixes(ctx context.Context, plans []FixPlan, opts RunOptions) (applied, s
 		allowed = []FixCategory{FixSafe}
 	}
 
-	plans = dedupePlansByCommand(plans)
+	plans = DedupePlans(plans)
 	if len(plans) == 0 {
 		fmt.Fprintln(out, "no fixable findings")
 		return 0, 0, nil
@@ -303,12 +303,28 @@ func dedupePlansByCommand(plans []FixPlan) []FixPlan {
 			if p.VulnID != "" {
 				covered[p.Command][p.VulnID] = struct{}{}
 			}
+			// Preserve CoveredVulnIDs already set upstream — e.g.
+			// dedupePlansByPackage emits plans whose CoveredVulnIDs
+			// is already the union across N CVEs; we must NOT drop
+			// those by overwriting here.
+			for _, id := range p.CoveredVulnIDs {
+				if id != "" {
+					covered[p.Command][id] = struct{}{}
+				}
+			}
 			continue
 		}
 		seen[p.Command] = len(out)
 		covered[p.Command] = map[string]struct{}{}
 		if p.VulnID != "" {
 			covered[p.Command][p.VulnID] = struct{}{}
+		}
+		// Seed the per-command covered set from any pre-existing
+		// CoveredVulnIDs so dedupePlansByPackage's output is preserved.
+		for _, id := range p.CoveredVulnIDs {
+			if id != "" {
+				covered[p.Command][id] = struct{}{}
+			}
 		}
 		out = append(out, p)
 	}
@@ -327,6 +343,182 @@ func dedupePlansByCommand(plans []FixPlan) []FixPlan {
 		out[i].CoveredVulnIDs = ids
 	}
 	return out
+}
+
+// DedupePlans is the public composition of the two dedup passes used
+// to fold per-CVE plans into the minimum executable set. Package-level
+// dedup runs first (collapses N CVEs against one package into a single
+// max-pinned plan); command-level dedup runs second (collapses any
+// remaining commands that happen to be byte-identical). Both passes
+// are idempotent — repeated application returns the same slice.
+//
+// Exported because the CLI calls it before saving plans (v0.8.0
+// --save-plan) so the saved artifact matches what will execute.
+func DedupePlans(plans []FixPlan) []FixPlan {
+	plans = dedupePlansByPackage(plans)
+	plans = dedupePlansByCommand(plans)
+	return plans
+}
+
+// dedupePlansByPackage (v0.8.1) collapses multiple CVE plans against
+// the same (ProjectDir, PackageName) into a single plan pinned to the
+// MAX required version across the group. Without this, a package with
+// 5 CVEs produces 5 sequential `npm install pkg@^X` commands at
+// different pins; the later ones either no-op or, worse, downgrade
+// the install the earlier one performed.
+//
+// Plans missing dedup keys (ProjectDir/PackageName/RequiredVersion all
+// blank) pass through untouched — incident-pack fixes, global-package
+// fixes, and Manual entries don't participate.
+//
+// The winning plan keeps its dedup keys (so dedupePlansByCommand,
+// which runs after this, treats it as the source-of-truth command).
+// Severity follows the highest-severity finding in the group;
+// CoveredVulnIDs accumulates every collapsed VulnID, sorted, for the
+// "also addresses: …" line in printPlan.
+func dedupePlansByPackage(plans []FixPlan) []FixPlan {
+	type key struct{ dir, pkg string }
+	groups := map[key][]int{}
+	for i, p := range plans {
+		if p.PackageName == "" || p.RequiredVersion == "" {
+			continue
+		}
+		k := key{p.ProjectDir, p.PackageName}
+		groups[k] = append(groups[k], i)
+	}
+	out := make([]FixPlan, 0, len(plans))
+	emitted := make([]bool, len(plans))
+	for i, p := range plans {
+		if emitted[i] {
+			continue
+		}
+		if p.PackageName == "" || p.RequiredVersion == "" {
+			out = append(out, p)
+			emitted[i] = true
+			continue
+		}
+		k := key{p.ProjectDir, p.PackageName}
+		members := groups[k]
+		if len(members) == 1 {
+			out = append(out, p)
+			emitted[i] = true
+			continue
+		}
+		// Find the member with the max RequiredVersion (semver). Ties
+		// broken by severity, then by first occurrence (stable).
+		winnerIdx := members[0]
+		for _, m := range members[1:] {
+			if compareRequired(plans[m].RequiredVersion, plans[winnerIdx].RequiredVersion) > 0 {
+				winnerIdx = m
+			} else if compareRequired(plans[m].RequiredVersion, plans[winnerIdx].RequiredVersion) == 0 &&
+				severityRank(plans[m].Severity) > severityRank(plans[winnerIdx].Severity) {
+				winnerIdx = m
+			}
+		}
+		merged := plans[winnerIdx]
+		for _, m := range members {
+			if severityRank(plans[m].Severity) > severityRank(merged.Severity) {
+				merged.Severity = plans[m].Severity
+			}
+		}
+		seenIDs := map[string]struct{}{}
+		for _, m := range members {
+			for _, id := range plans[m].CoveredVulnIDs {
+				if id != "" {
+					seenIDs[id] = struct{}{}
+				}
+			}
+			if plans[m].VulnID != "" {
+				seenIDs[plans[m].VulnID] = struct{}{}
+			}
+			emitted[m] = true
+		}
+		ids := make([]string, 0, len(seenIDs))
+		for id := range seenIDs {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		merged.CoveredVulnIDs = ids
+		if len(members) > 1 {
+			merged.Description = fmt.Sprintf("Upgrade %s in %s past %d CVEs to ^%s (headline: %s)",
+				merged.PackageName, merged.ProjectDir, len(members), merged.RequiredVersion, merged.VulnID)
+		}
+		out = append(out, merged)
+	}
+	return out
+}
+
+// compareRequired compares two version strings for "which is higher"
+// using a tiny in-package semver parser. Returns -1 / 0 / 1. Strings
+// that don't parse compare lexicographically as a fallback — better
+// than crashing, and the dedup is robust to it (the lex-fallback only
+// matters when both inputs are unparseable, which doesn't happen for
+// real OSV fixed-version data).
+func compareRequired(a, b string) int {
+	av, aok := parseRequiredSemver(a)
+	bv, bok := parseRequiredSemver(b)
+	if !aok || !bok {
+		switch {
+		case a < b:
+			return -1
+		case a > b:
+			return 1
+		}
+		return 0
+	}
+	switch {
+	case av[0] != bv[0]:
+		if av[0] < bv[0] {
+			return -1
+		}
+		return 1
+	case av[1] != bv[1]:
+		if av[1] < bv[1] {
+			return -1
+		}
+		return 1
+	case av[2] != bv[2]:
+		if av[2] < bv[2] {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+// parseRequiredSemver is a deliberately tiny semver parser (no
+// dependency on internal/osv to keep this package leaf-y). Accepts
+// "X", "X.Y", "X.Y.Z", with optional leading "v" and trailing
+// `-prerelease` / `+build` (which we strip and ignore). Anything
+// non-numeric in a segment returns ok=false.
+func parseRequiredSemver(s string) ([3]int, bool) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "v")
+	for i, c := range s {
+		if c == '-' || c == '+' {
+			s = s[:i]
+			break
+		}
+	}
+	if s == "" {
+		return [3]int{}, false
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) > 3 {
+		return [3]int{}, false
+	}
+	var out [3]int
+	for i, p := range parts {
+		n := 0
+		for _, r := range p {
+			if r < '0' || r > '9' {
+				return [3]int{}, false
+			}
+			n = n*10 + int(r-'0')
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 func severityRank(s Severity) int {

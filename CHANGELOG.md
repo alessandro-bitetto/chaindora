@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.8.1] — 2026-05-15
+
+### Added
+
+- **Package-level fix-plan dedup.** When a single package has multiple
+  CVEs whose individual fixes pin to different in-major versions
+  (e.g. lodash 4.17.20 with five CVEs producing five `npm install
+  lodash@^X.Y.Z` plans at varying pins), the plan generator now
+  collapses them into ONE plan pinned to the MAX required version.
+  Without this, the runner ran the same package's install command N
+  times in a row at increasing pins — at best a no-op, at worst a
+  downgrade of an earlier successful install. The collapsed plan's
+  `CoveredVulnIDs` accumulates every collapsed CVE so users see
+  "addresses N CVEs" in the plan output. Implementation:
+  `FixPlan.{ProjectDir,PackageName,RequiredVersion}` new fields; new
+  `findings.DedupePlans()` public function called by
+  `buildAllFixPlans` (so saved plans are already deduped — what's in
+  `chdora plans show` is what executes).
+
+- **Preflight `--plan` apply check.** Before applying a saved fix
+  plan, chdora now reads the current `package-lock.json` and skips
+  any fix whose target package is already at a version that
+  satisfies the required pin (same major, >= required). The user
+  sees a `[chdora] preflight skipped N already-satisfied fix(es)`
+  line on stderr listing what was bypassed. Apply-history records
+  these as `status: already-satisfied` (distinct from
+  `applied`/`skipped`). Scope: npm `package-lock.json` only — yarn,
+  pnpm, poetry, uv etc. pass through and run their tool's own
+  no-op detection. v0.9 will broaden the lockfile coverage.
+
 ## [0.8.0] — 2026-05-15
 
 ### Added

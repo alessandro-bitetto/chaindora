@@ -187,7 +187,9 @@ func applyStoredPlan(ctx context.Context, store *fixplan.DiskStore, plan fixplan
 	}
 	fmt.Fprintf(os.Stderr, "applying plan %s (%d fix(es), created %s)\n",
 		plan.ID, len(plan.Plans), plan.CreatedAt.Local().Format("2006-01-02 15:04"))
-	_, _, err := findings.RunFixes(ctx, plan.Plans, findings.RunOptions{
+	filtered, skipped, notes := preflightFilterSatisfied(plan.Plans)
+	emitPreflightNotes(os.Stderr, notes, skipped)
+	_, _, err := findings.RunFixes(ctx, filtered, findings.RunOptions{
 		PlanOnly:          opts.DryRun,
 		AutoYes:           opts.AutoYes,
 		AllowedCategories: allowed,
@@ -198,11 +200,29 @@ func applyStoredPlan(ctx context.Context, store *fixplan.DiskStore, plan fixplan
 	if opts.DryRun {
 		return nil
 	}
+	// Identify which plans were dropped by preflight so we record
+	// them as "already-satisfied" instead of the generic "skipped".
+	satisfiedFP := map[string]bool{}
+	for _, fp := range plan.Plans {
+		dropped := true
+		for _, kept := range filtered {
+			if kept.FindingFingerprint == fp.FindingFingerprint {
+				dropped = false
+				break
+			}
+		}
+		if dropped {
+			satisfiedFP[fp.FindingFingerprint] = true
+		}
+	}
 	results := make([]fixplan.AppliedResult, 0, len(plan.Plans))
 	now := time.Now().UTC()
 	for i, fp := range plan.Plans {
 		status := "skipped"
-		if contains(allowed, fp.Category) {
+		switch {
+		case satisfiedFP[fp.FindingFingerprint]:
+			status = "already-satisfied"
+		case contains(allowed, fp.Category):
 			status = "applied"
 		}
 		results = append(results, fixplan.AppliedResult{

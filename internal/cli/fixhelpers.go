@@ -11,8 +11,12 @@ import (
 
 // buildAllFixPlans dispatches each finding to its detector's PlanFix and
 // falls back to manualPlanFromFinding for detectors that don't yet expose a
-// programmatic fix (heuristic, hostforensics). Result is one FixPlan per
-// finding, in input order.
+// programmatic fix (heuristic, hostforensics). Result is one deduped FixPlan
+// per (project, package) for lockfile upgrades; one per command otherwise.
+//
+// Dedup happens here, not at apply-time, so that saved plans (`--save-plan`)
+// already reflect what will execute — `chdora plans show` and the saved
+// JSON match the eventual run.
 func buildAllFixPlans(fs []findings.Finding) []findings.FixPlan {
 	plans := make([]findings.FixPlan, 0, len(fs))
 	for _, f := range fs {
@@ -31,7 +35,7 @@ func buildAllFixPlans(fs []findings.Finding) []findings.FixPlan {
 			plans = append(plans, *plan)
 		}
 	}
-	return plans
+	return findings.DedupePlans(plans)
 }
 
 // manualPlanFromFinding emits a manual-instructions FixPlan for findings the

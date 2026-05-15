@@ -84,6 +84,12 @@ func PlanFix(f findings.Finding) (*findings.FixPlan, bool) {
 		plan.Description = fmt.Sprintf("Upgrade %s past %s in %s (%s)", f.Name, f.Version, f.SourcePath, f.VulnID)
 		plan.Category = findings.FixSemiSafe
 		plan.Command = cmd
+		// v0.8.1 package-level dedup keys. The runner collapses
+		// plans with the same (ProjectDir, PackageName) into one
+		// command pinned to the max RequiredVersion.
+		plan.ProjectDir = projectDir
+		plan.PackageName = f.Name
+		plan.RequiredVersion = f.FixUpgradeTo
 		steps := []string{"Review the resulting lockfile diff before committing."}
 		if len(f.References) > 0 {
 			steps = append(steps, fmt.Sprintf("Advisory: %s", f.References[0]))

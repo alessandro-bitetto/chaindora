@@ -50,6 +50,17 @@ type FixPlan struct {
 	// user knows "one pip-upgrade addresses 6 pip CVEs" instead of seeing
 	// just the highest-severity one.
 	CoveredVulnIDs []string `json:"covered_vuln_ids,omitempty"`
+
+	// ProjectDir / PackageName / RequiredVersion are the package-level
+	// dedup keys (v0.8.1). When all three are set on multiple plans
+	// targeting the same (ProjectDir, PackageName), the runner collapses
+	// them into a single plan pinned to the max RequiredVersion so we
+	// don't run `npm install lodash@^4.17.21` and then
+	// `npm install lodash@^4.18.0` back-to-back. Detectors should set
+	// these whenever the fix is a package upgrade in a project lockfile.
+	ProjectDir      string `json:"project_dir,omitempty"`
+	PackageName     string `json:"package_name,omitempty"`
+	RequiredVersion string `json:"required_version,omitempty"`
 }
 
 // Executable reports whether RunFixes can actually invoke a shell to apply
