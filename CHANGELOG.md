@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.2] — 2026-05-15
+
+### Changed
+
+- **Text output redesigned.** `chdora scan` / `forensics` / `ci`
+  (default `--format text`) now:
+    - Sort findings by severity (CRITICAL → HIGH → MEDIUM → LOW →
+      UNKNOWN); within a severity, stable by detector + vuln-id +
+      name.
+    - Group findings into per-severity sections with separator bars
+      and a count (e.g. `HIGH  (5 findings)`).
+    - Number findings sequentially (`#1`, `#2`, ...) so they can be
+      referenced from chat / docs without quoting the whole PURL.
+    - Word-wrap summaries at 76 chars with hanging indent — long
+      OSV advisory bodies no longer overflow into mid-word breaks.
+    - Trim reference lists to the top 2; remaining are summarised as
+      `(+N more — use --format json for the full list)`.
+    - Color severity labels when stdout is a TTY (`NO_COLOR=1` opts
+      out, https://no-color.org/). Pipes / CI logs / file redirects
+      get plain ASCII.
+    - Surface `FixUpgradeTo` (`fix: upgrade to <safe-version>`) when
+      the incident-pack matcher knows a clean version to pin to.
+  JSON / JSONL / SARIF / GitHub annotation formats are unchanged.
+
+### Fixed
+
+- `chdora forensics` no longer surfaces chdora's own test fixtures
+  as Shai-Hulud findings. The incident-pack file-artifact walk now
+  treats `testdata/` as a default skip basename (Go's conventional
+  fixture directory). Previously, walking `$HOME` would match the
+  intentionally-malicious-looking `shai-hulud-workflow.yml` files
+  shipped in `chaindora/testdata/` for the scanner's own tests
+  (including any copies in `~/go/pkg/mod/`).
+
 ## [0.5.1] — 2026-05-15
 
 ### Fixed

@@ -107,7 +107,13 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 			}
 			if dent.IsDir() {
 				name := dent.Name()
-				if name == "node_modules" || name == ".venv" || name == "venv" || name == ".git" {
+				// Conventional skip-list. testdata is added because Go projects
+				// use it for fixture data and (e.g.) chdora's own repo ships
+				// intentionally-malicious-looking files there for the matcher
+				// to be tested against — high false-positive rate when walking
+				// $HOME. Users who want testdata scanned can rebuild from a
+				// fork that overrides this skip.
+				if name == "node_modules" || name == ".venv" || name == "venv" || name == ".git" || name == "testdata" {
 					return filepath.SkipDir
 				}
 				if _, skip := d.excludes[name]; skip {
