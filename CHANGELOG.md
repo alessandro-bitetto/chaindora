@@ -7,9 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `chaindora update` — refreshes the curated incident pack from
+  `github.com/alessandro-bitetto/chaindora` into `~/.chaindora/incidents/`.
+  Atomic per-file writes, YAML validation before commit, `.meta.json`
+  tracking last-update timestamp + source URL. Flags: `--source`,
+  `--dest`, `--dry-run`, `--verbose`.
+
 ### Planned for v0.2
+- Windows-equivalent host forensics: PowerShell profile scanner,
+  Credential Manager check, cross-compile in CI.
+- `chaindora forensics --scan-projects` — auto-discover every project
+  manifest under a root and scan in parallel.
+- `chaindora forensics --deep` — global packages (`npm ls -g`, pip
+  system, Homebrew, apt), browser extensions, IDE extensions,
+  persistence mechanisms, `~/.ssh/authorized_keys` diff.
 - Static AST scan of `node_modules` / `site-packages` for install-time
-  exfiltration patterns (eval-of-base64, hardcoded webhooks, …).
+  exfiltration patterns.
+- Signed incident-pack tarballs and `--auto-update` opt-in on
+  `scan`/`ci`.
 - Pre-built binaries via `goreleaser`; Homebrew tap.
 - GitHub Actions CI on the `chaindora` repo itself.
 

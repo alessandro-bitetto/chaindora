@@ -80,6 +80,25 @@ chaindora forensics --skip-hunt                 # tokens + shell rc only
 chaindora forensics --format json | jq          # pipe to jq
 ```
 
+### `chaindora update`
+
+Refreshes the curated incident pack from the upstream repo into
+`~/.chaindora/incidents/`. **Without periodic updates, chaindora only knows
+about the incidents that existed when you installed the binary** — run this
+command after every reported supply-chain attack against an ecosystem you
+use (or set up a daily cron / scheduled task).
+
+```sh
+chaindora update                                # fetch from upstream
+chaindora update --dry-run                      # report changes only
+chaindora update --dest /opt/chaindora/incidents  # custom location
+chaindora update --source https://api.github.com/repos/myfork/chaindora/contents/incidents?ref=main
+```
+
+`chaindora scan` automatically prefers `~/.chaindora/incidents/` over the
+bundled `./incidents/` directory if both exist, so an `update` immediately
+takes effect on the next scan.
+
 ### `chaindora ci [path]`
 
 CI gate. Autodetects the running CI from environment variables, picks an

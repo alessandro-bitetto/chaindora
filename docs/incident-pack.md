@@ -157,6 +157,43 @@ Same flow, but:
   acknowledged that ID in their issue trackers.
 - Document the diff (what's new, what was wrong) in the PR description.
 
+## Keeping your local copy fresh
+
+Each `chaindora` binary ships with whatever was in `incidents/` at build time.
+To pick up entries added upstream after that, run:
+
+```sh
+chaindora update
+```
+
+This fetches the latest `incidents/*.yaml` files via the GitHub Contents
+API and writes them atomically into `~/.chaindora/incidents/`. `chaindora
+scan` and `chaindora ci` check that directory first, so the refresh takes
+effect on the next run without rebuilding.
+
+Recommended cadence:
+
+- **Daily**: schedule `chaindora update` in a cron / launchd / Task Scheduler
+  job. Five seconds, ~10 KB.
+- **Manually** after every notable supply-chain incident (Socket / Aikido /
+  StepSecurity blog post). Don't wait for the next scheduled run.
+- **In CI**: run `chaindora update` *before* `chaindora ci .` if the runner
+  has network access. For air-gapped runners, bake the latest `incidents/`
+  into the runner image at build time.
+
+### Forks and private packs
+
+If your organization maintains a private incident pack on top of the
+upstream one, point `--source` at the same Contents API shape on your fork
+or internal mirror:
+
+```sh
+chaindora update --source https://api.github.com/repos/myorg/chaindora-incidents/contents?ref=main
+```
+
+The endpoint just needs to return the same JSON shape (an array of objects
+with `name`, `type`, and `download_url` fields).
+
 ## Governance
 
 The incident pack is maintained in-tree. Anyone can open a PR; merges
