@@ -9,6 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.9] — 2026-05-15
+
+### Fixed
+
+- **Shared default-skip list across every walker.** v0.5.2 added a
+  `testdata/` skip to the incident-pack file-artifact walker, but
+  the inventory parser and the project-discovery walker still
+  descended into testdata, into `~/go/pkg/mod/` (Go module cache),
+  and into `~/.vscode/extensions/*/`. Result: a real-world
+  `chdora audit --whole-machine` from the field reported 306
+  noise findings on a developer machine — 88 from chdora's own
+  test fixtures, 45 from older chdora versions sitting in the Go
+  modcache, 210 from the `opentofu` VSCode extension's bundled
+  package-lock.json. None of those were user-actionable.
+
+  Extracted the skip logic into `inventory.ShouldSkipDir(path,
+  name)`, now shared by all three walkers
+  (`inventory.Scan`, `incident.Detect` file-artifact pass,
+  `cli.discoverProjects`). New skip list adds:
+    - `testdata` — Go convention, both fixture-data dirs in
+      projects and chdora's own test corpus under `$HOME`.
+    - `.vscode`, `.cursor` — IDE extension storage. Each
+      extension ships its own lockfiles, but those are the
+      extension author's responsibility.
+    - `Cellar` — Homebrew internal storage.
+    - `mod` *when its parent basename is `pkg`* — Go module
+      cache. Parent-aware match so we don't over-skip
+      unrelated dirs named `mod`.
+
+  The walker still descends into a user-supplied root even when
+  the basename matches the skip list, so `chdora scan testdata/`
+  works as expected.
+
+### Changed
+
+- **Text renderer now deduplicates findings by (VulnID, PURL).**
+  Previously, the same CVE found in N projects produced N
+  separate `#` entries. Now it produces one entry with all
+  source paths listed:
+
+  ```
+    #5  osv-ioc | GHSA-cx63-2mw6-8hw5 | pkg:pypi/setuptools@58.0.4
+        setuptools vulnerable to Command Injection via package URL
+        sources: /Users/me/Work/proj-a/requirements.txt
+                 /Users/me/Work/proj-b/poetry.lock
+                 /Users/me/Work/proj-c/uv.lock
+        refs:    https://nvd.nist.gov/vuln/detail/CVE-2024-6345
+                 ...
+  ```
+
+  When the source list is longer than 4 entries, the rest are
+  summarised as `(+N more occurrences — use --format json for the
+  full list)`. The headline summary also reports the dedupe
+  ratio: `"X findings — ... (deduplicated from Y instances)"`
+  when grouping collapsed anything.
+
+  JSON / JSONL / SARIF / GitHub annotation formats are unchanged —
+  the underlying `Finding` slice is still flat (one row per
+  source). Grouping is render-time only.
+
+  The field report that motivated this: a 1,120-finding
+  `--whole-machine` run that, after both fixes, surfaces as
+  ~600 unique findings across ~10 distinct projects, with
+  duplicates collapsed into the parent finding's source list.
+
 ## [0.5.8] — 2026-05-15
 
 ### Added

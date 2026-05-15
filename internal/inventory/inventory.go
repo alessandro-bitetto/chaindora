@@ -94,8 +94,15 @@ func Scan(root string, opts ...ScanOption) (*Inventory, error) {
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if name == "node_modules" || name == ".venv" || name == "venv" || name == ".git" {
-				return filepath.SkipDir
+			// Don't skip the user-supplied root even if its basename
+			// matches the skip list (e.g. `chdora scan testdata`
+			// should actually scan testdata, not refuse to descend
+			// into it just because the basename is in the default
+			// skip set).
+			if path != root {
+				if ShouldSkipDir(path, name) {
+					return filepath.SkipDir
+				}
 			}
 			if _, skip := cfg.excludeNames[name]; skip {
 				return filepath.SkipDir

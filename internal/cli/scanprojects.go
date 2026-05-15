@@ -190,9 +190,6 @@ func mergeExcludeMap(userExcludes []string) map[string]bool {
 // also discovered, only the ancestor is kept (one inventory.Scan() against
 // the ancestor will subsume the nested manifests).
 func discoverProjects(root string, skip map[string]bool) []string {
-	if skip == nil {
-		skip = defaultScanProjectsSkipDirs
-	}
 	found := map[string]struct{}{}
 	prog := progress.New(os.Stderr)
 	prog.Start(fmt.Sprintf("discovering projects under %s", root))
@@ -207,6 +204,13 @@ func discoverProjects(root string, skip map[string]bool) []string {
 		if d.IsDir() {
 			if path == root {
 				return nil
+			}
+			// Default skip list lives in inventory.ShouldSkipDir
+			// (shared with the inventory parser + incident artifact
+			// walker). `skip` carries user-supplied --exclude
+			// basenames on top.
+			if inventory.ShouldSkipDir(path, d.Name()) {
+				return filepath.SkipDir
 			}
 			if skip[d.Name()] {
 				return filepath.SkipDir

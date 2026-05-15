@@ -42,12 +42,68 @@ func effectiveFormat(format string, jsonShortcut bool) string {
 }
 
 // writeText renders findings as human-readable output: severity-sorted,
-// grouped into sections, with word-wrapped summaries and trimmed reference
-// lists. Designed for skim-ability — for full data use --format json.
+// grouped into sections, deduplicated by (VulnID, PURL) so the same CVE
+// across multiple projects shows once with all source paths listed,
+// word-wrapped summaries, and trimmed reference lists. Designed for
+// skim-ability — for the full ungrouped data use --format json.
 const (
-	maxRefsShown = 2
-	wrapWidth    = 76
+	maxRefsShown    = 2
+	maxSourcesShown = 4
+	wrapWidth       = 76
 )
+
+// renderGroup is a render-time aggregation: one row per unique
+// (VulnID, PURL) pair across the input Finding slice. Sources accumulates
+// every distinct SourcePath that produced a finding in the group.
+type renderGroup struct {
+	findings.Finding
+	Sources []string
+}
+
+// groupForRender collapses a flat Finding slice into per-(VulnID, PURL)
+// groups while preserving severity grouping downstream (groups inherit
+// the headline finding's severity). When VulnID and PURL are both empty
+// (rare — only happens for malformed findings), the group key falls back
+// to the SourcePath so each unique artifact still gets its own entry.
+func groupForRender(fs []findings.Finding) []renderGroup {
+	type key struct{ vulnID, purl, fallback string }
+	groups := map[key]*renderGroup{}
+	var order []key
+	for _, f := range fs {
+		k := key{vulnID: f.VulnID, purl: f.PURL}
+		if k.vulnID == "" && k.purl == "" {
+			k.fallback = f.SourcePath
+		}
+		g, ok := groups[k]
+		if !ok {
+			g = &renderGroup{Finding: f}
+			groups[k] = g
+			order = append(order, k)
+		}
+		if f.SourcePath != "" {
+			g.Sources = append(g.Sources, f.SourcePath)
+		}
+	}
+	out := make([]renderGroup, 0, len(order))
+	for _, k := range order {
+		g := groups[k]
+		// Deduplicate + sort the source paths so output is stable
+		// across runs.
+		seen := map[string]struct{}{}
+		uniq := g.Sources[:0]
+		for _, s := range g.Sources {
+			if _, dup := seen[s]; dup {
+				continue
+			}
+			seen[s] = struct{}{}
+			uniq = append(uniq, s)
+		}
+		sort.Strings(uniq)
+		g.Sources = uniq
+		out = append(out, *g)
+	}
+	return out
+}
 
 // ANSI color helpers. Emitted only when the writer is a TTY and NO_COLOR is
 // unset (https://no-color.org/). Empty strings otherwise — the formatting
@@ -94,18 +150,28 @@ func writeText(w io.Writer, fs []findings.Finding) {
 	}
 
 	p := newPalette(w)
-	groups := groupAndSort(fs)
+	rgs := groupForRender(fs)
+	groups := groupAndSort(rgs)
 
-	// Top-line summary: total + per-severity counts.
+	// Top-line summary: unique findings + per-severity counts. When
+	// grouping collapsed multiple instances into one row, surface the
+	// instance count parenthetically so the user knows the spread.
 	parts := make([]string, 0, len(groups.order))
+	totalUnique := 0
 	for _, sev := range groups.order {
 		count := len(groups.bySev[sev])
 		if count == 0 {
 			continue
 		}
+		totalUnique += count
 		parts = append(parts, fmt.Sprintf("%d %s", count, strings.ToLower(string(sev))))
 	}
-	fmt.Fprintf(w, "%s%d findings%s — %s\n\n", p.bold, len(fs), p.reset, strings.Join(parts, ", "))
+	summary := fmt.Sprintf("%s%d findings%s — %s", p.bold, totalUnique, p.reset, strings.Join(parts, ", "))
+	if len(fs) > totalUnique {
+		summary += fmt.Sprintf(" %s(deduplicated from %d instances)%s", p.gray, len(fs), p.reset)
+	}
+	fmt.Fprintln(w, summary)
+	fmt.Fprintln(w)
 
 	// Per-severity sections in priority order.
 	idx := 0
@@ -119,13 +185,13 @@ func writeText(w io.Writer, fs []findings.Finding) {
 }
 
 type grouped struct {
-	bySev map[findings.Severity][]findings.Finding
+	bySev map[findings.Severity][]renderGroup
 	order []findings.Severity
 }
 
-func groupAndSort(fs []findings.Finding) grouped {
+func groupAndSort(rgs []renderGroup) grouped {
 	g := grouped{
-		bySev: make(map[findings.Severity][]findings.Finding),
+		bySev: make(map[findings.Severity][]renderGroup),
 		order: []findings.Severity{
 			findings.SeverityCritical,
 			findings.SeverityHigh,
@@ -134,12 +200,12 @@ func groupAndSort(fs []findings.Finding) grouped {
 			findings.SeverityUnknown,
 		},
 	}
-	for _, f := range fs {
-		key := f.Severity
+	for _, rg := range rgs {
+		key := rg.Severity
 		if key == "" {
 			key = findings.SeverityUnknown
 		}
-		g.bySev[key] = append(g.bySev[key], f)
+		g.bySev[key] = append(g.bySev[key], rg)
 	}
 	// Within each severity, stable order: detector, then vuln-id, then name.
 	for sev := range g.bySev {
@@ -157,21 +223,22 @@ func groupAndSort(fs []findings.Finding) grouped {
 	return g
 }
 
-func writeSection(w io.Writer, p palette, sev findings.Severity, fs []findings.Finding, idx *int) {
+func writeSection(w io.Writer, p palette, sev findings.Severity, rgs []renderGroup, idx *int) {
 	bar := strings.Repeat("=", wrapWidth+4)
 	sevColor := severityColor(p, sev)
 	fmt.Fprintln(w, bar)
 	fmt.Fprintf(w, "%s%s%s  (%d %s)\n", sevColor, strings.ToUpper(string(sev)), p.reset,
-		len(fs), pluralize("finding", len(fs)))
+		len(rgs), pluralize("finding", len(rgs)))
 	fmt.Fprintln(w, bar)
 	fmt.Fprintln(w)
-	for _, f := range fs {
+	for _, rg := range rgs {
 		*idx++
-		writeFinding(w, p, *idx, f)
+		writeFinding(w, p, *idx, rg)
 	}
 }
 
-func writeFinding(w io.Writer, p palette, num int, f findings.Finding) {
+func writeFinding(w io.Writer, p palette, num int, g renderGroup) {
+	f := g.Finding
 	// Headline: #N  detector | vuln-id | purl-or-name
 	loc := f.PURL
 	if loc == "" {
@@ -193,15 +260,38 @@ func writeFinding(w io.Writer, p palette, num int, f findings.Finding) {
 		}
 	}
 
-	// SourcePath, when distinct from the headline (file artifacts) or worth
-	// surfacing (project lockfile / global-pkg source).
-	if f.SourcePath != "" && f.SourcePath != loc {
-		fmt.Fprintf(w, "      %ssource:%s %s\n", p.gray, p.reset, f.SourcePath)
+	// Sources — list every distinct path the group collapsed across.
+	// Singular line for 1 source (matches the pre-grouping layout);
+	// plural block for 2+, truncated past maxSourcesShown.
+	sources := g.Sources
+	switch len(sources) {
+	case 0:
+		// No sources beyond what's encoded in the headline (e.g. global
+		// packages where PURL fully identifies the install).
+	case 1:
+		if sources[0] != loc {
+			fmt.Fprintf(w, "      %ssource:%s  %s\n", p.gray, p.reset, sources[0])
+		}
+	default:
+		fmt.Fprintf(w, "      %ssources:%s %s\n", p.gray, p.reset, sources[0])
+		shown := sources[1:]
+		hidden := 0
+		if len(shown) > maxSourcesShown-1 {
+			hidden = len(shown) - (maxSourcesShown - 1)
+			shown = shown[:maxSourcesShown-1]
+		}
+		for _, s := range shown {
+			fmt.Fprintf(w, "               %s\n", s)
+		}
+		if hidden > 0 {
+			fmt.Fprintf(w, "               %s(+%d more occurrence%s — use --format json for the full list)%s\n",
+				p.gray, hidden, pluralSuffix(hidden), p.reset)
+		}
 	}
 
 	// Fix hint, if the detector knows a clean version to pin to.
 	if f.FixUpgradeTo != "" {
-		fmt.Fprintf(w, "      %sfix:%s    upgrade to %s%s%s\n", p.gray, p.reset, p.bold, f.FixUpgradeTo, p.reset)
+		fmt.Fprintf(w, "      %sfix:%s     upgrade to %s%s%s\n", p.gray, p.reset, p.bold, f.FixUpgradeTo, p.reset)
 	}
 
 	// References — top N, with a tail count for the rest.
@@ -212,16 +302,23 @@ func writeFinding(w io.Writer, p palette, num int, f findings.Finding) {
 			hidden = len(shown) - maxRefsShown
 			shown = shown[:maxRefsShown]
 		}
-		fmt.Fprintf(w, "      %srefs:%s   %s\n", p.gray, p.reset, shown[0])
+		fmt.Fprintf(w, "      %srefs:%s    %s\n", p.gray, p.reset, shown[0])
 		for _, ref := range shown[1:] {
-			fmt.Fprintf(w, "              %s\n", ref)
+			fmt.Fprintf(w, "               %s\n", ref)
 		}
 		if hidden > 0 {
-			fmt.Fprintf(w, "              %s(+%d more — use --format json for the full list)%s\n", p.gray, hidden, p.reset)
+			fmt.Fprintf(w, "               %s(+%d more — use --format json for the full list)%s\n", p.gray, hidden, p.reset)
 		}
 	}
 
 	fmt.Fprintln(w)
+}
+
+func pluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func severityColor(p palette, sev findings.Severity) string {
