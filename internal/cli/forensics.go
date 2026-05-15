@@ -37,6 +37,9 @@ var (
 	forensicsYes          bool
 	forensicsAggressive   bool
 	forensicsSkipRegistry bool
+	forensicsShowAllCVEs  bool
+	forensicsSupplyOnly   bool
+	forensicsOffline      bool
 )
 
 var forensicsCmd = &cobra.Command{
@@ -59,6 +62,10 @@ var forensicsCmd = &cobra.Command{
 // opt-in detectors (--deep / --extensions / --persistence / --ssh-check) to
 // true and points --scan-projects at the user's home.
 func runForensicsFlow(ctx context.Context) error {
+	if forensicsOffline {
+		forensicsSkipOSV = true
+		forensicsSkipRegistry = true
+	}
 	{
 		home := forensicsHome
 		if home == "" {
@@ -233,6 +240,8 @@ func runForensicsFlow(ctx context.Context) error {
 		// without context.
 		tally.Print(os.Stderr)
 
+		ShowAllCVEs = forensicsShowAllCVEs
+		SupplyChainOnly = forensicsSupplyOnly
 		if err := renderFindings(os.Stdout, all, effectiveFormat(forensicsFormat, forensicsJSON)); err != nil {
 			return err
 		}
@@ -283,5 +292,8 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	forensicsCmd.Flags().BoolVar(&forensicsAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipRegistry, "skip-registry", false, "do not query npm/PyPI for evidence (offline mode; dep-confusion / typosquat / install-script heuristics become silent)")
+	forensicsCmd.Flags().BoolVar(&forensicsShowAllCVEs, "show-all-cves", false, "show every dependency-CVE finding (default: collapse to the top 5)")
+	forensicsCmd.Flags().BoolVar(&forensicsSupplyOnly, "supply-chain-only", false, "hide the dependency-CVE section entirely (chdora-identity scan)")
+	forensicsCmd.Flags().BoolVar(&forensicsOffline, "offline", false, "no network calls — implies --skip-osv and --skip-registry")
 	rootCmd.AddCommand(forensicsCmd)
 }

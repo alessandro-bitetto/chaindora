@@ -9,6 +9,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.7.0] — 2026-05-15
+
+The identity release: chdora visibly distinguishes "deliberate supply-
+chain attack against you" from "honest CVE in a legit dependency."
+v0.6.x mixed them. v0.7.0 puts the supply-chain signals first, collapses
+the dep-CVE noise, and leans on the OpenSSF Malicious Packages
+database (federated via OSV.dev) for the bulk catalog so the curated
+pack can shrink to the things only chdora can express.
+
+### Added
+
+- **`findings.Category`** field on every Finding:
+  `supply-chain-attack` / `dependency-cve` / `host-forensics` /
+  `configuration`. Drives the new renderer; serialized into JSON for
+  downstream tooling.
+
+- **MAL-* recognition in osv-ioc.** OSV.dev federates the OpenSSF
+  Malicious Packages database. When chdora queries OSV for a
+  package, any returned advisory IDs starting with `MAL-` are
+  tagged as `CategorySupplyChainAttack`; CVE-/GHSA-/PYSEC- IDs are
+  tagged as `CategoryDependencyCVE`. **No additional network calls
+  needed** — chdora was already pulling this data, just not
+  surfacing it as distinct.
+
+- **Two-section text renderer.**
+
+  ```
+  ============================================
+  SUPPLY-CHAIN ATTACK SIGNALS  (4 findings — ...)
+  ============================================
+    [CRITICAL] qix npm maintainer compromise: pkg:npm/chalk@5.6.1
+    [CRITICAL] SHAI-HULUD worm artifact: shai-hulud-workflow.yml
+    ...
+
+  ============================================
+  DEPENDENCY VULNERABILITIES (OSV.dev)  (153 findings — ...)
+  ============================================
+    [CRITICAL] fast-xml-parser@4.2.5 — CVE-2026-25896
+    [HIGH] axios@1.9.0 — 4 CVEs
+    ... and 148 more dependency CVE finding(s) — re-run with --show-all-cves
+  ```
+
+- **`--show-all-cves`** — un-collapses the dependency-CVE section
+  to show every finding. Default behavior collapses past the top 5.
+- **`--supply-chain-only`** — hides the dependency-CVE section
+  entirely. For a chdora-identity scan that says "tell me only
+  about attacks, not generic deps."
+- **`--offline`** — meta-flag that combines `--skip-osv` and
+  `--skip-registry`. No network calls; relies on local incident
+  pack + cached registry data. For air-gapped CI environments.
+
+### Changed
+
+- **Incident pack trimmed from 14 → 6 entries.** Removed
+  package-version-only incidents that the OpenSSF Malicious
+  Packages database (via OSV.dev) covers redundantly: `ctx-pypi`,
+  `eslint-scope`, `event-stream/flatmap-stream`, `lottie-player`,
+  `node-ipc/peacenotwar`, `torchtriton`, `ua-parser-js`,
+  `ultralytics`. Detection of these incidents is **unchanged** —
+  chdora still surfaces them via osv-ioc with `MAL-*` IDs tagged
+  as supply-chain-attack.
+
+  Kept the 6 entries that add a dimension MAL-* records can't:
+  `shai-hulud-2025` (file artifacts), `great-suspender-2021`
+  (browser extension), `xz-utils-cve-2024-3094` (Homebrew/Debian),
+  `qix-compromise-2025` (rich post-compromise narrative + downgrade-
+  as-fix metadata), `colors-faker-sabotage-2022` (sabotage edge
+  case), `pypi-typosquats-2019` (wildcard versions).
+
+- **CONTRIBUTING.md** — narrowed the incident-pack contribution
+  scope. Package-version-only incidents should go to
+  `ossf/malicious-packages` directly (chdora picks them up via
+  OSV). Curated pack PRs are for file artifacts, cross-ecosystem
+  cases, sabotage edge cases, and post-compromise narrative —
+  things MAL-* records can't express.
+
+### Deferred to v0.8.0
+
+These were in scope for v0.7.0 but didn't make this release because
+they need substantial engineering work (~3-4 hours dedicated):
+
+- **Native local mirror of `ossf/malicious-packages`** at
+  `~/.chaindora/openssf-malicious/`. Currently chdora pulls MAL-*
+  records from OSV.dev on every scan (cached 24h). v0.8 will
+  ship a `chdora update --include-openssf` that bulk-fetches the
+  full OpenSSF dataset for offline / air-gapped operation.
+
+- **SHA-pinned reproducible scans.** A `chdora.lock.json` recording
+  the registry-cache state + incident-pack snapshot used by a
+  scan, so the same `chdora scan` against the same code at a
+  later date produces the same findings even as upstream catalogs
+  evolve.
+
 ## [0.6.2] — 2026-05-15
 
 ### Changed

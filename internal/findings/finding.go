@@ -12,10 +12,47 @@ const (
 	SeverityUnknown  Severity = "UNKNOWN"
 )
 
+// Category classifies what kind of question a finding answers. Added in
+// v0.7.0 to separate "we found a deliberate supply-chain attack against
+// you" from "your dependency has a known CVE in legitimately-written
+// code." These two things look identical in a Severity-only world but
+// require different defenses, attention levels, and tools — and most of
+// chdora's identity is in the first bucket. The renderer surfaces
+// supply-chain findings prominently and collapses dependency-CVE
+// findings into a secondary section.
+type Category string
+
+const (
+	// CategorySupplyChainAttack — deliberate adversarial action:
+	// malicious package versions (qix, Shai-Hulud, ultralytics), worm
+	// file artifacts, dep-confusion-attack-shape, typosquat,
+	// install-script-on-fresh-package. OSV.dev IDs starting with
+	// "MAL-" land here, as do all incident-pack and most heuristic
+	// findings.
+	CategorySupplyChainAttack Category = "supply-chain-attack"
+
+	// CategoryDependencyCVE — known security flaw in a legitimately-
+	// authored dependency. OSV.dev IDs starting with "CVE-",
+	// "GHSA-", "PYSEC-", etc. The honest-bug bucket.
+	CategoryDependencyCVE Category = "dependency-cve"
+
+	// CategoryHostForensics — post-compromise artifact on the local
+	// machine: leaked credentials in dotfiles, modified shell rc,
+	// persistence entries, ssh authorized-keys drift. Answers "did
+	// I get hit?" rather than "could I be hit?".
+	CategoryHostForensics Category = "host-forensics"
+
+	// CategoryConfiguration — risk-shape configuration: unpinned
+	// action refs, curl|bash in CI, etc. Not yet an attack but
+	// reduces the cost of one happening to you.
+	CategoryConfiguration Category = "configuration"
+)
+
 // Finding is the normalized output of any detector. The shape is designed to
 // map cleanly onto SARIF 2.1.0 results when the SARIF reporter lands in P3.
 type Finding struct {
 	Detector   string              `json:"detector"`
+	Category   Category            `json:"category,omitempty"`
 	PURL       string              `json:"purl"`
 	Ecosystem  inventory.Ecosystem `json:"ecosystem"`
 	Name       string              `json:"name"`
@@ -35,4 +72,34 @@ type Finding struct {
 	// the user must take by hand. Set by the incident-pack detector from
 	// the YAML's top-level post_compromise list.
 	PostCompromise []string `json:"post_compromise,omitempty"`
+}
+
+// DeriveCategory returns the Category for a Finding. If Category is set
+// explicitly (osv-ioc distinguishes MAL-* from CVE-*; incident-pack
+// always sets SupplyChainAttack), that wins. Otherwise we infer from
+// the Detector class so v0.7.0 doesn't have to touch every emit site
+// in the host-forensics detector tree.
+func DeriveCategory(f Finding) Category {
+	if f.Category != "" {
+		return f.Category
+	}
+	switch {
+	case startsWith(f.Detector, "hostforensics:"):
+		return CategoryHostForensics
+	case f.Detector == "heuristic:unpinned-ref", f.Detector == "heuristic:ci-shell-pattern":
+		return CategoryConfiguration
+	case startsWith(f.Detector, "heuristic:"):
+		return CategorySupplyChainAttack
+	case f.Detector == "incident-pack":
+		return CategorySupplyChainAttack
+	case f.Detector == "osv-ioc":
+		// Defensive — osvioc.go should have set this explicitly,
+		// but if not, fall back to dep-cve which is the common case.
+		return CategoryDependencyCVE
+	}
+	return ""
+}
+
+func startsWith(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }

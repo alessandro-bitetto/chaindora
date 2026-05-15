@@ -6,12 +6,35 @@ docs/tests.
 
 ## Where to start
 
-**The single highest-leverage contribution is adding an entry to the
-[curated incident pack](./incidents/).** Every entry catches real attacks
-that OSV.dev hasn't (or can't) catalog — Shai-Hulud, the qix chalk/debug
-compromise, the ctx PyPI takeover — and an active pack is what makes
-`chaindora` more useful than `osv-scanner` alone. See
-[docs/incident-pack.md](./docs/incident-pack.md) for a detailed walkthrough.
+**As of v0.7.0, the curated incident pack has a narrower scope.** The bulk
+of malicious-package detection now flows through the [OpenSSF Malicious
+Packages database](https://github.com/ossf/malicious-packages), federated
+via OSV.dev — chdora picks up MAL-* records automatically. The curated
+pack is for what OSV-formatted records *can't* express:
+
+1. **File-artifact globs.** Worm-deployed files like
+   `shai-hulud-workflow.yml` that aren't packages — OSV.dev is
+   package-centric and has no way to flag a file on disk.
+2. **Cross-ecosystem coverage where OSV is thin.** Browser/IDE
+   extensions, Homebrew formulae, Debian system packages.
+3. **Sabotage / downgrade-as-fix cases.** When the "safe version" is
+   the *previous* release (Marak colors-sabotage 2022, faker 6.6.6) —
+   OSV's `fixed:` field doesn't model "go back, not forward."
+4. **Rich post-compromise narrative.** Editorially-curated checklists
+   ("rotate npm tokens for accounts that ran `npm install` between
+   14:00–17:00 UTC on 2025-09-08") that the auto-generated MAL-*
+   summaries can't match.
+
+**Don't open PRs for package-version-only incidents** — those go to
+[ossf/malicious-packages](https://github.com/ossf/malicious-packages)
+and reach chdora users automatically via OSV.
+
+For everything else, the high-impact areas are:
+
+- **Bug reports** with a minimal reproducible test case.
+- **Heuristics**: new detection patterns for `internal/detectors/heuristic/`.
+- **Ecosystem support**: new lockfile or CI parsers in `internal/inventory/`.
+- **Documentation**: every confusing flag, undocumented edge case.
 
 For everything else, the high-impact areas are:
 

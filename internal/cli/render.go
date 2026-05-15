@@ -143,6 +143,20 @@ func isTerm(w io.Writer) bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
+// cveSectionPreviewSize controls how many dependency-CVE findings show
+// in the default text output. The rest collapse into a "+N more — use
+// --show-all-cves" line. The supply-chain section is always shown in
+// full because that's chdora's primary identity.
+const cveSectionPreviewSize = 5
+
+// ShowAllCVEs, when true, disables the collapse of the
+// dependency-CVE section. Set from the CLI's --show-all-cves flag.
+var ShowAllCVEs bool
+
+// SupplyChainOnly, when true, hides the dependency-CVE section
+// entirely. Set from the CLI's --supply-chain-only flag.
+var SupplyChainOnly bool
+
 func writeText(w io.Writer, fs []findings.Finding) {
 	if len(fs) == 0 {
 		fmt.Fprintln(w, "no known supply chain compromises detected")
@@ -151,37 +165,119 @@ func writeText(w io.Writer, fs []findings.Finding) {
 
 	p := newPalette(w)
 	rgs := groupForRender(fs)
-	groups := groupAndSort(rgs)
 
-	// Top-line summary: unique findings + per-severity counts. When
-	// grouping collapsed multiple instances into one row, surface the
-	// instance count parenthetically so the user knows the spread.
-	parts := make([]string, 0, len(groups.order))
-	totalUnique := 0
-	for _, sev := range groups.order {
-		count := len(groups.bySev[sev])
-		if count == 0 {
-			continue
-		}
-		totalUnique += count
-		parts = append(parts, fmt.Sprintf("%d %s", count, strings.ToLower(string(sev))))
-	}
-	summary := fmt.Sprintf("%s%d findings%s — %s", p.bold, totalUnique, p.reset, strings.Join(parts, ", "))
-	if len(fs) > totalUnique {
-		summary += fmt.Sprintf(" %s(deduplicated from %d instances)%s", p.gray, len(fs), p.reset)
+	// Partition by category. The supply-chain section comes first
+	// and gets the loud presentation; the dep-CVE section is
+	// collapsed by default. host-forensics + configuration findings
+	// fold into the supply-chain block because they're chdora-
+	// specific signals that don't appear in commodity SCA tools.
+	supplyChain, depCVE := partitionByCategory(rgs)
+
+	// Top-line summary unchanged.
+	totalUnique := len(rgs)
+	totalInstances := len(fs)
+	sevParts := summaryBySeverity(rgs)
+	summary := fmt.Sprintf("%s%d findings%s — %s", p.bold, totalUnique, p.reset, strings.Join(sevParts, ", "))
+	if totalInstances > totalUnique {
+		summary += fmt.Sprintf(" %s(deduplicated from %d instances)%s", p.gray, totalInstances, p.reset)
 	}
 	fmt.Fprintln(w, summary)
 	fmt.Fprintln(w)
 
-	// Per-severity sections in priority order.
 	idx := 0
-	for _, sev := range groups.order {
-		group := groups.bySev[sev]
-		if len(group) == 0 {
-			continue
+
+	// === SUPPLY-CHAIN ATTACK SIGNALS section ===
+	if len(supplyChain) > 0 {
+		writeBanner(w, p, "SUPPLY-CHAIN ATTACK SIGNALS", supplyChain, p.bold+p.red)
+		// Within the section, sort by severity.
+		grouped := groupAndSort(supplyChain)
+		for _, sev := range grouped.order {
+			group := grouped.bySev[sev]
+			if len(group) == 0 {
+				continue
+			}
+			writeSection(w, p, sev, group, &idx)
 		}
-		writeSection(w, p, sev, group, &idx)
 	}
+
+	// === DEPENDENCY VULNERABILITIES section ===
+	if !SupplyChainOnly && len(depCVE) > 0 {
+		writeBanner(w, p, "DEPENDENCY VULNERABILITIES (OSV.dev)", depCVE, p.bold+p.cyan)
+		grouped := groupAndSort(depCVE)
+		shown := 0
+		for _, sev := range grouped.order {
+			group := grouped.bySev[sev]
+			if len(group) == 0 {
+				continue
+			}
+			if !ShowAllCVEs {
+				// Collapse: show only up to cveSectionPreviewSize
+				// findings total across all severities, then bail.
+				remaining := cveSectionPreviewSize - shown
+				if remaining <= 0 {
+					break
+				}
+				if len(group) > remaining {
+					group = group[:remaining]
+				}
+			}
+			writeSection(w, p, sev, group, &idx)
+			shown += len(group)
+		}
+		if !ShowAllCVEs && shown < len(depCVE) {
+			fmt.Fprintf(w, "  %s... and %d more dependency CVE finding(s) — re-run with --show-all-cves%s\n",
+				p.gray, len(depCVE)-shown, p.reset)
+			fmt.Fprintln(w)
+		}
+	}
+}
+
+func partitionByCategory(rgs []renderGroup) (supplyChain, depCVE []renderGroup) {
+	for _, g := range rgs {
+		cat := findings.DeriveCategory(g.Finding)
+		if cat == findings.CategoryDependencyCVE {
+			depCVE = append(depCVE, g)
+		} else {
+			// Supply-chain + host-forensics + configuration + unknown
+			// all land here. chdora's identity findings.
+			supplyChain = append(supplyChain, g)
+		}
+	}
+	return supplyChain, depCVE
+}
+
+func summaryBySeverity(rgs []renderGroup) []string {
+	order := []findings.Severity{
+		findings.SeverityCritical, findings.SeverityHigh,
+		findings.SeverityMedium, findings.SeverityLow,
+		findings.SeverityUnknown,
+	}
+	counts := map[findings.Severity]int{}
+	for _, g := range rgs {
+		s := g.Severity
+		if s == "" {
+			s = findings.SeverityUnknown
+		}
+		counts[s]++
+	}
+	var parts []string
+	for _, sev := range order {
+		if c := counts[sev]; c > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", c, strings.ToLower(string(sev))))
+		}
+	}
+	return parts
+}
+
+func writeBanner(w io.Writer, p palette, title string, group []renderGroup, color string) {
+	bar := strings.Repeat("=", wrapWidth+4)
+	sevParts := summaryBySeverity(group)
+	fmt.Fprintln(w, bar)
+	fmt.Fprintf(w, "%s%s%s  (%d finding%s — %s)\n",
+		color, title, p.reset,
+		len(group), pluralSuffix(len(group)), strings.Join(sevParts, ", "))
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w)
 }
 
 type grouped struct {

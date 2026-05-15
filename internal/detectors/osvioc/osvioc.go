@@ -2,6 +2,7 @@ package osvioc
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
@@ -85,6 +86,7 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 		for _, vr := range r.Vulns {
 			f := findings.Finding{
 				Detector:   "osv-ioc",
+				Category:   categoryForOSVID(vr.ID),
 				PURL:       p.PURL,
 				Ecosystem:  p.Ecosystem,
 				Name:       p.Name,
@@ -107,6 +109,18 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 		}
 	}
 	return out, nil
+}
+
+// categoryForOSVID classifies an OSV vulnerability ID into a chdora
+// Category. MAL-* records come from the OpenSSF Malicious Packages
+// database (federated into OSV.dev) — those are deliberate supply-chain
+// attacks. Everything else (CVE-, GHSA-, PYSEC-, RUSTSEC-, ...) is a
+// honest-bug dependency vulnerability.
+func categoryForOSVID(id string) findings.Category {
+	if strings.HasPrefix(id, "MAL-") {
+		return findings.CategorySupplyChainAttack
+	}
+	return findings.CategoryDependencyCVE
 }
 
 func osvEcosystem(e inventory.Ecosystem) string {

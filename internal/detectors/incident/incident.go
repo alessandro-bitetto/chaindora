@@ -74,6 +74,7 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 				}
 				out = append(out, findings.Finding{
 					Detector:       "incident-pack",
+					Category:       findings.CategorySupplyChainAttack,
 					PURL:           p.PURL,
 					Ecosystem:      p.Ecosystem,
 					Name:           p.Name,
@@ -150,6 +151,7 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 				}
 				out = append(out, findings.Finding{
 					Detector:       "incident-pack",
+					Category:       findings.CategorySupplyChainAttack,
 					VulnID:         ar.Incident.ID,
 					Summary:        ar.Incident.Name + ": " + strings.TrimSpace(ar.Artifact.Description),
 					Severity:       parseSeverity(ar.Artifact.Severity),

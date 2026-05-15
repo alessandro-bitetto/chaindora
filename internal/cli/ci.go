@@ -34,6 +34,9 @@ var (
 	ciYes            bool
 	ciAggressive     bool
 	ciSkipRegistry   bool
+	ciShowAllCVEs    bool
+	ciSupplyOnly     bool
+	ciOffline        bool
 )
 
 var ciCmd = &cobra.Command{
@@ -57,6 +60,11 @@ continuous-integration use:
 		root := "."
 		if len(args) == 1 {
 			root = args[0]
+		}
+
+		if ciOffline {
+			ciSkipOSV = true
+			ciSkipRegistry = true
 		}
 
 		ci := detectCI(os.Getenv)
@@ -139,6 +147,8 @@ continuous-integration use:
 
 		tally.Print(os.Stderr)
 
+		ShowAllCVEs = ciShowAllCVEs
+		SupplyChainOnly = ciSupplyOnly
 		if err := renderFindings(os.Stdout, all, format); err != nil {
 			return err
 		}
@@ -253,6 +263,9 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciSkipHeuristic, "skip-heuristic", false, "skip behavioral heuristics")
 	ciCmd.Flags().BoolVar(&ciFreshPopular, "fresh-popular", false, "also check publish dates of top-N popular npm/PyPI deps (requires network)")
 	ciCmd.Flags().BoolVar(&ciSkipRegistry, "skip-registry", false, "do not query npm/PyPI for evidence (offline mode; evidence-based heuristics become silent)")
+	ciCmd.Flags().BoolVar(&ciShowAllCVEs, "show-all-cves", false, "show every dependency-CVE finding (default: collapse to the top 5)")
+	ciCmd.Flags().BoolVar(&ciSupplyOnly, "supply-chain-only", false, "hide the dependency-CVE section entirely")
+	ciCmd.Flags().BoolVar(&ciOffline, "offline", false, "no network calls — implies --skip-osv and --skip-registry")
 	ciCmd.Flags().BoolVar(&ciVerbose, "verbose", false, "emit diagnostic logs to stderr")
 	ciCmd.Flags().StringSliceVar(&ciExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated)")
 	ciCmd.Flags().BoolVar(&ciFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
