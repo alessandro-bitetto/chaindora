@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.6.1] — 2026-05-15
+
+### Fixed
+
+- **Dependabot now splits major-version bumps from minor/patch.**
+  v0.5.8's config grouped all updates to GitHub-published actions
+  (`actions/*`, `github/codeql-action*`) into a single weekly PR.
+  This worked fine for routine security fixes but caused a real
+  problem overnight: a major-version bump (`actions/checkout v4 →
+  v6.0.2`, `actions/setup-go v5 → v6.4.0`, `goreleaser-action
+  v6 → v7.2.1`, `codeql-action v3 → v4.35.5`) landed in one
+  bundled PR that was easy to merge without realising the major
+  jump.
+
+  New policy:
+    - **Minor + patch** updates are grouped into one weekly PR
+      per ecosystem. Routine; safe to merge in a batch.
+    - **Major** updates come in as individual, ungrouped PRs.
+      One action at a time, explicit review required, no
+      accidental bundle-merging.
+
+  Same split applies to the `gomod` ecosystem so a major-version
+  bump to `spf13/cobra` (which has happened before for cobra v1
+  → v2 in nearby projects) gets its own deliberate PR review.
+
+  Also added `goreleaser/*` to the github-actions-core group so
+  the goreleaser-action bumps come through the same bundled-
+  minor-patch path as the GitHub-published actions.
+
 ## [0.6.0] — 2026-05-15
 
 The architectural shift: heuristics stop guessing from package-name shape

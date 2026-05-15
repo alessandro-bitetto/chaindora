@@ -16,18 +16,34 @@ updates:
     commit-message:
       prefix: "ci"
     open-pull-requests-limit: 5
-    # Bundle updates to GitHub-published actions into one PR so we
-    # don't churn through 3 separate PRs every time GitHub does a
-    # coordinated release across checkout / setup-go / codeql-action.
+    # Two policies for GitHub-published actions:
+    #
+    # 1. Minor + patch bumps are grouped into one PR per week
+    #    (`github-actions-core`). These are routine security /
+    #    bugfix updates that are safe to merge in a single batch.
+    #
+    # 2. Major bumps come in as INDIVIDUAL PRs — no grouping,
+    #    explicit one-action-at-a-time. Major versions of these
+    #    actions historically include breaking changes (e.g.
+    #    actions/checkout v4 → v6 changed Node runtime version)
+    #    and deserve case-by-case review.
+    #
+    # The split means accidentally hitting "merge" on a bundled
+    # weekly PR can't pull in a breaking change behind your back.
     groups:
       github-actions-core:
         patterns:
           - "actions/*"
           - "github/codeql-action*"
+          - "goreleaser/*"
+        update-types:
+          - "minor"
+          - "patch"
 
   # Go modules: chdora intentionally minimal (cobra + yaml.v3 only).
   # Weekly polling keeps us informed of security advisories without
-  # being noisy.
+  # being noisy. Same major-bump split as github-actions: bundle
+  # minor + patch, surface majors individually.
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
@@ -36,3 +52,10 @@ updates:
     commit-message:
       prefix: "deps"
     open-pull-requests-limit: 3
+    groups:
+      gomod-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
