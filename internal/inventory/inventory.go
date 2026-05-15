@@ -18,6 +18,10 @@ const (
 	EcosystemCircleCIOrbs   Ecosystem = "CircleCI Orbs"
 	EcosystemAzurePipelines Ecosystem = "Azure Pipelines"
 	EcosystemDocker         Ecosystem = "Docker"
+	EcosystemHomebrew       Ecosystem = "Homebrew"
+	EcosystemDebian         Ecosystem = "Debian"
+	EcosystemBrowserExt     Ecosystem = "Browser Extension"
+	EcosystemIDEExt         Ecosystem = "IDE Extension"
 )
 
 // Package represents one resolved dependency discovered in a manifest or lockfile.

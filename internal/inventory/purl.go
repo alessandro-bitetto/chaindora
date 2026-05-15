@@ -33,6 +33,14 @@ func PURL(eco Ecosystem, name, version string) string {
 		typ = "azurepipelines"
 	case EcosystemDocker:
 		typ = "docker"
+	case EcosystemHomebrew:
+		typ = "brew"
+	case EcosystemDebian:
+		typ = "deb"
+	case EcosystemBrowserExt:
+		typ = "browserext"
+	case EcosystemIDEExt:
+		typ = "ideext"
 	default:
 		typ = strings.ToLower(string(eco))
 	}

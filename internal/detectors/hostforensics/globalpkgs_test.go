@@ -87,3 +87,39 @@ func TestParseNPMGlobalMalformedJSON(t *testing.T) {
 		t.Error("expected JSON error, got nil")
 	}
 }
+
+func TestParseBrewOutput(t *testing.T) {
+	out := "git 2.45.0\ngo 1.22.3 1.21.0\nsqlite 3.45.3\n"
+	pkgs := parseBrewOutput([]byte(out))
+	if len(pkgs) != 3 {
+		t.Fatalf("expected 3 brew formulae, got %d: %+v", len(pkgs), pkgs)
+	}
+	byName := map[string]string{}
+	for _, p := range pkgs {
+		byName[p.Name] = p.Version
+		if p.Ecosystem != inventory.EcosystemHomebrew {
+			t.Errorf("%s wrong ecosystem: %s", p.Name, p.Ecosystem)
+		}
+	}
+	if byName["git"] != "2.45.0" || byName["go"] != "1.22.3 1.21.0" || byName["sqlite"] != "3.45.3" {
+		t.Errorf("brew versions wrong: %v", byName)
+	}
+}
+
+func TestParseDpkgOutput(t *testing.T) {
+	out := "adduser|3.118\napt|2.4.13\nbash|5.1-6ubuntu1.1\n\nemptyname|\n|emptyversion\n"
+	pkgs := parseDpkgOutput([]byte(out))
+	if len(pkgs) != 3 {
+		t.Fatalf("expected 3 dpkg packages (empties dropped), got %d: %+v", len(pkgs), pkgs)
+	}
+	byName := map[string]string{}
+	for _, p := range pkgs {
+		byName[p.Name] = p.Version
+		if p.Ecosystem != inventory.EcosystemDebian {
+			t.Errorf("%s wrong ecosystem", p.Name)
+		}
+	}
+	if byName["bash"] != "5.1-6ubuntu1.1" {
+		t.Errorf("bash version: %v", byName)
+	}
+}
