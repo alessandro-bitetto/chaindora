@@ -7,24 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- `--exclude <name>` flag on `scan`, `ci`, and `forensics` — comma-separated
-  or repeatable directory basenames to skip during all detector walks
-  (inventory, incident-pack file-artifact hunt, heuristic install-script
-  walk, and project discovery). Plumbed via a new
-  `inventory.WithExcludes(...)` option, `heuristic.Config{Excludes}`, and a
-  variadic `incident.New(incs, excludes...)` constructor.
-- Dogfood self-scan re-enabled in `.github/workflows/test.yml`: a
-  separate job runs `./chaindora ci . --exclude testdata --fail-on critical,high`
-  and uploads the SARIF sidecar to GitHub code-scanning. The `testdata/`
-  exclusion keeps the deliberately-malicious test fixtures out of the
-  results.
-- `chaindora forensics --deep` — enumerates globally-installed packages
-  via `npm ls -g --json`, `pip list --format=json` (with pip3 fallback),
-  `brew list --formula --versions`, and `dpkg-query -W -f='${Package}|${Version}\n'`.
-  Each package manager is silently skipped when its binary isn't on PATH.
-  Runs the full detector pipeline (OSV on npm/PyPI, incident pack on all,
-  heuristics where applicable) against the resulting inventory.
+Future work tracked in [README's Roadmap section](./README.md#roadmap).
+
+## [0.2.0] — 2026-05-15
+
+Full-machine forensics, broader inventory reach, and a packaged release pipeline.
+
+### Added — Forensics
 - `chaindora forensics --ssh-check` — snapshots `~/.ssh/authorized_keys`
   on first run into `~/.chaindora/ssh-baseline.txt`, then on subsequent
   runs flags any new key (HIGH `HOST-SSH-KEY-ADDED`) or removed key
@@ -42,19 +31,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `EcosystemBrowserExt` and `EcosystemIDEExt` constants thread through to
   the existing detector pipeline so incident-pack entries can target
   specific extension IDs.
+- `chaindora forensics --deep` — enumerates globally-installed packages
+  via `npm ls -g --json`, `pip list --format=json` (with pip3 fallback),
+  `brew list --formula --versions`, and `dpkg-query -W -f='${Package}|${Version}\n'`.
+  Each package manager is silently skipped when its binary isn't on PATH.
+  Runs the full detector pipeline (OSV on npm/PyPI, incident pack on all,
+  heuristics where applicable) against the resulting inventory.
+- `chaindora forensics --scan-projects <root>` — full-machine project
+  discovery. Walks the filesystem for manifests, deduplicates nested
+  manifests, and runs a full scan against each discovered project root.
+- Windows-equivalent host forensics: PowerShell profile scanner
+  (`iex (irm/iwr …)`, `[Convert]::FromBase64String`,
+  `Add-MpPreference -Exclusion`, `Set-MpPreference -DisableRealtimeMonitoring`),
+  Windows Credential Manager presence check, verified cross-compile
+  for `GOOS=windows GOARCH={amd64,arm64}`.
+
+### Added — Detector / inventory plumbing
+- `--exclude <name>` flag on `scan`, `ci`, and `forensics` — comma-separated
+  or repeatable directory basenames to skip during all detector walks
+  (inventory, incident-pack file-artifact hunt, heuristic install-script
+  walk, and project discovery). Plumbed via a new
+  `inventory.WithExcludes(...)` option, `heuristic.Config{Excludes}`, and a
+  variadic `incident.New(incs, excludes...)` constructor.
+- New ecosystems: `Homebrew`, `Debian`, `Browser Extension`, `IDE Extension`,
+  with matching PURL types (`pkg:brew/...`, `pkg:deb/...`,
+  `pkg:browserext/...`, `pkg:ideext/...`).
+- `inventory.NormalizePyPIName` is now exported so external scanners can
+  apply the same PEP 503 normalization the lockfile parsers do.
+
+### Added — Updates & releases
+- `chaindora update` — refreshes the curated incident pack from the
+  upstream GitHub repo into `~/.chaindora/incidents/`. Atomic per-file
+  writes, YAML validation before commit, `.meta.json` provenance.
+  Flags: `--source`, `--dest`, `--dry-run`, `--verbose`.
 - Pre-built cross-platform binaries via goreleaser
   (`.goreleaser.yml` + `.github/workflows/release.yml`): tagged pushes
   build `linux/darwin/windows` × `amd64/arm64`, publish SHA-256
   checksums, and create a GitHub Release with verification instructions.
-- `inventory.NormalizePyPIName` is now exported so the global-pip scanner
-  applies the same PEP 503 normalization the lockfile parsers do.
-- `chaindora forensics --ssh-check` — snapshots `~/.ssh/authorized_keys`
-  on first run into `~/.chaindora/ssh-baseline.txt`, then on subsequent
-  runs flags any new key (HIGH `HOST-SSH-KEY-ADDED`) or removed key
-  (MEDIUM `HOST-SSH-KEY-REMOVED`). Hashes are SHA-256, ignoring comments
-  and blank lines. Configurable baseline path via `--ssh-baseline`.
+- Dogfood self-scan job in `.github/workflows/test.yml` runs
+  `./chaindora ci . --exclude testdata --fail-on critical,high` on every
+  push and uploads the SARIF sidecar to GitHub code-scanning.
 
-Future work tracked in [README's Roadmap section](./README.md#roadmap).
+### Fixed
+- `globMatch` in the incident detector now uses `path.Match` (forward-
+  slash-only) and normalizes both pattern and rel via `filepath.ToSlash`.
+  Previously `filepath.Match` on Windows treated `/` as a regular
+  character and `*.txt` would match `sub/foo.txt`.
+- `TestCollapseNestedRoots` rebuilt with `filepath.Join` so it passes on
+  both Unix and Windows test runners.
+- README `Install` section now documents the
+  `$(go env GOPATH)/bin` PATH gotcha that breaks `go install …@latest`
+  for users whose Go bin dir isn't already on `$PATH`.
 
 ## [0.1.0] — 2026-05-15
 
