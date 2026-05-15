@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -40,6 +41,12 @@ var (
 	ciExcludeConfig  bool
 	ciExcludeHost    bool
 	ciOffline        bool
+	// SonarQube-grade CI surface (v0.10).
+	ciBaselinePath       string
+	ciUpdateBaseline     bool
+	ciSuppressFile       string
+	ciIgnoreSuppressions bool
+	ciCommentPath        string
 )
 
 var ciCmd = &cobra.Command{
@@ -150,12 +157,89 @@ continuous-integration use:
 
 		tally.Print(os.Stderr)
 
+		// SonarQube-grade CI pipeline:
+		//   1. Load suppression file → split (kept, suppressed)
+		//   2. Load baseline → diff against current → (new, removed)
+		//   3. Render based on the chosen format
+		//   4. Apply fail-on against ONLY the new findings (not pre-existing)
+		//   5. Optionally update baseline / emit PR-comment markdown
+		//
+		// Steps 1+2+4 reframe the "ci as a PR gate" model:
+		//   - pre-existing tech-debt findings DON'T break new PRs
+		//   - explicitly-suppressed findings (with reason) DON'T break new PRs
+		//   - only ACTUAL NEW findings on this PR can fail the gate
+		suppressions, suppErr := findings.LoadSuppressions(ciSuppressFileOrDefault(root))
+		if suppErr != nil && !ciIgnoreSuppressions {
+			return fmt.Errorf("suppression file: %w", suppErr)
+		}
+		var suppressed []findings.SuppressedFinding
+		if !ciIgnoreSuppressions {
+			all, suppressed = findings.FilterSuppressed(all, suppressions, time.Now())
+		}
+		// Emit expired-suppression warning to stderr regardless of
+		// format — this is operational signal, not finding data.
+		expiredCount := 0
+		for _, s := range suppressed {
+			if s.Expired {
+				expiredCount++
+			}
+		}
+		if expiredCount > 0 {
+			fmt.Fprintf(os.Stderr, "[chdora] WARNING: %d expired suppression entry(ies) in %s — review and refresh\n",
+				expiredCount, suppressions.Path)
+		}
+
+		var newFindings []findings.Finding
+		var removedFps []string
+		if ciBaselinePath != "" {
+			baseline, err := findings.LoadBaseline(ciBaselinePath)
+			if err != nil {
+				return fmt.Errorf("baseline: %w", err)
+			}
+			newFindings, removedFps = findings.DiffAgainstBaseline(all, baseline)
+			if baseline == nil {
+				fmt.Fprintf(os.Stderr, "[chdora] no existing baseline at %s — every current finding is treated as NEW.\n", ciBaselinePath)
+				fmt.Fprintln(os.Stderr, "[chdora]   Run `chdora ci --baseline <path> --update-baseline` after fixing or accepting the current state to lock it in.")
+			} else if ciVerbose {
+				fmt.Fprintf(os.Stderr, "[chdora] baseline diff: %d new, %d resolved\n", len(newFindings), len(removedFps))
+			}
+		} else {
+			newFindings = all
+		}
+
 		ExcludeCVEs = ciExcludeCVEs
 		ExcludeSupplyChain = ciExcludeSupply
 		ExcludeConfig = ciExcludeConfig
 		ExcludeHost = ciExcludeHost
-		if err := renderFindings(os.Stdout, all, format); err != nil {
-			return err
+		// pr-comment is a new format that bypasses the standard
+		// renderer. Everything else still flows through renderFindings.
+		if format == "pr-comment" {
+			if err := findings.EmitPRComment(os.Stdout, all, suppressed, newFindings, removedFps, Version); err != nil {
+				return err
+			}
+		} else {
+			if err := renderFindings(os.Stdout, all, format); err != nil {
+				return err
+			}
+		}
+		// Optional separate file for the PR comment — useful when
+		// the primary format is text/sarif but the CI workflow still
+		// wants a markdown comment to post.
+		if ciCommentPath != "" {
+			f, err := os.Create(ciCommentPath)
+			if err != nil {
+				return fmt.Errorf("pr-comment sidecar: %w", err)
+			}
+			if err := findings.EmitPRComment(f, all, suppressed, newFindings, removedFps, Version); err != nil {
+				f.Close()
+				return fmt.Errorf("pr-comment emit: %w", err)
+			}
+			if err := f.Close(); err != nil {
+				return fmt.Errorf("pr-comment close: %w", err)
+			}
+			if ciVerbose {
+				fmt.Fprintf(os.Stderr, "[chdora] wrote PR comment to %s\n", ciCommentPath)
+			}
 		}
 
 		if ciSARIFPath != "" {
@@ -208,11 +292,36 @@ continuous-integration use:
 		}
 		emitEndOfRunFooter(os.Stderr, plans, saved, savedID, fixRequested)
 
-		if shouldFail(all, ciFailOn) {
+		// Update baseline AFTER all rendering so the file's
+		// final state reflects what was actually scanned this run.
+		if ciUpdateBaseline && ciBaselinePath != "" {
+			newBaseline := findings.BaselineFromFindings(all, Version, time.Now().UTC().Format(time.RFC3339))
+			if err := findings.SaveBaseline(ciBaselinePath, newBaseline); err != nil {
+				return fmt.Errorf("update baseline: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "[chdora] baseline updated at %s (%d fingerprint(s) recorded)\n",
+				ciBaselinePath, len(newBaseline.Fingerprints))
+		}
+
+		// SonarQube-style gate: --fail-on applies to the NEW set
+		// (post-suppression, post-baseline-diff) — not the
+		// full inventory. Pre-existing tech debt doesn't fail
+		// the PR; only what this PR introduced does.
+		if shouldFail(newFindings, ciFailOn) {
 			os.Exit(1)
 		}
 		return nil
 	},
+}
+
+// ciSuppressFileOrDefault picks the suppression-file location.
+// Explicit --suppress-file wins; otherwise the standard
+// .chaindora-ignore.yml discovery walks up from the scan root.
+func ciSuppressFileOrDefault(root string) string {
+	if ciSuppressFile != "" {
+		return ciSuppressFile
+	}
+	return root
 }
 
 // detectCI returns a short identifier for the running CI, or "" if none of
@@ -297,5 +406,11 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	ciCmd.Flags().BoolVar(&ciAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes")
 	ciCmd.Flags().BoolVar(&ciSavePlan, "save-plan", false, "save the generated fix-plan to ~/.chaindora/fix-plans/ and print its ID")
+	// v0.10 SonarQube-grade CI surface.
+	ciCmd.Flags().StringVar(&ciBaselinePath, "baseline", "", "path to a baseline findings file. --fail-on is then applied only to findings NEW since the baseline (not pre-existing tech debt). Combine with --update-baseline.")
+	ciCmd.Flags().BoolVar(&ciUpdateBaseline, "update-baseline", false, "after the scan, rewrite the baseline file to reflect the current findings. Use after intentional resolution / acceptance.")
+	ciCmd.Flags().StringVar(&ciSuppressFile, "suppress-file", "", "path to a .chaindora-ignore.yml. Default: walks up from the scan root looking for .chaindora-ignore.yml")
+	ciCmd.Flags().BoolVar(&ciIgnoreSuppressions, "ignore-suppressions", false, "process all findings even if the suppression file matches some — use for full audits")
+	ciCmd.Flags().StringVar(&ciCommentPath, "pr-comment", "", "additionally write a GitHub-flavored markdown PR-comment body to this file (sticky-comment compatible)")
 	rootCmd.AddCommand(ciCmd)
 }

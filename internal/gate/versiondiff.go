@@ -173,7 +173,7 @@ func (v *VersionBumpDiff) scanVersion(ctx context.Context, name, version string)
 	if err := v.NPM.FetchTarball(ctx, url, &buf); err != nil {
 		return nil, err
 	}
-	return scanNPMTarball(buf.Bytes(), 50<<20)
+	return scanTarball(buf.Bytes(), 50<<20)
 }
 
 // patternSet returns a map of pattern → weight, taking the MAX

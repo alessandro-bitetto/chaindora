@@ -30,6 +30,7 @@ import (
 type Cooldown struct {
 	Threshold time.Duration
 	NPM       npmCooldownProbe
+	PyPI      pypiCooldownProbe
 }
 
 // npmCooldownProbe is the subset of registries.NPM the cooldown
@@ -39,8 +40,16 @@ type npmCooldownProbe interface {
 	PublishedAtVersion(ctx context.Context, name, version string) (time.Time, error)
 }
 
+// pypiCooldownProbe mirrors npmCooldownProbe for PyPI. Same
+// shape so cooldown can dispatch on ecosystem without
+// reimplementing per-probe.
+type pypiCooldownProbe interface {
+	PublishedAtVersion(ctx context.Context, name, version string) (time.Time, error)
+}
+
 // NewCooldown returns a Cooldown configured with the supplied
-// threshold and the default public-registry NPM probe.
+// threshold and the default public-registry probes for both
+// npm and PyPI.
 func NewCooldown(threshold time.Duration) *Cooldown {
 	if threshold <= 0 {
 		threshold = 72 * time.Hour
@@ -48,6 +57,7 @@ func NewCooldown(threshold time.Duration) *Cooldown {
 	return &Cooldown{
 		Threshold: threshold,
 		NPM:       registries.NewNPM(),
+		PyPI:      registries.NewPyPI(),
 	}
 }
 
@@ -65,9 +75,16 @@ func (c *Cooldown) Check(ctx context.Context, ref PackageRef) CheckResult {
 	switch ref.Ecosystem {
 	case "npm":
 		publishedAt, err = c.NPM.PublishedAtVersion(ctx, ref.Name, ref.Version)
+	case "pypi", "pip":
+		if c.PyPI == nil {
+			result.Verdict = VerdictUnknown
+			result.Reason = "no PyPI probe configured"
+			return result
+		}
+		publishedAt, err = c.PyPI.PublishedAtVersion(ctx, ref.Name, ref.Version)
 	default:
-		// Other ecosystems aren't wired yet (PyPI/yarn/pnpm in
-		// follow-up patches). Skipping is safer than guessing —
+		// Other ecosystems aren't wired yet (RubyGems / crates /
+		// Maven in v0.11). Skipping is safer than guessing —
 		// return Unknown so the fail-closed policy still applies
 		// unless the user explicitly --allow-offline.
 		result.Verdict = VerdictUnknown

@@ -107,9 +107,69 @@ type npmVersionMetadata struct {
 }
 
 type npmDist struct {
-	Tarball   string `json:"tarball"`
-	Shasum    string `json:"shasum"`
-	Integrity string `json:"integrity"`
+	Tarball      string             `json:"tarball"`
+	Shasum       string             `json:"shasum"`
+	Integrity    string             `json:"integrity"`
+	Attestations *npmAttestationsRef `json:"attestations,omitempty"`
+}
+
+// npmAttestationsRef is the v0.10 npm-provenance metadata block.
+// When a publisher runs `npm publish --provenance`, the registry
+// records a sigstore-attested bundle reachable via the URL here.
+// Absence of this block on a publish-after-2023 package is a
+// soft anti-trust signal — adoption is rising but still optional.
+//
+// The `provenance` field is an OBJECT in the real response
+// (predicateType etc.), not a bool — we don't parse its contents
+// here, just presence. json.RawMessage lets us tolerate either
+// shape without breaking.
+type npmAttestationsRef struct {
+	URL        string          `json:"url"`
+	Provenance json.RawMessage `json:"provenance,omitempty"`
+}
+
+// HasProvenance reports whether the given (name, version) carries
+// a sigstore provenance attestation per the npm metadata. Returns
+// false + nil error when the package exists but lacks attestation
+// (the common case today). Errors only for transport/parse
+// failures.
+func (n *NPM) HasProvenance(ctx context.Context, name, version string) (bool, error) {
+	status, doc, err := n.fetchPackage(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	if status != http.StatusOK || doc == nil {
+		return false, fmt.Errorf("npm provenance %s@%s: HTTP %d", name, version, status)
+	}
+	vm, ok := doc.Versions[version]
+	if !ok {
+		return false, nil
+	}
+	if vm.Dist == nil || vm.Dist.Attestations == nil {
+		return false, nil
+	}
+	return vm.Dist.Attestations.URL != "", nil
+}
+
+// AnyVersionHasProvenance reports whether ANY version of the
+// package has ever been published with provenance. Used by the
+// gate's sigstore checker to decide whether absence-of-provenance
+// is suspicious for THIS publisher (some maintainers adopt
+// provenance, others don't — we don't want to spam either).
+func (n *NPM) AnyVersionHasProvenance(ctx context.Context, name string) (bool, error) {
+	status, doc, err := n.fetchPackage(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	if status != http.StatusOK || doc == nil {
+		return false, nil
+	}
+	for _, vm := range doc.Versions {
+		if vm.Dist != nil && vm.Dist.Attestations != nil && vm.Dist.Attestations.URL != "" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 type npmAuthor struct {

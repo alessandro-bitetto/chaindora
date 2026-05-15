@@ -59,19 +59,40 @@ detection lands.
 
 ### Pre-built binary (recommended)
 
-Pick the matching archive from the [Releases page](https://github.com/alessandro-bitetto/chaindora/releases),
-extract, place `chdora` on `$PATH`:
+Pick the matching archive from the [Releases page](https://github.com/alessandro-bitetto/chaindora/releases/latest),
+extract, place `chdora` on `$PATH`. Replace `0.9.2` with the version you
+want; `latest` works as a redirect for the most recent tag.
 
 ```sh
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_<version>_<os>_<arch>.tar.gz | tar xz
+# macOS, Apple Silicon
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_darwin_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
+
+# macOS, Intel
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_darwin_amd64.tar.gz | tar xz
+sudo mv chdora /usr/local/bin/
+
+# Linux, x86_64
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_linux_amd64.tar.gz | tar xz
+sudo mv chdora /usr/local/bin/
+
+# Linux, ARM64
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_linux_arm64.tar.gz | tar xz
+sudo mv chdora /usr/local/bin/
+
+# Windows, x86_64 (PowerShell)
+Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_windows_amd64.zip" -OutFile chdora.zip
+Expand-Archive chdora.zip -DestinationPath .
+Move-Item chdora.exe "$env:USERPROFILE\bin\chdora.exe"   # ensure this dir is on PATH
+
 chdora --version
 ```
 
-Each release publishes a `chaindora_<version>_checksums.txt`:
+Each release publishes a `chaindora_0.9.2_checksums.txt`. Verify before running:
 
 ```sh
-shasum -a 256 -c chaindora_<version>_checksums.txt
+curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_checksums.txt
+shasum -a 256 -c chaindora_0.9.2_checksums.txt
 ```
 
 ### From source
@@ -419,12 +440,15 @@ every release tag.
 
 ## Roadmap
 
-- **v0.10** — PyPI parity for the gate (yarn/pnpm too, but they all share
-  the npm registry data); `chdora watch` daemon that polls OSV/MAL-* and
-  alerts on installed inventory; sigstore-provenance enforcement for
-  high-risk packages.
+- **v0.10** ✅ shipped — `chdora ci` SonarQube-grade (baseline mode,
+  `.chaindora-ignore.yml` suppression, PR-comment markdown);
+  yarn + pnpm gate resolvers; PyPI gate parity (cooldown + OSV +
+  static-pattern); `chdora watch` daemon (periodic re-scan,
+  webhook alerts); sigstore-provenance check.
 - **v0.11** — Server mode: scheduled fleet scans, findings DB, webhook
-  ingest. Expanded ecosystems: RubyGems, crates.io, Maven Central.
+  ingest, multi-machine dashboard. Expanded ecosystems: RubyGems,
+  crates.io, Maven Central. PyPI gate parity for publisher-change /
+  maintainer-trust / version-diff.
 - **v1.0** — Reproducible-build verification: for packages with sigstore
   provenance, verify the tarball matches what builds from the attested
   git source. Closes the "registry compromised but source clean" gap.

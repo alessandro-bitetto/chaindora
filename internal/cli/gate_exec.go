@@ -83,31 +83,38 @@ Examples:
 		pm := pmArgs[0]
 		pmArgs = pmArgs[1:]
 
-		// Today only `npm` is gated. Other package managers fall
-		// through to "find real binary, pass through unchanged" so
-		// the shim is always safe to install even before pip /
-		// yarn / pnpm support ships.
-		if pm != "npm" {
-			return passThroughToReal(pm, pmArgs)
-		}
-		realNPM, err := findRealPackageManager(pm)
+		// Supported package managers route through their own
+		// resolver; everything else passes through unchanged so
+		// the shim is always safe to install for the user's full
+		// set of package managers.
+		realBin, err := findRealPackageManager(pm)
 		if err != nil {
 			return err
 		}
-		// Non-install verbs (uninstall, test, run, view, ...) pass
-		// through unchanged. The gate ONLY exists to intercept the
-		// install path because that's the only verb that lands new
-		// bytes on disk.
-		//
-		// `npm install` with no specific packages (just installing
-		// what's already in package.json/lock) also passes through
-		// — the lockfile presumably reflects an already-vetted
-		// install. Use `chdora scan` / `chdora audit` for the
-		// post-install detection story on that path.
-		if len(pmArgs) == 0 || !isNPMInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-			return execReal(realNPM, pmArgs)
+		var installArgs []string
+		var resolve func(context.Context, string, []string) ([]gate.PackageRef, error)
+		switch pm {
+		case "npm":
+			if len(pmArgs) == 0 || !isNPMInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
+				return execReal(realBin, pmArgs)
+			}
+			installArgs = pmArgs[1:]
+			resolve = gate.ResolveNPMTree
+		case "yarn":
+			if len(pmArgs) == 0 || !isYarnInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
+				return execReal(realBin, pmArgs)
+			}
+			installArgs = pmArgs[1:]
+			resolve = gate.ResolveYarnTree
+		case "pnpm":
+			if len(pmArgs) == 0 || !isPnpmInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
+				return execReal(realBin, pmArgs)
+			}
+			installArgs = pmArgs[1:]
+			resolve = gate.ResolvePnpmTree
+		default:
+			return passThroughToReal(pm, pmArgs)
 		}
-		installArgs := pmArgs[1:]
 		// Skip the gate when EVERY install arg is a flag (no real
 		// packages to vet). `npm install --save-dev` with nothing
 		// after it is effectively the no-args case.
@@ -118,7 +125,7 @@ Examples:
 			}
 		}
 		if realPkgs == 0 {
-			return execReal(realNPM, pmArgs)
+			return execReal(realBin, pmArgs)
 		}
 
 		cwd, _ := os.Getwd()
@@ -139,10 +146,12 @@ Examples:
 			gate.NewCooldown(threshold),
 			gate.NewPublisherChange(),
 			gate.NewMaintainerTrust(),
+			gate.NewProvenanceCheck(),
 		)
 		if !gateExecSkipStatic {
 			checkers = append(checkers, &gate.StaticScan{
-				NPM:      newStaticScanProbe(),
+				NPM:      newStaticScanNPMProbe(),
+				PyPI:     newStaticScanPyPIProbe(),
 				MaxBytes: 50 << 20, BlockAt: 3, WarnAt: 1,
 			})
 			checkers = append(checkers, gate.NewVersionBumpDiff())
@@ -156,10 +165,10 @@ Examples:
 			policy.AllowOnUnknown = true
 		}
 
-		fmt.Fprintf(os.Stderr, "[chdora] resolving install tree for: %s\n", strings.Join(pmArgs, " "))
+		fmt.Fprintf(os.Stderr, "[chdora] resolving install tree (%s) for: %s\n", pm, strings.Join(pmArgs, " "))
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
-		refs, err := gate.ResolveNPMTree(ctx, realNPM, installArgs)
+		refs, err := resolve(ctx, realBin, installArgs)
 		if err != nil {
 			return fmt.Errorf("resolve tree: %w", err)
 		}
@@ -205,8 +214,8 @@ Examples:
 			fmt.Fprintln(os.Stderr, "[chdora] --dry-run: gate approved (would exec real package manager)")
 			return nil
 		}
-		fmt.Fprintf(os.Stderr, "[chdora] gate approved — exec %s %s\n", realNPM, strings.Join(pmArgs, " "))
-		return execReal(realNPM, pmArgs)
+		fmt.Fprintf(os.Stderr, "[chdora] gate approved — exec %s %s\n", realBin, strings.Join(pmArgs, " "))
+		return execReal(realBin, pmArgs)
 	},
 }
 
@@ -269,6 +278,19 @@ func isNPMInstallVerb(v string) bool {
 		return true
 	}
 	return false
+}
+
+// isYarnInstallVerb — yarn classic uses `add`; Berry kept `add`.
+// `yarn install` (with no args) installs from existing lockfile
+// and isn't gated (vetted state already).
+func isYarnInstallVerb(v string) bool {
+	return v == "add"
+}
+
+// isPnpmInstallVerb — pnpm uses `add` for new packages and
+// `install` for restoring from lockfile (not gated).
+func isPnpmInstallVerb(v string) bool {
+	return v == "add"
 }
 
 // findRealPackageManager looks up the binary on $PATH while skipping

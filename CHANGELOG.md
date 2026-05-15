@@ -9,6 +9,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.10.0] — 2026-05-15
+
+The "production-ready CI + multi-ecosystem prevention" milestone.
+Closes most of the gap between v0.9.0's prevention proof-of-concept
+and a tool teams can drop into their PR pipelines unmodified.
+
+### Added — `chdora ci` is now SonarQube-grade
+
+- **`--baseline <path>`** — first run writes the current findings'
+  fingerprints to the path; subsequent runs compute the diff and
+  apply `--fail-on` only to NEW findings. The whole point: pre-
+  existing tech-debt findings don't break every new PR. Pair with
+  `--update-baseline` after intentional resolution / acceptance to
+  refresh the file.
+
+- **`.chaindora-ignore.yml`** — per-project suppression file
+  discovered by walking up from the scan root. Each entry must
+  carry a `reason` (parser refuses silent suppression). Match by
+  exact `fingerprint` OR by `vuln_id` plus optional
+  `package` / `version`. Optional `expires: YYYY-MM-DD` — expired
+  entries continue to apply but emit a warning. `--ignore-suppressions`
+  bypasses the file for full audits; `--suppress-file <path>`
+  overrides discovery.
+
+- **`--format pr-comment`** — emits GitHub-flavored markdown with a
+  one-line verdict, severity-counts table, expanded "new since
+  baseline" section, and collapsible "pre-existing" / "suppressed"
+  blocks. Includes a sticky-comment marker
+  (`<!-- chaindora:pr-comment -->`) so update-or-create flows work.
+  Also writable to a sidecar file via `--pr-comment <path>`.
+
+- **Quality-gate semantics**: `--fail-on` now applies to
+  post-suppression, post-baseline-diff findings — exactly the
+  set the PR introduces.
+
+### Added — gate ecosystem + provenance expansion
+
+- **yarn + pnpm resolvers** for `chdora gate exec` /
+  `chdora gate install`. Yarn classic (v1) + Berry (v2+) both
+  supported; pnpm covers the v5-6 slash-style keys AND v7+
+  `@`-style keys plus peer-deps annotations. The shim mechanism
+  installs `npm`/`yarn`/`pnpm` shims at once; non-install verbs
+  pass through transparently.
+
+- **PyPI gate parity** — cooldown + OSV + static-pattern now run
+  against PyPI packages. Cooldown queries
+  `pypi.org/pypi/<pkg>/json` for upload timestamps; static-pattern
+  downloads the sdist and runs the same suspicious-pattern stack
+  as npm tarballs. Publisher-change / maintainer-trust /
+  version-diff remain npm-only for v0.10 (PyPI's `_user` metadata
+  is shaped differently); follow-up in v0.10.x.
+
+- **Sigstore-provenance check** (`provenance` checker).
+  Default policy: Warn when this version lacks provenance BUT
+  another version of the same package HAS provenance — that's
+  the high-signal regression case (publisher used to attest,
+  stopped). Bare absence on never-attested packages stays
+  Approve. `--require-provenance` flips on strict mode that
+  blocks anything without attestation.
+
+### Added — `chdora watch` continuous-protection daemon
+
+- **`chdora watch`** — long-running command that periodically
+  re-scans projects under `$HOME` and alerts on findings new
+  since the previous pass. State persists at
+  `~/.chaindora/watch-state.json`.
+
+- `--interval 1h` (default), `--once` for cron-style one-shot,
+  `--webhook URL` to POST `new-finding` events as JSON, `--verbose`
+  to log every pass even when nothing changed. SIGHUP triggers an
+  immediate re-scan; SIGTERM / SIGINT exits cleanly.
+
+- Webhook URLs are auto-redacted in the startup log so basic-auth
+  credentials and query-string secrets don't leak into process
+  listings or shared terminals.
+
+### Changed — README + docs
+
+- Concrete per-OS download examples replace `<version>_<os>_<arch>`
+  placeholders. macOS-arm64 / macOS-intel / Linux-amd64 /
+  Linux-arm64 / Windows-amd64 commands shown explicitly with
+  version 0.9.2.
+
+### Tests
+
+- New tests for: suppression (load + match + filter + expired),
+  baseline (round-trip + diff + dedup), PR-comment (clean repo,
+  new criticals, pre-existing, expired suppressions),
+  yarn/pnpm parsers (classic + Berry + v5-6 + v7+ key shapes),
+  provenance (present / absent / regression / strict / network
+  error). All green under `go test ./... -race`.
+
 ## [0.9.2] — 2026-05-15
 
 ### Docs

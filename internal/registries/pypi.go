@@ -32,12 +32,97 @@ func NewPyPI() *PyPI {
 }
 
 type pypiPackageDoc struct {
-	Releases map[string][]struct {
-		UploadTime string `json:"upload_time_iso_8601"`
-	} `json:"releases"`
-	Info struct {
+	Releases map[string][]pypiReleaseFile `json:"releases"`
+	Info     struct {
 		Name string `json:"name"`
 	} `json:"info"`
+}
+
+type pypiReleaseFile struct {
+	UploadTime string `json:"upload_time_iso_8601"`
+	URL        string `json:"url"`
+	Filename   string `json:"filename"`
+	Packagetype string `json:"packagetype"` // "sdist" or "bdist_wheel"
+}
+
+// PublishedAtVersion returns the upload timestamp for a specific
+// release. PyPI's "release" can have multiple files (sdist, wheels
+// per Python version) — we return the EARLIEST upload time so the
+// cooldown check measures "when did this version first appear,"
+// not "when did the last wheel get added."
+func (p *PyPI) PublishedAtVersion(ctx context.Context, name, version string) (time.Time, error) {
+	status, doc, err := p.fetchPackage(ctx, name)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if status == http.StatusNotFound || doc == nil {
+		return time.Time{}, nil
+	}
+	if status != http.StatusOK {
+		return time.Time{}, fmt.Errorf("pypi publishedAtVersion %s@%s: HTTP %d", name, version, status)
+	}
+	rel, ok := doc.Releases[version]
+	if !ok || len(rel) == 0 {
+		return time.Time{}, nil
+	}
+	var earliest time.Time
+	for _, f := range rel {
+		t, err := time.Parse(time.RFC3339Nano, f.UploadTime)
+		if err != nil {
+			continue
+		}
+		if earliest.IsZero() || t.Before(earliest) {
+			earliest = t
+		}
+	}
+	return earliest, nil
+}
+
+// TarballURL returns the URL for the sdist (preferred — covers
+// the actual source) of a given version, falling back to the
+// first wheel if no sdist is published. Used by the static-pattern
+// scanner.
+func (p *PyPI) TarballURL(ctx context.Context, name, version string) (string, error) {
+	status, doc, err := p.fetchPackage(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK || doc == nil {
+		return "", fmt.Errorf("pypi tarballURL %s@%s: HTTP %d", name, version, status)
+	}
+	rel, ok := doc.Releases[version]
+	if !ok || len(rel) == 0 {
+		return "", fmt.Errorf("pypi tarballURL %s@%s: version not found", name, version)
+	}
+	for _, f := range rel {
+		if f.Packagetype == "sdist" {
+			return f.URL, nil
+		}
+	}
+	return rel[0].URL, nil
+}
+
+// FetchTarball downloads a release file. Mirror of the npm probe's
+// FetchTarball — both produce a gzipped archive the static-pattern
+// scanner can walk (.tar.gz for sdist, .zip for wheel).
+func (p *PyPI) FetchTarball(ctx context.Context, url string, dst io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	if p.UserAgent != "" {
+		req.Header.Set("User-Agent", p.UserAgent)
+	}
+	resp, err := p.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("tarball %s: HTTP %d", url, resp.StatusCode)
+	}
+	_, err = io.Copy(dst, io.LimitReader(resp.Body, 50<<20))
+	return err
 }
 
 func (p *PyPI) Exists(ctx context.Context, name string) (bool, error) {

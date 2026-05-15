@@ -46,15 +46,17 @@ import (
 // catch them all without false-positiving on common legitimate
 // packages (we tested against react, lodash, webpack, vite).
 type StaticScan struct {
-	NPM           tarballProbe
-	MaxBytes      int64
-	HTTPClient    *http.Client
-	BlockAt       int // score threshold for Block
-	WarnAt        int // score threshold for Warn
+	NPM        tarballProbe
+	PyPI       tarballProbe
+	MaxBytes   int64
+	HTTPClient *http.Client
+	BlockAt    int // score threshold for Block
+	WarnAt     int // score threshold for Warn
 }
 
-// tarballProbe is the subset of registries.NPM we need. Interface
-// keeps the scanner testable without setting up a real HTTP server.
+// tarballProbe is the subset of registries.NPM / registries.PyPI
+// we need. Interface keeps the scanner testable without setting
+// up a real HTTP server.
 type tarballProbe interface {
 	TarballURL(ctx context.Context, name, version string) (string, error)
 	FetchTarball(ctx context.Context, url string, dst io.Writer) error
@@ -75,17 +77,22 @@ func (s *StaticScan) Name() string { return "static-pattern" }
 
 func (s *StaticScan) Check(ctx context.Context, ref PackageRef) CheckResult {
 	r := CheckResult{Checker: s.Name()}
-	if ref.Ecosystem != "npm" {
+	var probe tarballProbe
+	switch ref.Ecosystem {
+	case "npm":
+		probe = s.NPM
+	case "pypi", "pip":
+		probe = s.PyPI
+	default:
 		r.Verdict = VerdictApprove
 		r.Reason = fmt.Sprintf("static-pattern not yet wired for %q", ref.Ecosystem)
 		return r
 	}
-	probe := s.NPM
 	if probe == nil {
 		// No probe wired — caller forgot to inject. Treat as
 		// Unknown rather than blowing up.
 		r.Verdict = VerdictUnknown
-		r.Reason = "static-pattern: no tarball probe configured"
+		r.Reason = fmt.Sprintf("static-pattern: no tarball probe configured for %q", ref.Ecosystem)
 		return r
 	}
 	url, err := probe.TarballURL(ctx, ref.Name, ref.Version)
@@ -100,7 +107,7 @@ func (s *StaticScan) Check(ctx context.Context, ref PackageRef) CheckResult {
 		r.Reason = fmt.Sprintf("tarball download failed: %v", err)
 		return r
 	}
-	findings, err := scanNPMTarball(buf.Bytes(), s.MaxBytes)
+	findings, err := scanTarball(buf.Bytes(), s.MaxBytes)
 	if err != nil {
 		r.Verdict = VerdictUnknown
 		r.Reason = fmt.Sprintf("tarball scan failed: %v", err)
@@ -144,11 +151,17 @@ type StaticFinding struct {
 	Weight  int
 }
 
-// scanNPMTarball walks a gzipped npm tarball, scoring every file
-// against the suspicious-pattern set. Returns the list of hits.
-// maxBytes is the cap on UNCOMPRESSED total bytes we'll inspect —
-// guards against tarball-bomb payloads that try to OOM us.
-func scanNPMTarball(data []byte, maxBytes int64) ([]StaticFinding, error) {
+// scanTarball walks a gzipped tarball (npm tgz, PyPI sdist) and
+// scores every file against the suspicious-pattern set. Returns
+// the list of hits. maxBytes caps UNCOMPRESSED bytes we'll
+// inspect to guard against tar-bomb payloads.
+//
+// Both npm and PyPI sdists land here unchanged — they're both
+// gzipped tar with a top-level package directory; the file
+// naming convention differs slightly (npm uses "package/...",
+// PyPI uses "<name>-<version>/...") but stripFirstDir handles
+// both.
+func scanTarball(data []byte, maxBytes int64) ([]StaticFinding, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("gunzip: %w", err)
