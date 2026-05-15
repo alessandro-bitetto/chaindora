@@ -32,6 +32,9 @@ var (
 	forensicsSSHBaseline  string
 	forensicsPersistence  bool
 	forensicsExtensions   bool
+	forensicsFixPlan      bool
+	forensicsFix          bool
+	forensicsYes          bool
 )
 
 var forensicsCmd = &cobra.Command{
@@ -182,6 +185,19 @@ var forensicsCmd = &cobra.Command{
 		if err := renderFindings(os.Stdout, all, effectiveFormat(forensicsFormat, forensicsJSON)); err != nil {
 			return err
 		}
+
+		if forensicsFixPlan || forensicsFix {
+			plans := buildAllFixPlans(all)
+			_, _, fErr := findings.RunFixes(ctx, plans, findings.RunOptions{
+				PlanOnly:          forensicsFixPlan && !forensicsFix,
+				AutoYes:           forensicsYes,
+				AllowedCategories: []findings.FixCategory{findings.FixSafe},
+			})
+			if fErr != nil {
+				return fErr
+			}
+		}
+
 		if len(all) > 0 {
 			os.Exit(1)
 		}
@@ -207,5 +223,8 @@ func init() {
 	forensicsCmd.Flags().StringVar(&forensicsSSHBaseline, "ssh-baseline", "", "alternative path for the SSH baseline file (default ~/.chaindora/ssh-baseline.txt)")
 	forensicsCmd.Flags().BoolVar(&forensicsPersistence, "persistence", false, "enumerate user-level persistence (cron, launchd, systemd, Scheduled Tasks); flag entries whose command matches a malware pattern as HIGH")
 	forensicsCmd.Flags().BoolVar(&forensicsExtensions, "extensions", false, "enumerate installed Chromium-based browser extensions and VSCode/Cursor extensions; match against the incident pack")
+	forensicsCmd.Flags().BoolVar(&forensicsFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
+	forensicsCmd.Flags().BoolVar(&forensicsFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
+	forensicsCmd.Flags().BoolVar(&forensicsYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	rootCmd.AddCommand(forensicsCmd)
 }

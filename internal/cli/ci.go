@@ -29,6 +29,9 @@ var (
 	ciFreshPopular   bool
 	ciVerbose        bool
 	ciExcludes       []string
+	ciFixPlan        bool
+	ciFix            bool
+	ciYes            bool
 )
 
 var ciCmd = &cobra.Command{
@@ -143,6 +146,18 @@ continuous-integration use:
 			}
 		}
 
+		if ciFixPlan || ciFix {
+			plans := buildAllFixPlans(all)
+			_, _, fErr := findings.RunFixes(ctx, plans, findings.RunOptions{
+				PlanOnly:          ciFixPlan && !ciFix,
+				AutoYes:           ciYes,
+				AllowedCategories: []findings.FixCategory{findings.FixSafe},
+			})
+			if fErr != nil {
+				return fErr
+			}
+		}
+
 		if shouldFail(all, ciFailOn) {
 			os.Exit(1)
 		}
@@ -221,5 +236,8 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciFreshPopular, "fresh-popular", false, "also check publish dates of top-N popular npm/PyPI deps (requires network)")
 	ciCmd.Flags().BoolVar(&ciVerbose, "verbose", false, "emit diagnostic logs to stderr")
 	ciCmd.Flags().StringSliceVar(&ciExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated)")
+	ciCmd.Flags().BoolVar(&ciFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
+	ciCmd.Flags().BoolVar(&ciFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
+	ciCmd.Flags().BoolVar(&ciYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	rootCmd.AddCommand(ciCmd)
 }

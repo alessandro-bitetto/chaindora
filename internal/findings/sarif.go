@@ -187,10 +187,16 @@ func firstNonEmpty(refs []string) string {
 	return ""
 }
 
-func fingerprint(f Finding) string {
+// Fingerprint returns a stable SHA-256 of the finding's identity tuple. Used
+// by SARIF's partialFingerprints and by the --fix runner as a per-plan ID.
+func Fingerprint(f Finding) string {
 	h := sha256.Sum256([]byte(f.Detector + "|" + f.VulnID + "|" + f.PURL + "|" + f.SourcePath))
 	return hex.EncodeToString(h[:])
 }
+
+// fingerprint is the unexported alias kept so existing call sites within this
+// package don't need to change.
+func fingerprint(f Finding) string { return Fingerprint(f) }
 
 func truncForSARIF(s string, n int) string {
 	if len(s) <= n {

@@ -26,6 +26,9 @@ var (
 	skipHeuristic    bool
 	scanFreshPopular bool
 	scanExcludes     []string
+	scanFixPlan      bool
+	scanFix          bool
+	scanYes          bool
 )
 
 var scanCmd = &cobra.Command{
@@ -100,6 +103,19 @@ var scanCmd = &cobra.Command{
 		if err := renderFindings(os.Stdout, all, effectiveFormat(scanFormat, jsonOut)); err != nil {
 			return err
 		}
+
+		if scanFixPlan || scanFix {
+			plans := buildAllFixPlans(all)
+			_, _, fErr := findings.RunFixes(ctx, plans, findings.RunOptions{
+				PlanOnly:          scanFixPlan && !scanFix,
+				AutoYes:           scanYes,
+				AllowedCategories: []findings.FixCategory{findings.FixSafe},
+			})
+			if fErr != nil {
+				return fErr
+			}
+		}
+
 		if len(all) > 0 {
 			os.Exit(1)
 		}
@@ -116,5 +132,8 @@ func init() {
 	scanCmd.Flags().BoolVar(&skipHeuristic, "skip-heuristic", false, "skip behavioral heuristics (unpinned refs, CI shell patterns, install scripts, typosquat, dep-confusion)")
 	scanCmd.Flags().BoolVar(&scanFreshPopular, "fresh-popular", false, "also check whether popular npm/PyPI deps were published in the last 14 days (requires network)")
 	scanCmd.Flags().StringSliceVar(&scanExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated, e.g. --exclude testdata,vendor)")
+	scanCmd.Flags().BoolVar(&scanFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
+	scanCmd.Flags().BoolVar(&scanFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
+	scanCmd.Flags().BoolVar(&scanYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	rootCmd.AddCommand(scanCmd)
 }
