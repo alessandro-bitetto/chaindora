@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.4.0] — 2026-05-15
+
+Broader fix coverage, audit-then-apply workflow, Go modules, first
+browser-extension incident, and a fix for a real OSV API rejection.
+
+### Added
+
+- `--fix-aggressive` flag on `scan`, `ci`, and `forensics`. When
+  combined with `--fix --yes`, expands the auto-applied set to include
+  `FixSemiSafe` plans (project-lockfile upgrades, package uninstalls).
+  Default `--yes` stays at `FixSafe` only.
+- `osvioc.PlanFix` now emits executable upgrade commands for project
+  lockfile findings instead of always falling back to manual:
+    - `package-lock.json` → `npm install <pkg>@latest`
+    - `yarn.lock`         → `yarn upgrade <pkg> --latest`
+    - `pnpm-lock.yaml`    → `pnpm update --latest <pkg>`
+    - `poetry.lock`       → `poetry update <pkg>`
+    - `uv.lock`           → `uv lock --upgrade-package <pkg>`
+    - `Pipfile.lock`      → `pipenv update <pkg>`
+    - `requirements.txt`  → manual steps (can't safely line-edit a pin
+      without parsing extras / hash specs)
+  Each emits a "review the resulting lockfile diff before committing"
+  step. Marked `FixSemiSafe` — auto-applied only under `--fix-aggressive`.
+- `chaindora fix --from <file>` — new top-level subcommand. Reads
+  findings from a JSON file (output of `--format json`) and runs the
+  same per-detector fix pipeline without rescanning. Useful for CI
+  workflows that scan-then-apply across separate steps. Flags:
+  `--from <path>` (required), `--plan`, `--yes`, `--aggressive`.
+- `internal/inventory/gomod.go` — parses `go.mod` for require entries
+  (single-line and grouped blocks, `// indirect` annotations preserved).
+  New `EcosystemGoModules` constant; OSV ecosystem mapping to "Go";
+  PURL type `golang` with segment-preserving paths
+  (`pkg:golang/github.com/spf13/cobra@v1.10.2`).
+- First browser-extension incident pack entry:
+  `incidents/great-suspender-2021.yaml` — Chrome extension
+  `klbibkeccnjlkjkiokjodocebajanakg` (The Great Suspender; post-sale
+  ad-injection / telemetry; removed by Google February 2021).
+
+### Fixed
+
+- OSV API rejection for Docker images: the bare `OCI` ecosystem name
+  isn't accepted by the public query endpoint. Removed the
+  `EcosystemDocker → OCI` mapping; Docker images now flow through the
+  incident pack only until a registry-aware mapping
+  (`OCI:gcr.io/distroless`-style) can be wired up in v0.5.
+
 ## [0.3.0] — 2026-05-15
 
 Per-detector remediation flow: chaindora can now describe *and* apply the
