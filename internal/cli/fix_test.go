@@ -21,15 +21,16 @@ func TestFixFromFileBuildsPlans(t *testing.T) {
 	path := filepath.Join(tmp, "findings.json")
 	fs := []findings.Finding{
 		{
-			Detector:   "osv-ioc",
-			PURL:       "pkg:npm/lodash@4.17.20",
-			Ecosystem:  inventory.EcosystemNPM,
-			Name:       "lodash",
-			Version:    "4.17.20",
-			VulnID:     "GHSA-35jh-r3h4-6jhm",
-			Summary:    "Command Injection in lodash",
-			Severity:   findings.SeverityHigh,
-			SourcePath: "/proj/package-lock.json",
+			Detector:     "osv-ioc",
+			PURL:         "pkg:npm/lodash@4.17.20",
+			Ecosystem:    inventory.EcosystemNPM,
+			Name:         "lodash",
+			Version:      "4.17.20",
+			VulnID:       "GHSA-35jh-r3h4-6jhm",
+			Summary:      "Command Injection in lodash",
+			Severity:     findings.SeverityHigh,
+			SourcePath:   "/proj/package-lock.json",
+			FixUpgradeTo: "4.17.21", // v0.7.2: min-fixed-in-major required for FixSemiSafe
 		},
 		{
 			Detector:   "osv-ioc",

@@ -9,6 +9,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.7.2] — 2026-05-15
+
+### Fixed
+
+- **`osvioc.PlanFix` now pins to the minimum-fixed-version within the
+  current major** instead of blindly emitting `pkg@latest`. v0.7.1's
+  fix flow ran `npm install vite@latest` on a project with
+  `vite@^6.3.5` and ended up at `vite@8.0.13` — two majors ahead,
+  immediately breaking `@tailwindcss/vite`'s peer-dep constraint
+  (`vite@^5.2.0 || ^6`). The lockfile entered an inconsistent state,
+  and **every subsequent fix in the same project failed with
+  ERESOLVE** (15+ cascading failures observed in a real audit run).
+
+  New logic:
+    - OSV records carry per-affected-package `ranges.events[].fixed`
+      version. New helper `osv.MinFixedInMajor(vuln, ecosystem,
+      current)` walks those events and picks the smallest fixed
+      version that (a) is greater than the installed version AND
+      (b) shares the same SemVer major.
+    - `Finding.FixUpgradeTo` is now populated from this value by
+      `osvioc.Detect` (in addition to the incident-pack flow that
+      already set it).
+    - `osvioc.PlanFix` uses `pkg@^X.Y.Z` (caret = stay-in-major) for
+      `npm install` / `yarn upgrade` / `pnpm update` commands.
+    - **When no in-major fix exists** (only path forward is a major
+      bump), the plan is downgraded to `FixManual` with an explicit
+      "this requires a major upgrade — review and migrate manually"
+      message. This prevents `--fix --yes` from auto-applying
+      breaking changes.
+
+- **Suppressed duplicate `[chdora] artifact hunt complete: 0 match(es)`
+  stderr lines.** The incident-pack file-artifact walker prints a
+  completion banner per-scanRoot. In `chdora audit --whole-machine`
+  that fires once per discovered project root — 17+ duplicate "0
+  matches" lines in a real audit run. Now the banner only prints
+  when there's at least one match; the silent case is the common
+  case and doesn't need annunciation.
+
+### Added
+
+- `osv.Affected`, `osv.Range`, `osv.Event` types on the OSV
+  `Vulnerability` struct, parsed from the upstream JSON. Surface
+  the version-event timeline (`introduced` / `fixed` /
+  `last_affected`) that powers `MinFixedInMajor` and future
+  fix-version logic.
+
+- `osv.MinFixedInMajor(vuln, ecosystem, current) string` — public
+  helper returning the smallest in-major fix, or "" when only a
+  major upgrade is available. Tested against the real vite 6.3.5
+  → 6.4.2 case that triggered the v0.7.1 cascade.
+
+### Migration note for users who ran v0.7.1's `--fix --yes`
+
+If you ran `chdora audit --fix --yes --fix-aggressive` with v0.7.1
+on a JS project that uses vite + @tailwindcss/vite + similar
+ecosystems, your lockfiles may have been bumped past peer-dep
+ranges. To check:
+
+```sh
+cd <project> && git diff package.json package-lock.json
+```
+
+If you see a major version jump (e.g. `vite "^6.x" → "^8.x"`),
+roll back with `git checkout package.json package-lock.json` and
+re-run with v0.7.2 — the new fix commands will respect peer ranges
+and produce successful, committable changes.
+
 ## [0.7.1] — 2026-05-15
 
 ### Fixed

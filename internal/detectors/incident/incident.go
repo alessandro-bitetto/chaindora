@@ -108,7 +108,15 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 		prog.Start(fmt.Sprintf("hunting incident artifacts under %s", scanRoot))
 		hitsAtStart := len(out)
 		defer func() {
-			prog.Stop(fmt.Sprintf("[chdora] artifact hunt complete: %d match(es) under %s", len(out)-hitsAtStart, scanRoot))
+			hits := len(out) - hitsAtStart
+			// Suppress the "complete: 0 match(es)" line — it's not
+			// useful and clutters audit output when chdora walks
+			// dozens of project roots that all come up clean.
+			summary := ""
+			if hits > 0 {
+				summary = fmt.Sprintf("[chdora] artifact hunt complete: %d match(es) under %s", hits, scanRoot)
+			}
+			prog.Stop(summary)
 		}()
 		_ = filepath.WalkDir(scanRoot, func(path string, dent fs.DirEntry, err error) error {
 			if err != nil {

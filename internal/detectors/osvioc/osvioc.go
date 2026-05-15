@@ -104,6 +104,11 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 				for _, ref := range v.References {
 					f.References = append(f.References, ref.URL)
 				}
+				// v0.7.2: pin the fix to the minimum-fixed-version
+				// within the current major. Empty FixUpgradeTo →
+				// PlanFix downgrades to FixManual (a major bump is
+				// needed; ask the user).
+				f.FixUpgradeTo = osv.MinFixedInMajor(v, osvEcosystem(p.Ecosystem), p.Version)
 			}
 			out = append(out, f)
 		}
