@@ -12,11 +12,14 @@ import (
 
 // setHomeForTest reroutes the chaindora data dir into a tmp dir so
 // maybePromptSavePlan can actually save without writing to the real
-// user's home. Returns a cleanup function (deferred by callers).
+// user's home. Sets both HOME (Unix) and USERPROFILE (Windows)
+// because os.UserHomeDir reads a different env var depending on
+// platform — setting only HOME makes the Windows CI matrix fail.
 func setHomeForTest(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	return home
 }
 

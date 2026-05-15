@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.9.1] — 2026-05-15
+
+### Fixed
+
+- **Windows CI: `TestMaybePromptSavePlan_DefaultYesOnEnter` failed
+  with "system cannot find the path specified."** Test set `HOME`
+  to a temp dir to redirect the saved plan, but `os.UserHomeDir`
+  reads `USERPROFILE` on Windows — so the save landed at the real
+  user's home while the test looked under the temp dir. Test now
+  sets both env vars; the fixplan and gate test suites aren't
+  affected (they construct DiskStore directly with `Dir:`).
+
 ## [0.9.0] — 2026-05-15
 
 The "prevention" milestone. Where chdora 0.1-0.8 answered "what's
