@@ -115,12 +115,15 @@ func osvEcosystem(e inventory.Ecosystem) string {
 		return "npm"
 	case inventory.EcosystemPyPI:
 		return "PyPI"
-	case inventory.EcosystemDocker:
-		return "OCI"
 	}
-	// GitHub Actions / GitLab CI / Bitbucket / CircleCI / Azure are not yet
-	// OSV ecosystems; their findings flow through the incident pack and
-	// (eventually) P3e behavioral heuristics.
+	// Docker images: OSV's container-image story uses per-registry ecosystem
+	// names (e.g. "OCI:gcr.io/distroless") and the bare "OCI" form is
+	// rejected as Invalid. We skip OSV queries for EcosystemDocker until
+	// we can resolve a registry-aware mapping (v0.5).
+	//
+	// GitHub Actions / GitLab CI / Bitbucket / CircleCI / Azure, Homebrew,
+	// Debian, browser & IDE extensions are not OSV ecosystems; findings flow
+	// through the incident pack and (where relevant) heuristics.
 	return ""
 }
 

@@ -32,6 +32,7 @@ var (
 	ciFixPlan        bool
 	ciFix            bool
 	ciYes            bool
+	ciAggressive     bool
 )
 
 var ciCmd = &cobra.Command{
@@ -148,10 +149,14 @@ continuous-integration use:
 
 		if ciFixPlan || ciFix {
 			plans := buildAllFixPlans(all)
+			allowed := []findings.FixCategory{findings.FixSafe}
+			if ciAggressive {
+				allowed = append(allowed, findings.FixSemiSafe)
+			}
 			_, _, fErr := findings.RunFixes(ctx, plans, findings.RunOptions{
 				PlanOnly:          ciFixPlan && !ciFix,
 				AutoYes:           ciYes,
-				AllowedCategories: []findings.FixCategory{findings.FixSafe},
+				AllowedCategories: allowed,
 			})
 			if fErr != nil {
 				return fErr
@@ -239,5 +244,6 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
 	ciCmd.Flags().BoolVar(&ciFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
 	ciCmd.Flags().BoolVar(&ciYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
+	ciCmd.Flags().BoolVar(&ciAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes")
 	rootCmd.AddCommand(ciCmd)
 }

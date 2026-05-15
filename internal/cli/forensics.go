@@ -35,6 +35,7 @@ var (
 	forensicsFixPlan      bool
 	forensicsFix          bool
 	forensicsYes          bool
+	forensicsAggressive   bool
 )
 
 var forensicsCmd = &cobra.Command{
@@ -188,10 +189,14 @@ var forensicsCmd = &cobra.Command{
 
 		if forensicsFixPlan || forensicsFix {
 			plans := buildAllFixPlans(all)
+			allowed := []findings.FixCategory{findings.FixSafe}
+			if forensicsAggressive {
+				allowed = append(allowed, findings.FixSemiSafe)
+			}
 			_, _, fErr := findings.RunFixes(ctx, plans, findings.RunOptions{
 				PlanOnly:          forensicsFixPlan && !forensicsFix,
 				AutoYes:           forensicsYes,
-				AllowedCategories: []findings.FixCategory{findings.FixSafe},
+				AllowedCategories: allowed,
 			})
 			if fErr != nil {
 				return fErr
@@ -226,5 +231,6 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
 	forensicsCmd.Flags().BoolVar(&forensicsFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
 	forensicsCmd.Flags().BoolVar(&forensicsYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
+	forensicsCmd.Flags().BoolVar(&forensicsAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes")
 	rootCmd.AddCommand(forensicsCmd)
 }

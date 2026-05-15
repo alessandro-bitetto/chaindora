@@ -29,6 +29,7 @@ var (
 	scanFixPlan      bool
 	scanFix          bool
 	scanYes          bool
+	scanAggressive   bool
 )
 
 var scanCmd = &cobra.Command{
@@ -106,10 +107,14 @@ var scanCmd = &cobra.Command{
 
 		if scanFixPlan || scanFix {
 			plans := buildAllFixPlans(all)
+			allowed := []findings.FixCategory{findings.FixSafe}
+			if scanAggressive {
+				allowed = append(allowed, findings.FixSemiSafe)
+			}
 			_, _, fErr := findings.RunFixes(ctx, plans, findings.RunOptions{
 				PlanOnly:          scanFixPlan && !scanFix,
 				AutoYes:           scanYes,
-				AllowedCategories: []findings.FixCategory{findings.FixSafe},
+				AllowedCategories: allowed,
 			})
 			if fErr != nil {
 				return fErr
@@ -135,5 +140,6 @@ func init() {
 	scanCmd.Flags().BoolVar(&scanFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
 	scanCmd.Flags().BoolVar(&scanFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
 	scanCmd.Flags().BoolVar(&scanYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
+	scanCmd.Flags().BoolVar(&scanAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes (uninstalls, project-lockfile upgrades)")
 	rootCmd.AddCommand(scanCmd)
 }
