@@ -69,9 +69,12 @@ chaindora scan . --incidents ./my-incidents     # custom incident pack
 
 Host-state hunt. Inspects `~/.npmrc` / `~/.pypirc` / `~/.docker/config.json`
 / `~/.aws/credentials` / `~/.gem/credentials` / `~/.cargo/credentials.toml`
-for leaked tokens, scans shell rc files for `curl|bash` / `eval $(base64 …)`
-patterns, and hunts incident-pack file artifacts (e.g. `shai-hulud-workflow.yml`)
-across `$HOME`.
+for leaked tokens, scans **shell rc files** (`.bashrc`, `.zshrc`,
+`.profile`, …) and **PowerShell profiles** (cross-platform `pwsh` plus
+Windows-specific Documents paths) for `curl|bash` / `iex (irm …)` /
+`eval $(base64 …)` / AV-bypass patterns, lists Windows Credential
+Manager blobs when present, and hunts incident-pack file artifacts
+(e.g. `shai-hulud-workflow.yml`) across `$HOME`.
 
 ```sh
 chaindora forensics                             # scan $HOME
@@ -165,15 +168,27 @@ chaindora scan . --format sarif    # SARIF 2.1.0 (GitHub code-scanning et al.)
 chaindora scan . --format github   # ::error file=...,line=...:: annotations
 ```
 
+## Platform support
+
+| OS | Status |
+|---|---|
+| Linux (amd64 / arm64) | Tier 1 — full support |
+| macOS (amd64 / arm64) | Tier 1 — full support |
+| Windows (amd64 / arm64) | Tier 1 — cross-compiles cleanly; host forensics includes PowerShell profile + Credential Manager checks. CI matrix coming with the GitHub Actions workflow. |
+
 ## Roadmap
 
-- **v0.2** — Static AST scan of installed `node_modules` / `site-packages`
-  for install-time exfiltration patterns (eval-of-base64, hardcoded
-  webhooks, `child_process` + network in postinstall, …).
-- **v0.3** — Server mode: scheduled fleet scans, findings DB, webhook
+- **v0.2** (in progress) — `chaindora update` for incident-pack refresh
+  (shipped), Windows-equivalent forensics (shipped), full-machine scan
+  via `forensics --scan-projects` and `forensics --deep`, signed
+  incident-pack tarballs, GitHub Actions CI on the repo itself.
+- **v0.3** — Static AST scan of installed `node_modules` /
+  `site-packages` for install-time exfiltration patterns (eval-of-base64,
+  hardcoded webhooks, `child_process` + network in postinstall, …).
+- **v0.4** — Server mode: scheduled fleet scans, findings DB, webhook
   ingest.
-- **v0.4** — Expanded ecosystems: RubyGems, crates.io, Go modules, Maven
-  Central.
+- **v0.5** — Expanded ecosystems: RubyGems, crates.io, Go modules,
+  Maven Central.
 
 ## Contributing
 

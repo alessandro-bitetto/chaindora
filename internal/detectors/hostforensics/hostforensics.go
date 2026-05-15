@@ -31,5 +31,7 @@ func (d *Detector) Detect(ctx context.Context) ([]findings.Finding, error) {
 	var out []findings.Finding
 	out = append(out, scanTokens(d.home)...)
 	out = append(out, scanShellRC(d.home)...)
+	out = append(out, scanPowerShell(d.home)...)
+	out = append(out, scanWindowsCredentials(d.home)...)
 	return out, nil
 }

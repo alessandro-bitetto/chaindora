@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Atomic per-file writes, YAML validation before commit, `.meta.json`
   tracking last-update timestamp + source URL. Flags: `--source`,
   `--dest`, `--dry-run`, `--verbose`.
+- **Windows-equivalent host forensics**:
+  - PowerShell profile scanner (`hostforensics:powershell`) covering
+    cross-platform `pwsh` (`~/.config/powershell/`) plus Windows-specific
+    paths (`Documents\PowerShell\` and `Documents\WindowsPowerShell\`).
+    Detects `iex (irm …)` malware loaders, `[Convert]::FromBase64String`
+    obfuscation, `Add-MpPreference -Exclusion` AV-bypass, and
+    `Set-MpPreference -DisableRealtimeMonitoring` defender-disable.
+  - Windows Credential Manager presence check
+    (`HOST-WINDOWS-CREDS-PRESENT`) — flags non-empty
+    `%LOCALAPPDATA%\Microsoft\Credentials\` and `%APPDATA%\Microsoft\Credentials\`
+    as MEDIUM informational findings.
+- Verified clean cross-compilation to `GOOS=windows GOARCH=amd64` and
+  `GOOS=windows GOARCH=arm64`.
 
 ### Planned for v0.2
 - Windows-equivalent host forensics: PowerShell profile scanner,
