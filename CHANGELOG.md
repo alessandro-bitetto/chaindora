@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.8.2] — 2026-05-15
+
+### Fixed
+
+- **`sudo chdora audit --save-plan` left plans unreadable by the
+  regular user.** Saved plans landed on disk as `root:wheel 0600`,
+  so a follow-up `chdora plans list` (run normally, without sudo)
+  found nothing — `Load` got `EACCES` on the file and silently
+  skipped it during listing. `DiskStore.Save` now chown's both the
+  plan file and any newly-created ancestor directories
+  (`~/.chaindora/`, `~/.chaindora/fix-plans/`) back to `$SUDO_USER`
+  when running as root, so subsequent non-sudo invocations can read
+  what sudo just wrote. No-op on Windows, no-op when not running
+  as root, no-op when `$SUDO_USER` isn't set.
+
+  Fixing pre-existing root-owned plans on disk:
+  ```sh
+  sudo chown -R "$USER":staff ~/.chaindora
+  ```
+
+### Added
+
+- **Interactive end-of-run save-plan prompt.** When a `scan` / `ci` /
+  `forensics` / `audit` run produces fixes but the user didn't pass
+  `--save-plan` or `--fix`, chdora now asks before exiting:
+  `[chdora] 146 fix(es) available. Save them as a plan to apply later? [Y/n]`.
+  Default-Yes (pressing Enter saves). On Yes, the plan is written
+  and the usual save-success footer with the apply-later hints
+  fires. On No (or non-interactive stdin — pipelines, CI logs,
+  `chdora audit | jq`), the existing three-option text footer is
+  shown instead, preserving the v0.8.0 behavior. This matches the
+  workflow design: "at the end of each audit, we ask the user if
+  they want a produced fix-plan-id."
+
 ## [0.8.1] — 2026-05-15
 
 ### Added

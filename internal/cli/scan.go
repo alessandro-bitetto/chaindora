@@ -159,7 +159,15 @@ var scanCmd = &cobra.Command{
 				return fErr
 			}
 		}
-		emitEndOfRunFooter(os.Stderr, plans, scanSavePlan && savedID != "", savedID, scanFixPlan || scanFix)
+		saved := scanSavePlan && savedID != ""
+		fixRequested := scanFixPlan || scanFix
+		if !saved && !fixRequested {
+			if id := maybePromptSavePlan(os.Stdin, os.Stderr, plans, len(all), root, saved, fixRequested); id != "" {
+				saved = true
+				savedID = id
+			}
+		}
+		emitEndOfRunFooter(os.Stderr, plans, saved, savedID, fixRequested)
 
 		if len(all) > 0 {
 			os.Exit(1)

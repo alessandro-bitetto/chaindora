@@ -198,7 +198,15 @@ continuous-integration use:
 				return fErr
 			}
 		}
-		emitEndOfRunFooter(os.Stderr, plans, ciSavePlan && savedID != "", savedID, ciFixPlan || ciFix)
+		saved := ciSavePlan && savedID != ""
+		fixRequested := ciFixPlan || ciFix
+		if !saved && !fixRequested {
+			if id := maybePromptSavePlan(os.Stdin, os.Stderr, plans, len(all), root, saved, fixRequested); id != "" {
+				saved = true
+				savedID = id
+			}
+		}
+		emitEndOfRunFooter(os.Stderr, plans, saved, savedID, fixRequested)
 
 		if shouldFail(all, ciFailOn) {
 			os.Exit(1)

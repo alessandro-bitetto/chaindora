@@ -278,7 +278,19 @@ func runForensicsFlow(ctx context.Context) error {
 				return fErr
 			}
 		}
-		emitEndOfRunFooter(os.Stderr, plans, forensicsSavePlan && savedID != "", savedID, forensicsFixPlan || forensicsFix)
+		saved := forensicsSavePlan && savedID != ""
+		fixRequested := forensicsFixPlan || forensicsFix
+		if !saved && !fixRequested {
+			scanRoot := forensicsScanProjects
+			if scanRoot == "" {
+				scanRoot = forensicsHome
+			}
+			if id := maybePromptSavePlan(os.Stdin, os.Stderr, plans, len(all), scanRoot, saved, fixRequested); id != "" {
+				saved = true
+				savedID = id
+			}
+		}
+		emitEndOfRunFooter(os.Stderr, plans, saved, savedID, fixRequested)
 
 		if len(all) > 0 {
 			os.Exit(1)

@@ -68,6 +68,15 @@ func (s *DiskStore) Save(plan Plan) (string, error) {
 	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
 		return "", fmt.Errorf("create plan dir: %w", err)
 	}
+	// When running under sudo, fix ownership on every ancestor of the
+	// plan dir we might have just created. Without this, `sudo chdora
+	// audit --save-plan` leaves /Users/<u>/.chaindora/ and
+	// /Users/<u>/.chaindora/fix-plans/ owned by root, which blocks the
+	// non-sudo `chdora plans list` from reading anything underneath.
+	chownToSudoUser(s.Dir)
+	if parent := filepath.Dir(s.Dir); parent != "" {
+		chownToSudoUser(parent)
+	}
 	if plan.CreatedAt.IsZero() {
 		plan.CreatedAt = s.now().UTC()
 	}
@@ -103,6 +112,7 @@ func (s *DiskStore) Save(plan Plan) (string, error) {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("rename plan: %w", err)
 	}
+	chownToSudoUser(s.path(plan.ID))
 	return plan.ID, nil
 }
 
