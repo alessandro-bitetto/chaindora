@@ -4,11 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
-
-	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
 
 // VersionBumpDiff catches the "previously clean, now malicious"
@@ -26,84 +23,32 @@ import (
 // templating lib) doesn't false-positive, but the moment that
 // package starts adding postinstall network calls, we catch it.
 type VersionBumpDiff struct {
-	NPM       versionDiffProbe
-	StaticGen func() *StaticScan
-	BlockAt   int
-	WarnAt    int
+	Probes  *Probes
+	BlockAt int
+	WarnAt  int
 }
 
-type versionDiffProbe interface {
-	AllVersions(ctx context.Context, name string) ([]registries.VersionInfo, error)
-	TarballURL(ctx context.Context, name, version string) (string, error)
-	FetchTarball(ctx context.Context, url string, dst writeTo) error
-}
-
-// writeTo is an interface alias for bytes.Buffer's Write method.
-// Lets the version-diff probe and the static-scan probe share a
-// type without a wire-format incompatibility.
-type writeTo = interface {
-	Write(p []byte) (n int, err error)
-}
-
-// NewVersionBumpDiff returns a VersionBumpDiff using the default
-// npm probe + static scanner.
+// NewVersionBumpDiff returns a VersionBumpDiff with default
+// thresholds. Caller populates Probes.
 func NewVersionBumpDiff() *VersionBumpDiff {
-	npm := registries.NewNPM()
 	return &VersionBumpDiff{
-		NPM:       versionDiffNPMAdapter{NPM: npm},
-		StaticGen: func() *StaticScan { return &StaticScan{NPM: tarballAdapter{NPM: npm}, MaxBytes: 50 << 20} },
-		BlockAt:   3,
-		WarnAt:    1,
+		Probes:  NewProbes(),
+		BlockAt: 3,
+		WarnAt:  1,
 	}
-}
-
-// versionDiffNPMAdapter bridges registries.NPM to the local
-// versionDiffProbe interface — same calls, just renamed FetchTarball
-// signature using io.Writer concretely.
-type versionDiffNPMAdapter struct{ NPM *registries.NPM }
-
-func (a versionDiffNPMAdapter) AllVersions(ctx context.Context, name string) ([]registries.VersionInfo, error) {
-	return a.NPM.AllVersions(ctx, name)
-}
-func (a versionDiffNPMAdapter) TarballURL(ctx context.Context, name, version string) (string, error) {
-	return a.NPM.TarballURL(ctx, name, version)
-}
-func (a versionDiffNPMAdapter) FetchTarball(ctx context.Context, url string, dst writeTo) error {
-	// registries.NPM.FetchTarball wants io.Writer; bytes.Buffer
-	// satisfies both. Callers pass *bytes.Buffer.
-	if buf, ok := dst.(*bytes.Buffer); ok {
-		return a.NPM.FetchTarball(ctx, url, buf)
-	}
-	// Fallback: copy through a buffer for tests that pass alternates.
-	var tmp bytes.Buffer
-	if err := a.NPM.FetchTarball(ctx, url, &tmp); err != nil {
-		return err
-	}
-	_, err := dst.Write(tmp.Bytes())
-	return err
-}
-
-// tarballAdapter bridges registries.NPM to the StaticScan
-// tarballProbe interface (which uses io.Writer).
-type tarballAdapter struct{ NPM *registries.NPM }
-
-func (a tarballAdapter) TarballURL(ctx context.Context, name, version string) (string, error) {
-	return a.NPM.TarballURL(ctx, name, version)
-}
-func (a tarballAdapter) FetchTarball(ctx context.Context, url string, dst io.Writer) error {
-	return a.NPM.FetchTarball(ctx, url, dst)
 }
 
 func (v *VersionBumpDiff) Name() string { return "version-diff" }
 
 func (v *VersionBumpDiff) Check(ctx context.Context, ref PackageRef) CheckResult {
 	r := CheckResult{Checker: v.Name()}
-	if ref.Ecosystem != "npm" {
+	probe, ok := v.Probes.versionProbeFor(ref.Ecosystem)
+	if !ok {
 		r.Verdict = VerdictApprove
-		r.Reason = fmt.Sprintf("version-diff not yet wired for %q", ref.Ecosystem)
+		r.Reason = fmt.Sprintf("version-diff: no probe for ecosystem %q", ref.Ecosystem)
 		return r
 	}
-	versions, err := v.NPM.AllVersions(ctx, ref.Name)
+	versions, err := probe.AllVersions(ctx, ref.Name)
 	if err != nil {
 		r.Verdict = VerdictUnknown
 		r.Reason = fmt.Sprintf("version-timeline lookup failed: %v", err)
@@ -119,13 +64,13 @@ func (v *VersionBumpDiff) Check(ctx context.Context, ref PackageRef) CheckResult
 		return r
 	}
 	// Scan both versions.
-	newFindings, err := v.scanVersion(ctx, ref.Name, ref.Version)
+	newFindings, err := v.scanVersion(ctx, probe, ref.Name, ref.Version)
 	if err != nil {
 		r.Verdict = VerdictUnknown
 		r.Reason = fmt.Sprintf("new-version scan failed: %v", err)
 		return r
 	}
-	priorFindings, err := v.scanVersion(ctx, ref.Name, prior.Version)
+	priorFindings, err := v.scanVersion(ctx, probe, ref.Name, prior.Version)
 	if err != nil {
 		r.Verdict = VerdictUnknown
 		r.Reason = fmt.Sprintf("prior-version scan failed: %v", err)
@@ -163,14 +108,15 @@ func (v *VersionBumpDiff) Check(ctx context.Context, ref PackageRef) CheckResult
 }
 
 // scanVersion downloads + scans one specific version's tarball.
-// Returns the raw findings list.
-func (v *VersionBumpDiff) scanVersion(ctx context.Context, name, version string) ([]StaticFinding, error) {
-	url, err := v.NPM.TarballURL(ctx, name, version)
+// Returns the raw findings list. Ecosystem-agnostic: the probe
+// supplies the bytes, scanTarball walks them.
+func (v *VersionBumpDiff) scanVersion(ctx context.Context, probe VersionProbe, name, version string) ([]StaticFinding, error) {
+	url, err := probe.TarballURL(ctx, name, version)
 	if err != nil {
 		return nil, err
 	}
 	var buf bytes.Buffer
-	if err := v.NPM.FetchTarball(ctx, url, &buf); err != nil {
+	if err := probe.FetchTarball(ctx, url, &buf); err != nil {
 		return nil, err
 	}
 	return scanTarball(buf.Bytes(), 50<<20)

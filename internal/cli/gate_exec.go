@@ -136,26 +136,12 @@ Examples:
 		if gateExecCooldown != 0 {
 			threshold = gateExecCooldown
 		}
-		checkers := []gate.Checker{
-			&gate.AllowlistChecker{Config: cfg},
-		}
-		if !gateExecSkipOSV {
-			checkers = append(checkers, gate.NewOSVCheck())
-		}
-		checkers = append(checkers,
-			gate.NewCooldown(threshold),
-			gate.NewPublisherChange(),
-			gate.NewMaintainerTrust(),
-			gate.NewProvenanceCheck(),
-		)
-		if !gateExecSkipStatic {
-			checkers = append(checkers, &gate.StaticScan{
-				NPM:      newStaticScanNPMProbe(),
-				PyPI:     newStaticScanPyPIProbe(),
-				MaxBytes: 50 << 20, BlockAt: 3, WarnAt: 1,
-			})
-			checkers = append(checkers, gate.NewVersionBumpDiff())
-		}
+		probes := buildGateProbes()
+		checkers := buildCheckerStack(probes, threshold, checkerOpts{
+			SkipOSV:    gateExecSkipOSV,
+			SkipStatic: gateExecSkipStatic,
+			Config:     cfg,
+		})
 
 		policy := cfg.Policy()
 		if gateExecLenient {

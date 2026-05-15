@@ -46,26 +46,19 @@ import (
 // catch them all without false-positiving on common legitimate
 // packages (we tested against react, lodash, webpack, vite).
 type StaticScan struct {
-	NPM        tarballProbe
-	PyPI       tarballProbe
+	Probes     *Probes
 	MaxBytes   int64
 	HTTPClient *http.Client
 	BlockAt    int // score threshold for Block
 	WarnAt     int // score threshold for Warn
 }
 
-// tarballProbe is the subset of registries.NPM / registries.PyPI
-// we need. Interface keeps the scanner testable without setting
-// up a real HTTP server.
-type tarballProbe interface {
-	TarballURL(ctx context.Context, name, version string) (string, error)
-	FetchTarball(ctx context.Context, url string, dst io.Writer) error
-}
-
 // NewStaticScan returns a StaticScan with defaults: 50MB tarball
-// cap, score 1 = Warn, score 3 = Block.
+// cap, score 1 = Warn, score 3 = Block. Caller must populate
+// Probes before adding to a checker stack.
 func NewStaticScan() *StaticScan {
 	return &StaticScan{
+		Probes:     NewProbes(),
 		MaxBytes:   50 << 20,
 		BlockAt:    3,
 		WarnAt:     1,
@@ -77,22 +70,10 @@ func (s *StaticScan) Name() string { return "static-pattern" }
 
 func (s *StaticScan) Check(ctx context.Context, ref PackageRef) CheckResult {
 	r := CheckResult{Checker: s.Name()}
-	var probe tarballProbe
-	switch ref.Ecosystem {
-	case "npm":
-		probe = s.NPM
-	case "pypi", "pip":
-		probe = s.PyPI
-	default:
+	probe, ok := s.Probes.versionProbeFor(ref.Ecosystem)
+	if !ok {
 		r.Verdict = VerdictApprove
-		r.Reason = fmt.Sprintf("static-pattern not yet wired for %q", ref.Ecosystem)
-		return r
-	}
-	if probe == nil {
-		// No probe wired — caller forgot to inject. Treat as
-		// Unknown rather than blowing up.
-		r.Verdict = VerdictUnknown
-		r.Reason = fmt.Sprintf("static-pattern: no tarball probe configured for %q", ref.Ecosystem)
+		r.Reason = fmt.Sprintf("static-pattern: no probe for ecosystem %q", ref.Ecosystem)
 		return r
 	}
 	url, err := probe.TarballURL(ctx, ref.Name, ref.Version)

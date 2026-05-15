@@ -4,60 +4,38 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
 
-// Cooldown is the gate's most important single check: it refuses to
-// install any package version published less than Threshold ago.
+// Cooldown is the gate's most important single check: it refuses
+// to install any package version published less than Threshold
+// ago. Empirically, malicious packages get yanked by the registry
+// security team within hours-to-1-day of publication; major
+// supply-chain worms (shai-hulud, qix, ctx, eslint-config-prettier,
+// ua-parser-js) are all reported and removed inside a 72-hour
+// window. A blanket "don't install brand-new versions" rule
+// blocks the entire 0-day window without you needing to know
+// about the specific attack.
 //
-// Empirically, malicious npm packages get yanked by the npm security
-// team within hours-to-1-day of publication; major worms
-// (shai-hulud, qix, ctx, eslint-config-prettier, ua-parser-js) are
-// all reported and removed inside a 72-hour window. A blanket
-// "don't install brand-new versions" rule blocks the entire
-// 0-day window without you needing to know about the specific attack.
+// Per-project allowlist (chaindora.yml) is the escape hatch: name
+// a specific (pkg, version) and the cooldown is bypassed for it.
 //
-// The cost: legitimate fresh patches (security CVE fixes!) also get
-// blocked for the cooldown period. That's the tradeoff users
-// explicitly opt into. The per-project allowlist (chaindora.yml)
-// is the escape hatch: name a specific (pkg, version) and the
-// cooldown is bypassed for it.
-//
-// Default threshold is 72 hours — generous enough to catch
-// every recent npm supply-chain attack we know of, short enough
-// that "I want to use today's hotfix" is only a 3-day wait.
+// Default threshold is 72 hours.
 type Cooldown struct {
 	Threshold time.Duration
-	NPM       npmCooldownProbe
-	PyPI      pypiCooldownProbe
-}
-
-// npmCooldownProbe is the subset of registries.NPM the cooldown
-// checker needs. Defined as an interface so tests can inject a
-// fake without importing the real HTTP probe.
-type npmCooldownProbe interface {
-	PublishedAtVersion(ctx context.Context, name, version string) (time.Time, error)
-}
-
-// pypiCooldownProbe mirrors npmCooldownProbe for PyPI. Same
-// shape so cooldown can dispatch on ecosystem without
-// reimplementing per-probe.
-type pypiCooldownProbe interface {
-	PublishedAtVersion(ctx context.Context, name, version string) (time.Time, error)
+	Probes    *Probes
 }
 
 // NewCooldown returns a Cooldown configured with the supplied
-// threshold and the default public-registry probes for both
-// npm and PyPI.
+// threshold. Callers should populate Probes before adding to the
+// checker stack — typically via the cli package's gate-wiring
+// helpers.
 func NewCooldown(threshold time.Duration) *Cooldown {
 	if threshold <= 0 {
 		threshold = 72 * time.Hour
 	}
 	return &Cooldown{
 		Threshold: threshold,
-		NPM:       registries.NewNPM(),
-		PyPI:      registries.NewPyPI(),
+		Probes:    NewProbes(),
 	}
 }
 
@@ -70,27 +48,13 @@ func (c *Cooldown) Check(ctx context.Context, ref PackageRef) CheckResult {
 		result.Reason = "no resolved version to check"
 		return result
 	}
-	var publishedAt time.Time
-	var err error
-	switch ref.Ecosystem {
-	case "npm":
-		publishedAt, err = c.NPM.PublishedAtVersion(ctx, ref.Name, ref.Version)
-	case "pypi", "pip":
-		if c.PyPI == nil {
-			result.Verdict = VerdictUnknown
-			result.Reason = "no PyPI probe configured"
-			return result
-		}
-		publishedAt, err = c.PyPI.PublishedAtVersion(ctx, ref.Name, ref.Version)
-	default:
-		// Other ecosystems aren't wired yet (RubyGems / crates /
-		// Maven in v0.11). Skipping is safer than guessing —
-		// return Unknown so the fail-closed policy still applies
-		// unless the user explicitly --allow-offline.
+	probe, ok := c.Probes.versionProbeFor(ref.Ecosystem)
+	if !ok {
 		result.Verdict = VerdictUnknown
-		result.Reason = fmt.Sprintf("cooldown not implemented for ecosystem %q", ref.Ecosystem)
+		result.Reason = fmt.Sprintf("cooldown: no registry probe for ecosystem %q", ref.Ecosystem)
 		return result
 	}
+	publishedAt, err := probe.PublishedAtVersion(ctx, ref.Name, ref.Version)
 	if err != nil {
 		result.Verdict = VerdictUnknown
 		result.Reason = fmt.Sprintf("registry lookup failed: %v", err)
@@ -114,8 +78,8 @@ func (c *Cooldown) Check(ctx context.Context, ref PackageRef) CheckResult {
 	return result
 }
 
-// humanDuration renders a Duration in the shape users expect from a
-// cooldown message: "14m", "3h", "5d 2h", "29d" — never the
+// humanDuration renders a Duration in the shape users expect from
+// a cooldown message: "14m", "3h", "5d 2h", "29d" — never the
 // stock-Go "359h44m" form.
 func humanDuration(d time.Duration) string {
 	if d < time.Minute {

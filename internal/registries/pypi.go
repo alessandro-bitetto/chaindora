@@ -34,7 +34,10 @@ func NewPyPI() *PyPI {
 type pypiPackageDoc struct {
 	Releases map[string][]pypiReleaseFile `json:"releases"`
 	Info     struct {
-		Name string `json:"name"`
+		Name            string `json:"name"`
+		MaintainerEmail string `json:"maintainer_email"`
+		AuthorEmail     string `json:"author_email"`
+		ProjectURL      string `json:"project_url"`
 	} `json:"info"`
 }
 
@@ -100,6 +103,75 @@ func (p *PyPI) TarballURL(ctx context.Context, name, version string) (string, er
 		}
 	}
 	return rel[0].URL, nil
+}
+
+// PublisherOfVersion returns the project-level maintainer email
+// (the only publisher-like identity PyPI exposes in the public
+// JSON API). PyPI's "publisher" isn't per-version — the JSON
+// endpoint shows the CURRENT maintainer for every release. So
+// our publisher-change check effectively becomes: "did the
+// project-level maintainer drift since the last known good
+// state?". Returns "" + nil when no maintainer field is set
+// (very common for older packages), and the gate degrades to
+// Unknown for those.
+func (p *PyPI) PublisherOfVersion(ctx context.Context, name, version string) (string, error) {
+	status, doc, err := p.fetchPackage(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK || doc == nil {
+		return "", nil
+	}
+	// PyPI's `info.maintainer_email` is the project-level
+	// maintainer. Falls back to `info.author_email` when the
+	// project has never set maintainer explicitly.
+	if doc.Info.MaintainerEmail != "" {
+		return doc.Info.MaintainerEmail, nil
+	}
+	return doc.Info.AuthorEmail, nil
+}
+
+// AllVersions returns the timeline of every published version for
+// the package, chronologically. The Publisher field is filled
+// with the project-level maintainer (shared across versions
+// because PyPI doesn't expose per-version identity).
+func (p *PyPI) AllVersions(ctx context.Context, name string) ([]VersionInfo, error) {
+	status, doc, err := p.fetchPackage(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK || doc == nil {
+		return nil, nil
+	}
+	publisher := doc.Info.MaintainerEmail
+	if publisher == "" {
+		publisher = doc.Info.AuthorEmail
+	}
+	out := make([]VersionInfo, 0, len(doc.Releases))
+	for ver, files := range doc.Releases {
+		if len(files) == 0 {
+			continue
+		}
+		// Earliest upload time across files for this version.
+		var earliest time.Time
+		for _, f := range files {
+			t, err := time.Parse(time.RFC3339Nano, f.UploadTime)
+			if err != nil {
+				continue
+			}
+			if earliest.IsZero() || t.Before(earliest) {
+				earliest = t
+			}
+		}
+		out = append(out, VersionInfo{
+			Name:        name,
+			Version:     ver,
+			Publisher:   publisher,
+			PublishedAt: earliest,
+		})
+	}
+	sortVersionsByPublishedAt(out)
+	return out, nil
 }
 
 // FetchTarball downloads a release file. Mirror of the npm probe's

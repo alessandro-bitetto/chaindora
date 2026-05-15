@@ -1,7 +1,6 @@
 package gate
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"testing"
@@ -9,38 +8,26 @@ import (
 	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
 
-type stubVersionDiff struct {
-	versions  []registries.VersionInfo
-	tarballs  map[string][]byte // version → tarball bytes
-	urlErr    error
-	fetchErr  error
+// versionDiffStub gives different tarball bytes per version.
+type versionDiffStub struct {
+	stubProbe
+	tarballsByVersion map[string][]byte
 }
 
-func (s stubVersionDiff) AllVersions(context.Context, string) ([]registries.VersionInfo, error) {
-	return s.versions, nil
+func (v versionDiffStub) TarballURL(_ context.Context, _, version string) (string, error) {
+	return "stub://" + version, nil
 }
-func (s stubVersionDiff) TarballURL(_ context.Context, _, version string) (string, error) {
-	if s.urlErr != nil {
-		return "", s.urlErr
-	}
-	return "stub://tarball/" + version, nil
-}
-func (s stubVersionDiff) FetchTarball(_ context.Context, url string, dst writeTo) error {
-	if s.fetchErr != nil {
-		return s.fetchErr
-	}
-	// URL ends in version per the stub.
-	version := url[len("stub://tarball/"):]
-	data, ok := s.tarballs[version]
-	if !ok {
-		return io.EOF
+func (v versionDiffStub) FetchTarball(_ context.Context, url string, dst io.Writer) error {
+	const prefix = "stub://"
+	version := url[len(prefix):]
+	data := v.tarballsByVersion[version]
+	if data == nil {
+		_, err := dst.Write(nil)
+		return err
 	}
 	_, err := dst.Write(data)
 	return err
 }
-
-// Compile-time check: stubVersionDiff implements versionDiffProbe.
-var _ versionDiffProbe = stubVersionDiff{}
 
 func TestVersionDiff_ApprovesWhenNoNewPatterns(t *testing.T) {
 	clean := buildTarball(t, map[string]string{
@@ -48,10 +35,12 @@ func TestVersionDiff_ApprovesWhenNoNewPatterns(t *testing.T) {
 		"index.js":     "module.exports = 42;",
 	})
 	v := &VersionBumpDiff{
-		NPM: stubVersionDiff{
-			versions: []registries.VersionInfo{{Version: "1.0.0"}, {Version: "1.0.1"}},
-			tarballs: map[string][]byte{"1.0.0": clean, "1.0.1": clean},
-		},
+		Probes: probesWith("npm", versionDiffStub{
+			stubProbe: stubProbe{
+				versions: []registries.VersionInfo{{Version: "1.0.0"}, {Version: "1.0.1"}},
+			},
+			tarballsByVersion: map[string][]byte{"1.0.0": clean, "1.0.1": clean},
+		}),
 		BlockAt: 3, WarnAt: 1,
 	}
 	r := v.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "p", Version: "1.0.1"})
@@ -70,10 +59,12 @@ func TestVersionDiff_BlocksWhenNewVersionAddsPostinstall(t *testing.T) {
 		"index.js":     "module.exports = 42;",
 	})
 	v := &VersionBumpDiff{
-		NPM: stubVersionDiff{
-			versions: []registries.VersionInfo{{Version: "1.0.0"}, {Version: "1.0.1"}},
-			tarballs: map[string][]byte{"1.0.0": clean, "1.0.1": malicious},
-		},
+		Probes: probesWith("npm", versionDiffStub{
+			stubProbe: stubProbe{
+				versions: []registries.VersionInfo{{Version: "1.0.0"}, {Version: "1.0.1"}},
+			},
+			tarballsByVersion: map[string][]byte{"1.0.0": clean, "1.0.1": malicious},
+		}),
 		BlockAt: 3, WarnAt: 1,
 	}
 	r := v.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "p", Version: "1.0.1"})
@@ -84,20 +75,18 @@ func TestVersionDiff_BlocksWhenNewVersionAddsPostinstall(t *testing.T) {
 
 func TestVersionDiff_NoPriorApproves(t *testing.T) {
 	v := &VersionBumpDiff{
-		NPM: stubVersionDiff{
-			versions: []registries.VersionInfo{{Version: "1.0.0"}}, // single version
-		},
+		Probes: probesWith("npm", stubProbe{
+			versions: []registries.VersionInfo{{Version: "1.0.0"}},
+		}),
 		BlockAt: 3, WarnAt: 1,
 	}
 	r := v.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "p", Version: "1.0.0"})
 	if r.Verdict != VerdictApprove {
-		t.Errorf("first version (no prior) should Approve (publisher-change handles new packages), got %v", r.Verdict)
+		t.Errorf("first version should Approve, got %v", r.Verdict)
 	}
 }
 
 func TestVersionDiff_PreservedPatternsDontCount(t *testing.T) {
-	// Both versions have eval() — that's the package's job
-	// (a JS templating lib). The DELTA is zero so we approve.
 	jsWithEval := `var x = userInput; eval(x);`
 	v1 := buildTarball(t, map[string]string{
 		"package.json": `{"name":"tpl","version":"1.0.0"}`,
@@ -108,10 +97,12 @@ func TestVersionDiff_PreservedPatternsDontCount(t *testing.T) {
 		"compile.js":   jsWithEval,
 	})
 	v := &VersionBumpDiff{
-		NPM: stubVersionDiff{
-			versions: []registries.VersionInfo{{Version: "1.0.0"}, {Version: "1.0.1"}},
-			tarballs: map[string][]byte{"1.0.0": v1, "1.0.1": v2},
-		},
+		Probes: probesWith("npm", versionDiffStub{
+			stubProbe: stubProbe{
+				versions: []registries.VersionInfo{{Version: "1.0.0"}, {Version: "1.0.1"}},
+			},
+			tarballsByVersion: map[string][]byte{"1.0.0": v1, "1.0.1": v2},
+		}),
 		BlockAt: 3, WarnAt: 1,
 	}
 	r := v.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "tpl", Version: "1.0.1"})
@@ -135,7 +126,3 @@ func TestPatternSet_TakesMaxWeight(t *testing.T) {
 		t.Errorf("y: got %d, want 2", got["y"])
 	}
 }
-
-// Compile-time assertion that bytes.Buffer satisfies our writeTo
-// alias so all the tests above can pass it through.
-var _ writeTo = (*bytes.Buffer)(nil)

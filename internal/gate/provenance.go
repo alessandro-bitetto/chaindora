@@ -3,8 +3,6 @@ package gate
 import (
 	"context"
 	"fmt"
-
-	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
 
 // ProvenanceCheck flags packages that lack a sigstore-backed
@@ -13,47 +11,43 @@ import (
 // optional — so a blanket "block on no provenance" would be far
 // too noisy.
 //
-// The default policy: warn only when ANOTHER version of the
-// same package has provenance. That isolates the high-value
-// signal — "this publisher started using provenance, then
-// stopped" — which is a strong account-takeover indicator on
-// par with the publisher-change check. Bare absence on packages
-// that have never had provenance returns Approve (passthrough).
+// The default policy: warn only when ANOTHER version of the same
+// package has provenance. That isolates the high-value signal —
+// "this publisher started using provenance, then stopped" —
+// which is a strong account-takeover indicator on par with the
+// publisher-change check. Bare absence on packages that have
+// never had provenance returns Approve (passthrough).
 //
 // Strict mode (Require=true) blocks any version without
-// provenance regardless of history; suitable for "we only want
-// audited supply chain" projects.
+// provenance regardless of history.
+//
+// Per-ecosystem semantics: only npm exposes the attestation
+// metadata today via dist.attestations. Other ecosystems return
+// Approve passthrough until they have their own provenance-probe
+// implementation (PyPI's trusted-publishers is shaped
+// differently and would need a separate model).
 type ProvenanceCheck struct {
-	NPM     provenanceProbe
+	Probes  *Probes
 	Require bool // strict mode: refuse anything without provenance
 }
 
-// provenanceProbe is the subset of registries.NPM we need.
-type provenanceProbe interface {
-	HasProvenance(ctx context.Context, name, version string) (bool, error)
-	AnyVersionHasProvenance(ctx context.Context, name string) (bool, error)
-}
-
 // NewProvenanceCheck returns a ProvenanceCheck with the default
-// "warn only when a publisher started using provenance and
-// dropped it" policy.
+// "warn only on regression" policy.
 func NewProvenanceCheck() *ProvenanceCheck {
-	return &ProvenanceCheck{NPM: registries.NewNPM(), Require: false}
+	return &ProvenanceCheck{Probes: NewProbes(), Require: false}
 }
 
 func (p *ProvenanceCheck) Name() string { return "provenance" }
 
 func (p *ProvenanceCheck) Check(ctx context.Context, ref PackageRef) CheckResult {
 	r := CheckResult{Checker: p.Name()}
-	if ref.Ecosystem != "npm" {
-		// PyPI's trusted-publisher equivalent is shaped
-		// differently (per-publisher OIDC); v0.10 wires npm
-		// only.
+	probe, ok := p.Probes.provenanceProbeFor(ref.Ecosystem)
+	if !ok {
 		r.Verdict = VerdictApprove
-		r.Reason = fmt.Sprintf("provenance not yet wired for %q", ref.Ecosystem)
+		r.Reason = fmt.Sprintf("provenance: no probe for ecosystem %q", ref.Ecosystem)
 		return r
 	}
-	hasProv, err := p.NPM.HasProvenance(ctx, ref.Name, ref.Version)
+	hasProv, err := probe.HasProvenance(ctx, ref.Name, ref.Version)
 	if err != nil {
 		r.Verdict = VerdictUnknown
 		r.Reason = fmt.Sprintf("provenance lookup failed: %v", err)
@@ -64,16 +58,12 @@ func (p *ProvenanceCheck) Check(ctx context.Context, ref PackageRef) CheckResult
 		r.Reason = "sigstore provenance present"
 		return r
 	}
-	// No provenance on this version. Decide based on policy.
 	if p.Require {
 		r.Verdict = VerdictBlock
 		r.Reason = "no sigstore provenance and --require-provenance is set"
 		return r
 	}
-	// Default mode: only warn if SOME version of this package
-	// has provenance — i.e. the publisher knows how, but didn't
-	// for this version.
-	anyHas, err := p.NPM.AnyVersionHasProvenance(ctx, ref.Name)
+	anyHas, err := probe.AnyVersionHasProvenance(ctx, ref.Name)
 	if err != nil {
 		r.Verdict = VerdictUnknown
 		r.Reason = fmt.Sprintf("provenance-history lookup failed: %v", err)

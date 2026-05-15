@@ -4,49 +4,38 @@ import (
 	"context"
 	"fmt"
 	"time"
-
-	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
 
-// MaintainerTrust adds auxiliary trust signals about the maintainer
-// behind a (pkg, version). Where publisher-change catches account
-// takeovers across versions, maintainer-trust catches red flags
-// about the publisher account itself:
+// MaintainerTrust adds auxiliary trust signals about the publisher
+// of a (pkg, version). Where publisher-change catches takeovers
+// across versions, maintainer-trust catches red flags about the
+// publisher account itself:
 //
-//   - package is brand new (< 30 days since first publish on the
-//     registry — even legitimate new packages need warming-up time
-//     before they're broadly trusted)
-//   - very few versions ever published (< 3) — first-time
-//     contributors are statistically more likely to have shipped
-//     unintentional bugs or be sleeper accounts
-//   - long activity gap then sudden burst — 6+ months silent then a
-//     new version is a classic takeover signal
+//   - package is brand new (< NewPackageDays since first publish)
+//   - very few versions ever published (< MinVersionCount)
+//   - long activity gap then sudden burst (> GapThreshold) — the
+//     classic sleeper-revival pattern
 //
-// We don't have full npm-user-profile access without authenticated
-// queries, so this checker stays within the public package-doc data:
-// time["created"], time["modified"], the per-version publish timeline.
-// That's enough for the three signals above; richer maintainer
-// metadata (account age, total packages published) is a follow-up.
+// Composite trust score: each signal contributes 1 point.
+// Threshold 1+ → Warn (combined with other checkers easily
+// blocks). No Block from this checker alone — these are soft
+// signals.
 //
-// Composite trust score: each signal contributes 1 point. Threshold
-// 1+ → Warn (combined with other checkers easily blocks). No Block
-// from this checker alone — these are SOFT signals.
+// Per-ecosystem semantics: any VersionProbe that returns a
+// non-empty AllVersions list with PublishedAt timestamps will
+// produce useful signals here. Cross-ecosystem by design.
 type MaintainerTrust struct {
-	NPM             maintainerProbe
+	Probes          *Probes
 	NewPackageDays  int           // < this since first publish → Warn
 	MinVersionCount int           // < this total versions → Warn
 	GapThreshold    time.Duration // gap of this long before bump → Warn
 }
 
-type maintainerProbe interface {
-	AllVersions(ctx context.Context, name string) ([]registries.VersionInfo, error)
-}
-
-// NewMaintainerTrust returns a MaintainerTrust with the default
+// NewMaintainerTrust returns a MaintainerTrust with default
 // thresholds (30 days, 3 versions, 6 months gap).
 func NewMaintainerTrust() *MaintainerTrust {
 	return &MaintainerTrust{
-		NPM:             registries.NewNPM(),
+		Probes:          NewProbes(),
 		NewPackageDays:  30,
 		MinVersionCount: 3,
 		GapThreshold:    6 * 30 * 24 * time.Hour,
@@ -57,12 +46,13 @@ func (m *MaintainerTrust) Name() string { return "maintainer-trust" }
 
 func (m *MaintainerTrust) Check(ctx context.Context, ref PackageRef) CheckResult {
 	r := CheckResult{Checker: m.Name()}
-	if ref.Ecosystem != "npm" {
+	probe, ok := m.Probes.versionProbeFor(ref.Ecosystem)
+	if !ok {
 		r.Verdict = VerdictApprove
-		r.Reason = fmt.Sprintf("maintainer-trust not yet wired for %q", ref.Ecosystem)
+		r.Reason = fmt.Sprintf("maintainer-trust: no probe for ecosystem %q", ref.Ecosystem)
 		return r
 	}
-	versions, err := m.NPM.AllVersions(ctx, ref.Name)
+	versions, err := probe.AllVersions(ctx, ref.Name)
 	if err != nil {
 		r.Verdict = VerdictUnknown
 		r.Reason = fmt.Sprintf("version-timeline lookup failed: %v", err)
@@ -92,11 +82,8 @@ func (m *MaintainerTrust) Check(ctx context.Context, ref PackageRef) CheckResult
 			len(versions), m.MinVersionCount))
 	}
 
-	// Signal 3: long dormancy then sudden bump. Compare the gap
-	// between the requested version and its prior — if huge,
-	// that's the "sleeper revived" pattern.
+	// Signal 3: long dormancy then sudden bump.
 	if prior := priorVersion(versions, ref.Version); prior != nil {
-		// Find the requested version's publish date.
 		var thisPublish time.Time
 		for _, v := range versions {
 			if v.Version == ref.Version {
@@ -122,7 +109,6 @@ func (m *MaintainerTrust) Check(ctx context.Context, ref PackageRef) CheckResult
 	}
 	r.Verdict = VerdictWarn
 	r.Reason = fmt.Sprintf("%d soft trust signal(s)", len(signals))
-	r.Detail = ""
 	for i, s := range signals {
 		if i > 0 {
 			r.Detail += "\n"

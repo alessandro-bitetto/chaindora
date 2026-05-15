@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"time"
@@ -14,34 +13,21 @@ import (
 	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
 
-// newStaticScanNPMProbe returns the npm tarball probe wired against
-// the default public registry. Kept in cli/ so internal/gate stays
-// free of cross-package wiring conveniences.
-func newStaticScanNPMProbe() staticNPMWrapper {
-	return staticNPMWrapper{NPM: registries.NewNPM()}
-}
-
-type staticNPMWrapper struct{ NPM *registries.NPM }
-
-func (s staticNPMWrapper) TarballURL(ctx context.Context, name, version string) (string, error) {
-	return s.NPM.TarballURL(ctx, name, version)
-}
-func (s staticNPMWrapper) FetchTarball(ctx context.Context, url string, dst io.Writer) error {
-	return s.NPM.FetchTarball(ctx, url, dst)
-}
-
-// newStaticScanPyPIProbe is the PyPI equivalent.
-func newStaticScanPyPIProbe() staticPyPIWrapper {
-	return staticPyPIWrapper{PyPI: registries.NewPyPI()}
-}
-
-type staticPyPIWrapper struct{ PyPI *registries.PyPI }
-
-func (s staticPyPIWrapper) TarballURL(ctx context.Context, name, version string) (string, error) {
-	return s.PyPI.TarballURL(ctx, name, version)
-}
-func (s staticPyPIWrapper) FetchTarball(ctx context.Context, url string, dst io.Writer) error {
-	return s.PyPI.FetchTarball(ctx, url, dst)
+// buildGateProbes returns the canonical Probes table with every
+// ecosystem chaindora knows about wired in. The seam between
+// HTTP-backed registries and the gate's per-ecosystem interface.
+// Add a new ecosystem here once it has a registries.Probe
+// implementation, and every gate checker picks it up.
+func buildGateProbes() *gate.Probes {
+	p := gate.NewProbes()
+	p.Register("npm", registries.NewNPM())
+	p.Register("pypi", registries.NewPyPI())
+	// More ecosystems register here as their probes land:
+	//   p.Register("rubygems", registries.NewRubyGems())
+	//   p.Register("crates",   registries.NewCrates())
+	//   p.Register("maven",    registries.NewMavenCentral())
+	p.RegisterProvenance("npm", registries.NewNPM())
+	return p
 }
 
 // chdora gate is the install-time prevention layer. Where the rest of
@@ -126,26 +112,13 @@ Examples:
 		if gateCheckCooldown != 0 {
 			threshold = gateCheckCooldown
 		}
-		checkers := []gate.Checker{
-			&gate.AllowlistChecker{Config: cfg},
-		}
-		if !gateCheckSkipOSV {
-			checkers = append(checkers, gate.NewOSVCheck())
-		}
-		checkers = append(checkers,
-			gate.NewCooldown(threshold),
-			gate.NewPublisherChange(),
-			gate.NewMaintainerTrust(),
-			&gate.ProvenanceCheck{NPM: registries.NewNPM(), Require: gateCheckRequireProv},
-		)
-		if !gateCheckSkipStatic {
-			checkers = append(checkers, &gate.StaticScan{
-				NPM:      newStaticScanNPMProbe(),
-				PyPI:     newStaticScanPyPIProbe(),
-				MaxBytes: 50 << 20, BlockAt: 3, WarnAt: 1,
-			})
-			checkers = append(checkers, gate.NewVersionBumpDiff())
-		}
+		probes := buildGateProbes()
+		checkers := buildCheckerStack(probes, threshold, checkerOpts{
+			SkipOSV:            gateCheckSkipOSV,
+			SkipStatic:         gateCheckSkipStatic,
+			RequireProvenance:  gateCheckRequireProv,
+			Config:             cfg,
+		})
 
 		// Resolve policy.
 		policy := cfg.Policy()

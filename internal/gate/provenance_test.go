@@ -6,11 +6,12 @@ import (
 	"testing"
 )
 
+// stubProvenance is the test fixture for ProvenanceProbe.
 type stubProvenance struct {
-	hasProv   bool
-	anyProv   bool
-	hasErr    error
-	anyErr    error
+	hasProv bool
+	anyProv bool
+	hasErr  error
+	anyErr  error
 }
 
 func (s stubProvenance) HasProvenance(_ context.Context, _, _ string) (bool, error) {
@@ -20,8 +21,16 @@ func (s stubProvenance) AnyVersionHasProvenance(_ context.Context, _ string) (bo
 	return s.anyProv, s.anyErr
 }
 
+var _ ProvenanceProbe = stubProvenance{}
+
+func provenanceProbesWith(eco string, probe ProvenanceProbe) *Probes {
+	p := NewProbes()
+	p.RegisterProvenance(eco, probe)
+	return p
+}
+
 func TestProvenance_ApprovesPresent(t *testing.T) {
-	p := &ProvenanceCheck{NPM: stubProvenance{hasProv: true}}
+	p := &ProvenanceCheck{Probes: provenanceProbesWith("npm", stubProvenance{hasProv: true})}
 	r := p.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "x", Version: "1.0"})
 	if r.Verdict != VerdictApprove {
 		t.Errorf("provenance present should Approve, got %v", r.Verdict)
@@ -29,23 +38,23 @@ func TestProvenance_ApprovesPresent(t *testing.T) {
 }
 
 func TestProvenance_DefaultModeApprovesWhenPublisherNeverUsedIt(t *testing.T) {
-	p := &ProvenanceCheck{NPM: stubProvenance{hasProv: false, anyProv: false}}
+	p := &ProvenanceCheck{Probes: provenanceProbesWith("npm", stubProvenance{hasProv: false, anyProv: false})}
 	r := p.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "x", Version: "1.0"})
 	if r.Verdict != VerdictApprove {
-		t.Errorf("no-prov + no-prior-prov should Approve (signal-free), got %v: %q", r.Verdict, r.Reason)
+		t.Errorf("no-prov + no-prior-prov should Approve, got %v: %q", r.Verdict, r.Reason)
 	}
 }
 
 func TestProvenance_DefaultModeWarnsOnRegression(t *testing.T) {
-	p := &ProvenanceCheck{NPM: stubProvenance{hasProv: false, anyProv: true}}
+	p := &ProvenanceCheck{Probes: provenanceProbesWith("npm", stubProvenance{hasProv: false, anyProv: true})}
 	r := p.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "x", Version: "1.0"})
 	if r.Verdict != VerdictWarn {
-		t.Errorf("no-prov on this version + prior-prov elsewhere should Warn, got %v: %q", r.Verdict, r.Reason)
+		t.Errorf("no-prov + prior-prov should Warn, got %v: %q", r.Verdict, r.Reason)
 	}
 }
 
 func TestProvenance_StrictModeBlocksAbsent(t *testing.T) {
-	p := &ProvenanceCheck{NPM: stubProvenance{hasProv: false}, Require: true}
+	p := &ProvenanceCheck{Probes: provenanceProbesWith("npm", stubProvenance{hasProv: false}), Require: true}
 	r := p.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "x", Version: "1.0"})
 	if r.Verdict != VerdictBlock {
 		t.Errorf("strict mode no-prov should Block, got %v", r.Verdict)
@@ -53,17 +62,17 @@ func TestProvenance_StrictModeBlocksAbsent(t *testing.T) {
 }
 
 func TestProvenance_UnknownOnNetworkError(t *testing.T) {
-	p := &ProvenanceCheck{NPM: stubProvenance{hasErr: errors.New("net")}}
+	p := &ProvenanceCheck{Probes: provenanceProbesWith("npm", stubProvenance{hasErr: errors.New("net")})}
 	r := p.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "x", Version: "1.0"})
 	if r.Verdict != VerdictUnknown {
 		t.Errorf("network error should Unknown, got %v", r.Verdict)
 	}
 }
 
-func TestProvenance_NonNPMPassthrough(t *testing.T) {
-	p := &ProvenanceCheck{NPM: stubProvenance{}}
+func TestProvenance_UnregisteredEcosystemPassthrough(t *testing.T) {
+	p := &ProvenanceCheck{Probes: NewProbes()}
 	r := p.Check(context.Background(), PackageRef{Ecosystem: "pypi", Name: "x", Version: "1.0"})
 	if r.Verdict != VerdictApprove {
-		t.Errorf("non-npm should Approve passthrough, got %v", r.Verdict)
+		t.Errorf("unregistered ecosystem should Approve passthrough, got %v", r.Verdict)
 	}
 }
