@@ -22,6 +22,10 @@ var (
 	forensicsFormat       string
 	forensicsSkipHunt     bool
 	forensicsIncidentsDir string
+	forensicsScanProjects string
+	forensicsSkipOSV      bool
+	forensicsSkipHeur     bool
+	forensicsVerbose      bool
 )
 
 var forensicsCmd = &cobra.Command{
@@ -79,6 +83,31 @@ var forensicsCmd = &cobra.Command{
 			}
 		}
 
+		if forensicsScanProjects != "" {
+			projRoot := forensicsScanProjects
+			if forensicsVerbose {
+				fmt.Fprintf(os.Stderr, "discovering projects under %s\n", projRoot)
+			}
+			roots := discoverProjects(projRoot, nil)
+			fmt.Fprintf(os.Stderr, "found %d project root(s) under %s\n", len(roots), projRoot)
+			opts := projectScanOpts{
+				IncidentsDir:  forensicsIncidentsDir,
+				SkipOSV:       forensicsSkipOSV,
+				SkipIncidents: false,
+				SkipHeuristic: forensicsSkipHeur,
+				FreshPopular:  false,
+				Verbose:       forensicsVerbose,
+			}
+			for _, r := range roots {
+				results, err := scanProject(ctx, r, opts)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warn: %s: %v\n", r, err)
+					continue
+				}
+				all = append(all, results...)
+			}
+		}
+
 		if err := renderFindings(os.Stdout, all, effectiveFormat(forensicsFormat, forensicsJSON)); err != nil {
 			return err
 		}
@@ -96,5 +125,10 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsJSON, "json", false, "deprecated; shortcut for --format=json")
 	forensicsCmd.Flags().StringVar(&forensicsFormat, "format", "text", "output format: text|json|jsonl|sarif|github")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipHunt, "skip-hunt", false, "skip the incident-pack file_artifact hunt")
+	forensicsCmd.Flags().StringVar(&forensicsScanProjects, "scan-projects", "",
+		"also walk this directory for project manifests (package.json, requirements.txt, Dockerfile, etc.) and run a full scan on each project root found")
+	forensicsCmd.Flags().BoolVar(&forensicsSkipOSV, "skip-osv", false, "skip OSV.dev queries during --scan-projects")
+	forensicsCmd.Flags().BoolVar(&forensicsSkipHeur, "skip-heuristic", false, "skip behavioral heuristics during --scan-projects")
+	forensicsCmd.Flags().BoolVar(&forensicsVerbose, "verbose", false, "log per-project scanned + per-host check counts to stderr")
 	rootCmd.AddCommand(forensicsCmd)
 }
