@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
@@ -140,9 +141,30 @@ func printPlan(w io.Writer, n, total int, p FixPlan) {
 	if p.Command != "" {
 		fmt.Fprintf(w, "  command: %s\n", p.Command)
 	}
+	// Surface the full covered set when more than one finding rolled up
+	// into this plan, so the user sees that "one upgrade addresses N CVEs"
+	// instead of just the highest-severity headline.
+	if extras := otherVulnIDs(p); len(extras) > 0 {
+		fmt.Fprintf(w, "  also addresses: %s\n", strings.Join(extras, ", "))
+	}
 	for _, s := range p.ManualSteps {
 		fmt.Fprintf(w, "  step: %s\n", s)
 	}
+}
+
+// otherVulnIDs returns CoveredVulnIDs minus the headline VulnID, in stable
+// order. Returns nil when there's nothing extra to surface.
+func otherVulnIDs(p FixPlan) []string {
+	if len(p.CoveredVulnIDs) <= 1 {
+		return nil
+	}
+	out := make([]string, 0, len(p.CoveredVulnIDs)-1)
+	for _, id := range p.CoveredVulnIDs {
+		if id != p.VulnID {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func categoryAllowed(c FixCategory, allowed []FixCategory) bool {
@@ -260,10 +282,12 @@ func stdinOr(r io.Reader) io.Reader {
 // dedupePlansByCommand collapses identical executable Commands so we don't
 // re-run `python3 -m pip install --upgrade pip` once per pip CVE. Manual /
 // command-less plans pass through untouched — each finding keeps its own
-// remediation steps. Highest-severity finding wins for the kept entry so
-// the user sees the strongest justification.
+// remediation steps. Highest-severity finding wins for the kept entry's
+// headline metadata; CoveredVulnIDs accumulates every collapsed VulnID so
+// the user can see the full set this one command addresses.
 func dedupePlansByCommand(plans []FixPlan) []FixPlan {
 	seen := map[string]int{}
+	covered := map[string]map[string]struct{}{} // command → set of vuln ids
 	out := make([]FixPlan, 0, len(plans))
 	for _, p := range plans {
 		if p.Command == "" {
@@ -276,10 +300,31 @@ func dedupePlansByCommand(plans []FixPlan) []FixPlan {
 				out[idx].VulnID = p.VulnID
 				out[idx].Description = p.Description
 			}
+			if p.VulnID != "" {
+				covered[p.Command][p.VulnID] = struct{}{}
+			}
 			continue
 		}
 		seen[p.Command] = len(out)
+		covered[p.Command] = map[string]struct{}{}
+		if p.VulnID != "" {
+			covered[p.Command][p.VulnID] = struct{}{}
+		}
 		out = append(out, p)
+	}
+	// Flatten the per-plan covered set into a stable slice. Sorted so the
+	// output is deterministic across runs.
+	for i := range out {
+		set := covered[out[i].Command]
+		if len(set) == 0 {
+			continue
+		}
+		ids := make([]string, 0, len(set))
+		for id := range set {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		out[i].CoveredVulnIDs = ids
 	}
 	return out
 }

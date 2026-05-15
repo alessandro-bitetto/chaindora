@@ -42,6 +42,14 @@ type FixPlan struct {
 	Category           FixCategory `json:"category"`
 	Command            string      `json:"command,omitempty"`
 	ManualSteps        []string    `json:"manual_steps,omitempty"`
+
+	// CoveredVulnIDs lists every VulnID a single execution of this plan
+	// resolves. After dedupe-by-Command this contains the headline VulnID
+	// plus every collapsed sibling, deduplicated. Set by the runner — not
+	// by detectors — and used by printPlan to surface the full set so the
+	// user knows "one pip-upgrade addresses 6 pip CVEs" instead of seeing
+	// just the highest-severity one.
+	CoveredVulnIDs []string `json:"covered_vuln_ids,omitempty"`
 }
 
 // Executable reports whether RunFixes can actually invoke a shell to apply

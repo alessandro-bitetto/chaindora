@@ -101,6 +101,23 @@ func TestRunFixesDedupesByCommand(t *testing.T) {
 	if deduped[0].Severity != SeverityHigh || deduped[0].VulnID != "X-2" {
 		t.Errorf("dedup didn't keep highest severity: %+v", deduped[0])
 	}
+	// CoveredVulnIDs should contain every collapsed VulnID, deduplicated
+	// and sorted, so the user can see the full set.
+	pipPlan := deduped[0]
+	if len(pipPlan.CoveredVulnIDs) != 3 {
+		t.Fatalf("expected 3 covered vuln IDs on pip plan, got %d: %+v", len(pipPlan.CoveredVulnIDs), pipPlan.CoveredVulnIDs)
+	}
+	wantIDs := []string{"X-1", "X-2", "X-3"}
+	for i, id := range wantIDs {
+		if pipPlan.CoveredVulnIDs[i] != id {
+			t.Errorf("CoveredVulnIDs[%d] = %q, want %q (full: %+v)", i, pipPlan.CoveredVulnIDs[i], id, pipPlan.CoveredVulnIDs)
+		}
+	}
+	// Single-finding plan should also have CoveredVulnIDs (length 1).
+	suPlan := deduped[1]
+	if len(suPlan.CoveredVulnIDs) != 1 || suPlan.CoveredVulnIDs[0] != "Y-1" {
+		t.Errorf("single-finding plan should have CoveredVulnIDs=[Y-1], got %+v", suPlan.CoveredVulnIDs)
+	}
 }
 
 func TestSeverityRank(t *testing.T) {

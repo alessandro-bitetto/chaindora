@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.4] — 2026-05-15
+
+### Fixed
+
+- **Fix-plan output now surfaces every CVE a single command addresses.**
+  Previously, when N findings deduped into one fix plan (e.g. 6 pip
+  CVEs → 1 `pip install --upgrade --user pip` plan), the printed plan
+  showed only the highest-severity CVE's VulnID — the other five
+  silently disappeared from the user-visible output. Users with 2
+  pip CVEs against pip@26.0.1 saw `=== 1 fix plan(s) ===` and
+  reasonably asked "why is chdora handling only one of my
+  vulnerabilities?". The answer (both CVEs share the same
+  `pip install --upgrade ...` command, so deduping is correct) was
+  hidden behind the renderer.
+
+  Now the runner surfaces the full set:
+
+  ```
+  Fix 1/1  [HIGH] [safe] GHSA-cx63-2mw6-8hw5
+    Upgrade pip-installed setuptools past 58.0.4 (user install) ...
+    command: python3 -m pip install --upgrade --user setuptools
+    also addresses: GHSA-5rjg-fvgr-3xxf, GHSA-r9hx-vwmv-q579,
+                    PYSEC-2022-43012, PYSEC-2025-49
+  ```
+
+### Added
+
+- `FixPlan.CoveredVulnIDs` — a sorted, deduplicated list of every
+  VulnID a single execution of this plan addresses, accumulated by
+  the dedup pass. Populated automatically by the runner; detectors
+  don't need to set it. Used by `printPlan` to surface the full set,
+  and available on the JSON-serialised plan for downstream consumers.
+
 ## [0.5.3] — 2026-05-15
 
 ### Added
