@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -10,7 +11,25 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/alessandro-bitetto/chaindora/internal/gate"
+	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
+
+// newStaticScanProbe returns a tarball probe wired against the
+// default public npm registry. Kept in cli/ so internal/gate stays
+// free of cross-package wiring conveniences — the gate package
+// only takes interfaces.
+func newStaticScanProbe() staticProbeWrapper {
+	return staticProbeWrapper{NPM: registries.NewNPM()}
+}
+
+type staticProbeWrapper struct{ NPM *registries.NPM }
+
+func (s staticProbeWrapper) TarballURL(ctx context.Context, name, version string) (string, error) {
+	return s.NPM.TarballURL(ctx, name, version)
+}
+func (s staticProbeWrapper) FetchTarball(ctx context.Context, url string, dst io.Writer) error {
+	return s.NPM.FetchTarball(ctx, url, dst)
+}
 
 // chdora gate is the install-time prevention layer. Where the rest of
 // chdora answers "what's compromised on this machine right now?",
@@ -45,12 +64,13 @@ timeout, unparseable response) treats the install as suspect. Use
 }
 
 var (
-	gateCheckEcosystem string
-	gateCheckCooldown  time.Duration
-	gateCheckLenient   bool
-	gateCheckOffline   bool
-	gateCheckSkipOSV   bool
-	gateCheckExplain   bool
+	gateCheckEcosystem  string
+	gateCheckCooldown   time.Duration
+	gateCheckLenient    bool
+	gateCheckOffline    bool
+	gateCheckSkipOSV    bool
+	gateCheckSkipStatic bool
+	gateCheckExplain    bool
 )
 
 var gateCheckCmd = &cobra.Command{
@@ -98,7 +118,18 @@ Examples:
 		if !gateCheckSkipOSV {
 			checkers = append(checkers, gate.NewOSVCheck())
 		}
-		checkers = append(checkers, gate.NewCooldown(threshold))
+		checkers = append(checkers,
+			gate.NewCooldown(threshold),
+			gate.NewPublisherChange(),
+			gate.NewMaintainerTrust(),
+		)
+		if !gateCheckSkipStatic {
+			checkers = append(checkers, &gate.StaticScan{
+				NPM:      newStaticScanProbe(),
+				MaxBytes: 50 << 20, BlockAt: 3, WarnAt: 1,
+			})
+			checkers = append(checkers, gate.NewVersionBumpDiff())
+		}
 
 		// Resolve policy.
 		policy := cfg.Policy()
@@ -199,6 +230,7 @@ func init() {
 	gateCheckCmd.Flags().BoolVar(&gateCheckLenient, "lenient", false, "treat Warn verdicts as approve (still block Block)")
 	gateCheckCmd.Flags().BoolVar(&gateCheckOffline, "allow-offline", false, "treat Unknown verdicts (registry unreachable) as approve — disables fail-closed posture")
 	gateCheckCmd.Flags().BoolVar(&gateCheckSkipOSV, "skip-osv", false, "skip the OSV/MAL-* query")
+	gateCheckCmd.Flags().BoolVar(&gateCheckSkipStatic, "skip-static", false, "skip the tarball-download static-pattern + version-diff checks (faster, less coverage)")
 	gateCheckCmd.Flags().BoolVar(&gateCheckExplain, "explain", false, "show CheckResult.Detail context lines (publisher email, parsed advisories, etc.)")
 
 	gateCmd.AddCommand(gateCheckCmd)

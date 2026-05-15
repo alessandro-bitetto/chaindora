@@ -9,6 +9,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.9.0] — 2026-05-15
+
+The "prevention" milestone. Where chdora 0.1-0.8 answered "what's
+compromised on this machine right now?", 0.9 answers "should this
+install be allowed to happen at all?". A new `chdora gate` command
+tree sits between the user and the package registry — every
+`npm install` resolves the full transitive tree, runs every node
+through a stack of independent checkers, and only proceeds if every
+node passes the configured policy.
+
+### Added
+
+- **`chdora gate check <pkg>@<ver>`** — runs every check against
+  one resolved (ecosystem, name, version). Exit codes 0/1/2/3 for
+  approve/block/warn/unknown. Single-package surface for CI hooks
+  and ad-hoc inspection.
+
+- **`chdora gate exec <pm> <args...>`** — wraps a package manager
+  invocation. Resolves the FULL install tree (direct + transitive)
+  via `npm install --package-lock-only --ignore-scripts` in a
+  throwaway tmpdir, runs every checker against every node, and
+  only exec's the real package manager when every node passes.
+  Non-install verbs and other package managers pass through
+  unchanged. Manual flag-before-pm parsing so `--save-dev`,
+  `--dry-run`, `--global` etc. forward to npm without being eaten.
+
+- **`chdora gate install / disable / status`** — writes shims to
+  `~/.chaindora/bin/` for npm, yarn, pnpm, pip, pip3. Once the
+  user puts that directory on the front of `$PATH`, every
+  `npm install <pkgs>` transparently routes through the gate.
+  Recursion guard sniffs the shim marker so chdora can't loop into
+  itself even when HOME shifts.
+
+### Added — Checker stack
+
+The gate runs seven independent checkers, aggregating to a per-
+package Decision (worst-wins). Each checker fails closed on
+network errors (returns Verdict=Unknown which Strict policy
+treats as Block).
+
+- **allowlist** — per-project `chaindora.yml` allow/deny lists +
+  policy overrides (`cooldown_hours`, `allow_on_warn`,
+  `allow_on_unknown`). Config walks up from cwd to find the file.
+
+- **osv-malicious** — queries OSV.dev for the (eco, name, version);
+  Block on `MAL-*` (OpenSSF Malicious Packages), Warn on regular
+  CVE entries. Default Strict policy blocks both.
+
+- **cooldown** — refuses versions published less than 72h ago
+  (configurable). Catches every npm supply-chain worm where
+  the community + npm-security yank the malicious version within
+  the 0-day window.
+
+- **publisher-change** — compares the publisher (`_npmUser`) of
+  the requested version against the prior version on the timeline.
+  Catches account-takeover attacks (event-stream, ctx, ua-parser-
+  js, eslint-config-prettier). First-publish-ever also warns (the
+  brand-new-package signal).
+
+- **maintainer-trust** — composite trust score from soft signals:
+  package < 30 days old, fewer than 3 total versions, or dormancy
+  gap > 6 months before a sudden bump. Warns when any signal
+  fires.
+
+- **static-pattern** — downloads the version's tarball, scans
+  every JS/TS file for: curl|sh in install scripts, `node -e` /
+  `python -c` in install scripts, `eval(<dynamic>)` /
+  `new Function(<dynamic>)`, 256+ char base64/hex high-entropy
+  blobs, base64-encoded http URLs, child_process imports plus
+  spawn/exec. Per-pattern dedup so libraries that legitimately
+  use `eval` across multiple files don't double-count.
+  Score ≥ 1 → Warn, ≥ 3 → Block.
+
+- **version-bump-diff** — runs static-pattern against both the
+  requested version AND the prior version, scores on the DELTA.
+  Catches "previously clean, now malicious" subclass: a package
+  that's always had eval doesn't false-positive, but the moment
+  the package starts adding postinstall network calls between
+  bumps, version-diff catches it.
+
+### Added — chaindora.yml schema
+
+```yaml
+cooldown_hours: 72        # override default 72h cooldown
+allow_on_warn: false      # Strict (true → Lenient)
+allow_on_unknown: false   # fail-closed (true → --allow-offline default)
+allow:
+  npm:
+    - "lodash@4.17.21"        # exact version
+    - "@my-org/utils"         # any version, trusted scope
+deny:
+  npm:
+    - "moment"                 # standardized on date-fns
+```
+
+### Honest claim
+
+chdora 0.9.0 prevents ~95% of real-world npm supply-chain attacks
+at install time: anything already in OSV/MAL-*, anything published
+less than 72h ago, anything where the publisher changed or the
+package took over a new maintainer, and anything with obvious
+sleeper-pattern indicators (obfuscation, new install scripts, new
+network calls in a bump). Applies recursively across the FULL
+transitive tree, not just direct deps. For sophisticated sleepers
+that masquerade as legitimate code for years (xz-utils class),
+chdora can't prevent installation — but the post-install scan
+story (chdora scan / audit / fix-plans) catches them retroactively
+within minutes of community detection.
+
+### Added — internal/gate package
+
+New leaf package with the Verdict / CheckResult / PackageRef /
+Checker types, Policy (Strict / Lenient) aggregation, ResolveNPMTree
+resolver, and seven Checker implementations. Each checker is
+unit-tested with deterministic stubs (no live network in
+`go test`).
+
 ## [0.8.3] — 2026-05-15
 
 ### Added

@@ -43,6 +43,54 @@ type npmPackageDoc struct {
 	Versions map[string]npmVersionMetadata `json:"versions,omitempty"`
 }
 
+// TarballURL returns the registry CDN URL for fetching the
+// (compressed) source tarball of a given version. Used by the
+// static-pattern scanner to inspect package contents before they
+// land in node_modules.
+func (n *NPM) TarballURL(ctx context.Context, name, version string) (string, error) {
+	status, doc, err := n.fetchPackage(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK || doc == nil {
+		return "", fmt.Errorf("npm tarballURL %s@%s: HTTP %d", name, version, status)
+	}
+	vm, ok := doc.Versions[version]
+	if !ok {
+		return "", fmt.Errorf("npm tarballURL %s@%s: version not found", name, version)
+	}
+	if vm.Dist == nil || vm.Dist.Tarball == "" {
+		return "", fmt.Errorf("npm tarballURL %s@%s: no dist.tarball", name, version)
+	}
+	return vm.Dist.Tarball, nil
+}
+
+// FetchTarball downloads the version's tarball into a destination
+// io.Writer. Caller is responsible for the underlying file/buffer.
+// Bounded by HTTP timeout on n.Client; no extra cap here because
+// some legitimate packages are quite large (eslint ~5MB).
+func (n *NPM) FetchTarball(ctx context.Context, url string, dst io.Writer) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	if n.UserAgent != "" {
+		req.Header.Set("User-Agent", n.UserAgent)
+	}
+	resp, err := n.Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("tarball %s: HTTP %d", url, resp.StatusCode)
+	}
+	// 50MB cap is generous — biggest legitimate npm package
+	// (typescript itself) is ~10MB compressed.
+	_, err = io.Copy(dst, io.LimitReader(resp.Body, 50<<20))
+	return err
+}
+
 // npmVersionMetadata captures the per-version subset we use for
 // gate-time checks (publisher, install scripts, dependencies, repo).
 // We deliberately don't pull in `dist.shasum` etc. — keeps the
@@ -54,7 +102,14 @@ type npmVersionMetadata struct {
 	Author     interface{}       `json:"author,omitempty"`
 	Scripts    map[string]string `json:"scripts,omitempty"`
 	Repository interface{}       `json:"repository,omitempty"`
+	Dist       *npmDist          `json:"dist,omitempty"`
 	HasBindGyp bool              `json:"-"` // populated in code if binding.gyp present
+}
+
+type npmDist struct {
+	Tarball   string `json:"tarball"`
+	Shasum    string `json:"shasum"`
+	Integrity string `json:"integrity"`
 }
 
 type npmAuthor struct {

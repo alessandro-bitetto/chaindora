@@ -26,12 +26,13 @@ import (
 // pip / yarn / pnpm will follow once the resolver lands for them.
 
 var (
-	gateExecCooldown time.Duration
-	gateExecLenient  bool
-	gateExecOffline  bool
-	gateExecSkipOSV  bool
-	gateExecExplain  bool
-	gateExecDryRun   bool
+	gateExecCooldown   time.Duration
+	gateExecLenient    bool
+	gateExecOffline    bool
+	gateExecSkipOSV    bool
+	gateExecSkipStatic bool
+	gateExecExplain    bool
+	gateExecDryRun     bool
 )
 
 var gateExecCmd = &cobra.Command{
@@ -134,7 +135,18 @@ Examples:
 		if !gateExecSkipOSV {
 			checkers = append(checkers, gate.NewOSVCheck())
 		}
-		checkers = append(checkers, gate.NewCooldown(threshold))
+		checkers = append(checkers,
+			gate.NewCooldown(threshold),
+			gate.NewPublisherChange(),
+			gate.NewMaintainerTrust(),
+		)
+		if !gateExecSkipStatic {
+			checkers = append(checkers, &gate.StaticScan{
+				NPM:      newStaticScanProbe(),
+				MaxBytes: 50 << 20, BlockAt: 3, WarnAt: 1,
+			})
+			checkers = append(checkers, gate.NewVersionBumpDiff())
+		}
 
 		policy := cfg.Policy()
 		if gateExecLenient {
@@ -393,7 +405,7 @@ func splitGateExecArgs(args []string) (chdora []string, pm []string, err error) 
 		}
 		// Known boolean chdora flags consume no value.
 		switch a {
-		case "--lenient", "--allow-offline", "--skip-osv", "--explain", "--dry-run":
+		case "--lenient", "--allow-offline", "--skip-osv", "--skip-static", "--explain", "--dry-run":
 			chdora = append(chdora, a)
 			i++
 			continue
@@ -431,6 +443,7 @@ func applyGateExecFlags(flags []string) error {
 	gateExecLenient = false
 	gateExecOffline = false
 	gateExecSkipOSV = false
+	gateExecSkipStatic = false
 	gateExecExplain = false
 	gateExecDryRun = false
 	for i := 0; i < len(flags); i++ {
@@ -441,6 +454,8 @@ func applyGateExecFlags(flags []string) error {
 			gateExecOffline = true
 		case "--skip-osv":
 			gateExecSkipOSV = true
+		case "--skip-static":
+			gateExecSkipStatic = true
 		case "--explain":
 			gateExecExplain = true
 		case "--dry-run":
