@@ -1,7 +1,9 @@
 # CLAUDE.md — chaindora
 
 On-ramp for contributors (human or AI) walking into the repo cold. For the
-user-facing story see [README.md](./README.md). For deeper coverage see
+user-facing story see [README.md](./README.md). For the threat model that
+drives scope and roadmap decisions, see
+[docs/threat-model.md](./docs/threat-model.md). For deeper coverage see
 [docs/architecture.md](./docs/architecture.md),
 [docs/incident-pack.md](./docs/incident-pack.md), and
 [docs/ci-integration.md](./docs/ci-integration.md).
@@ -307,6 +309,10 @@ docs/                           contributor docs
 
 ## Pointers
 
+- **Threat model** — scope, attack-surface map, roadmap-prioritization
+  framework: [docs/threat-model.md](./docs/threat-model.md). Start here
+  when proposing a new feature: locate the attack class in the four-
+  dimension space, check the scope boundary, score under the framework.
 - Architecture overview: [docs/architecture.md](./docs/architecture.md)
 - Incident-pack contributor guide:
   [docs/incident-pack.md](./docs/incident-pack.md)

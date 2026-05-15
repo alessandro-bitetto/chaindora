@@ -440,23 +440,54 @@ every release tag.
 
 ## Roadmap
 
-- **v0.10** ✅ shipped — `chdora ci` SonarQube-grade (baseline mode,
-  `.chaindora-ignore.yml` suppression, PR-comment markdown);
-  yarn + pnpm gate resolvers; PyPI gate parity (cooldown + OSV +
-  static-pattern); `chdora watch` daemon (periodic re-scan,
-  webhook alerts); sigstore-provenance check.
-- **v0.11** — Server mode: scheduled fleet scans, findings DB, webhook
-  ingest, multi-machine dashboard. Expanded ecosystems: RubyGems,
-  crates.io, Maven Central. PyPI gate parity for publisher-change /
-  maintainer-trust / version-diff.
-- **v1.0** — Reproducible-build verification: for packages with sigstore
-  provenance, verify the tarball matches what builds from the attested
-  git source. Closes the "registry compromised but source clean" gap.
+Roadmap is driven by the [threat model](./docs/threat-model.md), not
+by ecosystem checklists. Each milestone targets a specific attack-
+surface gap identified there.
+
+- **v0.10** ✅ shipped — SonarQube-grade `chdora ci` (baseline /
+  suppression / PR comments); yarn + pnpm gate resolvers; PyPI gate
+  parity for cooldown / OSV / static-pattern; `chdora watch` daemon;
+  sigstore-provenance check.
+- **v0.11** — close the highest-leverage gaps: git-URL trust
+  evaluator (`pip install git+...`, `npm install user/repo`, CMake
+  `FetchContent`, `go get` against unknown hosts), build-time +
+  import-time static scan for Go `init()` and Rust `build.rs`
+  (proc-macros), trust-anchor drift forensics
+  (`.npmrc registry=`, `pip.conf index-url`, `git insteadOf`,
+  ssh `known_hosts`, CA store), RubyGems + crates + Maven Central
+  detection + cooldown + OSV, PyPI gate parity for
+  publisher-change / maintainer-trust / version-diff.
+- **v0.12** — IaC supply chain: Terraform / OpenTofu modules +
+  providers, Helm charts (deps + hooks), Ansible Galaxy,
+  Composer/Packagist (PHP), NuGet (.NET).
+- **v0.13** — Server mode: scheduled fleet scans, findings DB,
+  webhook ingest, multi-machine dashboard. Opt-in by config.
+- **v0.14** — AI / ML supply chain: HuggingFace pickle scanner,
+  PyTorch / TF / Keras model file scanner, MCP server / Claude
+  Code skill auditor, Gradle (separate parser from Maven).
+- **v0.15** — Emerging surfaces: `bun.lockb` binary lockfile, Deno
+  URL-import map evaluation, devcontainer feature scanner,
+  slopsquatting heuristic (LLM-hallucinated typosquats), Vim /
+  Neovim / JetBrains plugin-manager inventory.
+- **v0.16+** — Long tail (CRAN, opam, Hackage, LuaRocks, Julia,
+  PlatformIO, game-engine asset stores) — community-driven.
+- **v1.0** — Reproducible-build verification: for sigstore-attested
+  packages, byte-compare the published tarball against what builds
+  from the attested git commit. Closes the "registry compromised
+  but source clean" gap.
+
+See [docs/threat-model.md](./docs/threat-model.md) for the full
+attack-surface map, scope boundaries, and the prioritization framework
+that ranks these milestones.
 
 ---
 
 ## Architecture, internals, contributing
 
+- [docs/threat-model.md](./docs/threat-model.md) — the full attack-surface
+  map: code-entry vectors, code-execution moments, trust-anchor vectors.
+  Defines what chaindora covers, what's deliberately out-of-scope, and
+  the prioritization framework that drives the roadmap
 - [docs/architecture.md](./docs/architecture.md) — internal package layout
   and data flow
 - [docs/incident-pack.md](./docs/incident-pack.md) — how to contribute new

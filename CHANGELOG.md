@@ -7,7 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Future work tracked in [README's Roadmap section](./README.md#roadmap).
+Future work tracked in [README's Roadmap section](./README.md#roadmap)
+and the [threat model](./docs/threat-model.md).
+
+## [0.10.1] — 2026-05-16
+
+### Docs
+
+- **`docs/threat-model.md`** — the permanent reference for what
+  chaindora covers, what's deliberately out-of-scope, and how the
+  roadmap is prioritized. Organized around four dimensions of
+  supply-chain risk: code-entry vectors (where bytes come in),
+  code-execution moments (when arbitrary code runs), trust-anchor
+  vectors (what would invalidate every other check), and adjacent
+  surfaces (IaC, ML, identity, developer environment). Explicitly
+  lists tool classes chaindora will NOT compete with (EDR, SIEM,
+  runtime monitoring, credential rotation). Includes a quantitative
+  prioritization framework so feature proposals are evaluated on
+  attack-frequency × blast-radius × user-base ÷ effort rather than
+  intuition.
+
+- **README roadmap re-ranked against the threat model.** Each
+  milestone now targets a specific attack-surface gap, not an
+  ecosystem checklist. v0.11 closes the highest-leverage gaps
+  (git-URL trust evaluation, build-time / import-time static scan
+  for Go and Rust, trust-anchor drift forensics) plus the
+  originally-planned RubyGems / crates / Maven detection. v0.12
+  becomes IaC supply chain (Terraform, Helm, Ansible, Composer,
+  NuGet). v0.13 is server mode + multi-machine. v0.14 is AI/ML
+  supply chain (HuggingFace pickle, MCP/Claude-Code-skill
+  auditor). v0.15 is emerging surfaces (Bun binary lockfile,
+  Deno, devcontainers, slopsquatting, editor plugin managers).
+  v0.16+ is the long tail. v1.0 is reproducible-build verification.
+
+- CLAUDE.md now references the threat model as the on-ramp for
+  contribution-proposal evaluation.
+
+No code changes. All tests still green under `-race` across the
+ubuntu/macos/windows CI matrix.
 
 ## [0.10.0] — 2026-05-15
 
