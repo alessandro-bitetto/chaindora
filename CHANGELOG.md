@@ -9,7 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
-## [0.2.0] — 2026-05-15
+## [0.3.0] — 2026-05-15
+
+Per-detector remediation flow: chaindora can now describe *and* apply the
+fix for many of the findings it surfaces.
+
+### Added
+
+- `--fix-plan` / `--fix` / `--fix --yes` on `scan`, `ci`, and
+  `forensics`. `--fix-plan` describes how each finding would be
+  remediated and exits 0. `--fix` prompts per finding ([a]pply /
+  [s]kip / [A]pply-all-remaining / [q]uit). `--fix --yes` batch-applies
+  every plan whose category is `safe`. Manual / unsafe categories
+  always print instructions only and never execute.
+- Four-tier `FixCategory` (safe / semi-safe / unsafe / manual). Per-
+  detector `PlanFix` functions:
+    - **osv-ioc** — SourcePath-aware upgrade commands for `--deep`
+      findings: `npm install -g …@latest`, `python3 -m pip install
+      --upgrade --user …`, `brew upgrade …`. apt findings get manual
+      `sudo apt-get install --only-upgrade` instructions (FixUnsafe).
+      Project-lockfile findings get manual advisory references
+      (FixManual; programmatic lockfile editing is v0.3.1).
+    - **incident-pack** — file-artifact matches → `rm -f --` (FixSafe);
+      package matches → `npm uninstall` / `pip uninstall -y`
+      (FixSemiSafe).
+    - **heuristic** + **hostforensics** — manualPlanFromFinding emits
+      clear remediation steps without commands. Credentials and shell
+      rcs are deliberately off-limits to automation.
+- Plan dedup: when multiple findings would run the same upgrade
+  command (e.g. 6 different `pip` CVEs all collapse to one
+  `python3 -m pip install --upgrade --user pip`), the runner collapses
+  them and surfaces the highest-severity finding's justification.
+- `findings.Fingerprint` is now exported (used by SARIF
+  `partialFingerprints` and as the per-plan stable ID).
 
 Full-machine forensics, broader inventory reach, and a packaged release pipeline.
 
