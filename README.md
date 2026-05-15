@@ -85,6 +85,10 @@ chaindora forensics --format json | jq          # pipe to jq
 # Full-machine mode: discover EVERY project on disk and scan each.
 chaindora forensics --scan-projects ~ --verbose
 chaindora forensics --scan-projects ~/code --skip-osv --skip-heuristic
+
+# Deep mode: also enumerate globally-installed npm + pip packages.
+chaindora forensics --deep --verbose
+chaindora forensics --scan-projects ~ --deep
 ```
 
 The `--scan-projects <root>` flag walks the filesystem for project

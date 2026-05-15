@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and uploads the SARIF sidecar to GitHub code-scanning. The `testdata/`
   exclusion keeps the deliberately-malicious test fixtures out of the
   results.
+- `chaindora forensics --deep` — enumerates globally-installed packages
+  (`npm ls -g --json` and `pip list --format=json`, with `pip3` fallback)
+  and runs the full detector pipeline (OSV + incident pack + heuristics)
+  against them. Skips each package manager silently if its binary isn't
+  on PATH. Catches "I have a malicious npm tool installed globally that
+  I'm not even using in a project" scenarios. Homebrew and apt deferred
+  to a follow-up release.
+- `inventory.NormalizePyPIName` is now exported so the global-pip scanner
+  applies the same PEP 503 normalization the lockfile parsers do.
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
