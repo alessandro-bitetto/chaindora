@@ -48,7 +48,19 @@ inventoried 142 packages from 11 sources
 go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest
 ```
 
-Requires Go 1.22+. Pre-built binaries via `goreleaser` are on the roadmap.
+Requires Go 1.22+. After `go install`, make sure your Go bin directory is on
+`$PATH` so the binary is reachable as `chaindora`:
+
+```sh
+# One-off check
+ls "$(go env GOPATH)/bin/chaindora"
+
+# Add to PATH (persist by adding to ~/.zshrc or ~/.bashrc)
+export PATH="$PATH:$(go env GOPATH)/bin"
+```
+
+If you see `command not found: chaindora` right after a successful install,
+this is the fix. Pre-built binaries via `goreleaser` are on the v0.2 roadmap.
 
 ## Commands
 

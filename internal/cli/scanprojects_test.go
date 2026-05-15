@@ -48,25 +48,31 @@ func TestDiscoverProjects(t *testing.T) {
 }
 
 func TestCollapseNestedRoots(t *testing.T) {
+	// collapseNestedRoots uses filepath.Separator for nesting detection, so
+	// the test paths need to be constructed via filepath.Join to work on both
+	// Unix (/) and Windows (\).
 	in := []string{
-		"/home/u/proj",
-		"/home/u/proj/packages/a",
-		"/home/u/proj/packages/b",
-		"/home/u/other",
+		filepath.Join("home", "u", "proj"),
+		filepath.Join("home", "u", "proj", "packages", "a"),
+		filepath.Join("home", "u", "proj", "packages", "b"),
+		filepath.Join("home", "u", "other"),
 	}
 	sort.Strings(in)
 	got := collapseNestedRoots(in)
-	want := []string{"/home/u/other", "/home/u/proj"}
+	want := []string{
+		filepath.Join("home", "u", "other"),
+		filepath.Join("home", "u", "proj"),
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
 func TestCollapseNestedRootsRespectsSiblings(t *testing.T) {
-	in := []string{"/a", "/aa", "/aaa"} // not nested despite prefix collision
+	in := []string{"a", "aa", "aaa"} // siblings, not nested
 	sort.Strings(in)
 	got := collapseNestedRoots(in)
-	want := []string{"/a", "/aa", "/aaa"}
+	want := []string{"a", "aa", "aaa"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}

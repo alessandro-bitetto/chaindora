@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -141,14 +142,20 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 
 // globMatch supports a small but useful subset:
 //   "**/<path>" → match any file whose relative path ends with <path>
-//   "<path>"    → filepath.Match (no recursive ** support)
+//   "<path>"    → path.Match (no recursive ** support)
+//
+// Both `pattern` and `rel` are normalized to forward slashes before matching,
+// and we use `path.Match` (which always treats `/` as the separator) rather
+// than `filepath.Match` (which uses `\` on Windows, so `*` would happily
+// cross path separators and over-match).
 func globMatch(pattern, rel string) bool {
 	pattern = filepath.ToSlash(pattern)
+	rel = filepath.ToSlash(rel)
 	if strings.HasPrefix(pattern, "**/") {
 		suffix := strings.TrimPrefix(pattern, "**/")
 		return rel == suffix || strings.HasSuffix(rel, "/"+suffix)
 	}
-	ok, _ := filepath.Match(pattern, rel)
+	ok, _ := path.Match(pattern, rel)
 	return ok
 }
 
