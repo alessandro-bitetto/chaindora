@@ -81,7 +81,19 @@ chaindora forensics                             # scan $HOME
 chaindora forensics --hunt-root ~/code          # narrower artifact hunt
 chaindora forensics --skip-hunt                 # tokens + shell rc only
 chaindora forensics --format json | jq          # pipe to jq
+
+# Full-machine mode: discover EVERY project on disk and scan each.
+chaindora forensics --scan-projects ~ --verbose
+chaindora forensics --scan-projects ~/code --skip-osv --skip-heuristic
 ```
+
+The `--scan-projects <root>` flag walks the filesystem for project
+manifests (`package.json`, `requirements.txt`, `Cargo.toml`, `go.mod`,
+`Dockerfile`, `.gitlab-ci.yml`, `.circleci/`, …), deduplicates nested
+manifests, and runs a full scan against each discovered project root
+alongside the host-state checks. Skips `node_modules` / `.venv` /
+`.git` / `vendor` / `target` / `dist` / caches / `Library` / `AppData`
+by default.
 
 ### `chaindora update`
 

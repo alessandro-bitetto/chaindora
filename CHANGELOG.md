@@ -26,12 +26,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     as MEDIUM informational findings.
 - Verified clean cross-compilation to `GOOS=windows GOARCH=amd64` and
   `GOOS=windows GOARCH=arm64`.
+- `chaindora forensics --scan-projects <root>` — full-machine project
+  discovery. Walks the filesystem for project markers (`package.json`,
+  `requirements.txt`, `Cargo.toml`, `go.mod`, `Dockerfile`,
+  `.gitlab-ci.yml`, `.circleci/`, `.azure-pipelines/`, `.github/workflows/`,
+  …), deduplicates nested manifests via ancestor-preferring collapse,
+  and runs a full scan against each discovered project root alongside
+  the host-state checks. Skips `node_modules` / `.venv` / `.git` /
+  `vendor` / `target` / `dist` / caches / `Library` / `AppData` by
+  default. Demoed against `testdata/`: 11 project roots discovered, 24
+  findings aggregated.
 
 ### Planned for v0.2
-- Windows-equivalent host forensics: PowerShell profile scanner,
-  Credential Manager check, cross-compile in CI.
-- `chaindora forensics --scan-projects` — auto-discover every project
-  manifest under a root and scan in parallel.
 - `chaindora forensics --deep` — global packages (`npm ls -g`, pip
   system, Homebrew, apt), browser extensions, IDE extensions,
   persistence mechanisms, `~/.ssh/authorized_keys` diff.
