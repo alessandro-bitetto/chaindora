@@ -54,6 +54,19 @@ type Config struct {
 	// "packages our team has decided not to use" (e.g. moment.js
 	// in a project that standardized on date-fns).
 	Deny map[string][]string `yaml:"deny"`
+
+	// GitHosts is the per-project allowlist of git hosting
+	// platforms beyond the well-known set (github.com, gitlab.com,
+	// bitbucket.org, codeberg.org, sr.ht). Use for corporate
+	// self-hosted Gitea / GitLab / Stash instances. Wired into
+	// the git-url checker (v0.11.1).
+	GitHosts []string `yaml:"git_hosts"`
+
+	// AllowBranchRefs flips the "branch ref → Block" rule in the
+	// git-url checker to Warn. Default false (strict). Set true
+	// in monorepos with internal git deps that legitimately use
+	// branch refs.
+	AllowBranchRefs bool `yaml:"allow_branch_refs"`
 }
 
 // LoadConfig walks up from startDir looking for chaindora.yml or

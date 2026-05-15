@@ -102,7 +102,8 @@ func ResolveNPMTree(ctx context.Context, npmPath string, installArgs []string) (
 func parseNPMLockTree(data []byte, installArgs []string) ([]PackageRef, error) {
 	var lock struct {
 		Packages map[string]struct {
-			Version string `json:"version"`
+			Version  string `json:"version"`
+			Resolved string `json:"resolved"`
 		} `json:"packages"`
 	}
 	if err := json.Unmarshal(data, &lock); err != nil {
@@ -130,6 +131,24 @@ func parseNPMLockTree(data []byte, installArgs []string) ([]PackageRef, error) {
 		if name == "" || entry.Version == "" {
 			continue
 		}
+		// v0.11.1: detect git+url entries and emit them as a
+		// pseudo "git" ecosystem so the git-URL trust evaluator
+		// fires while registry-model checks (cooldown, OSV,
+		// publisher, ...) skip them.
+		if isGitResolvedURL(entry.Resolved) {
+			ident := "git:" + name + "@" + entry.Resolved
+			if _, ok := seen[ident]; ok {
+				continue
+			}
+			seen[ident] = struct{}{}
+			refs = append(refs, PackageRef{
+				Ecosystem: "git",
+				Name:      name,
+				Version:   normalizeGitResolved(entry.Resolved),
+				Direct:    directs[name],
+			})
+			continue
+		}
 		ident := name + "@" + entry.Version
 		if _, ok := seen[ident]; ok {
 			continue
@@ -143,6 +162,28 @@ func parseNPMLockTree(data []byte, installArgs []string) ([]PackageRef, error) {
 		})
 	}
 	return refs, nil
+}
+
+// isGitResolvedURL reports whether a package-lock.json `resolved`
+// value points at a git source rather than a tarball. npm uses
+// the `git+` prefix on the URL for git-protocol installs;
+// historically `git://` and bare-git-ssh appear too.
+func isGitResolvedURL(s string) bool {
+	if s == "" {
+		return false
+	}
+	low := strings.ToLower(s)
+	return strings.HasPrefix(low, "git+") ||
+		strings.HasPrefix(low, "git://") ||
+		strings.HasPrefix(low, "git@") ||
+		strings.HasPrefix(low, "ssh://git@")
+}
+
+// normalizeGitResolved trims npm's `git+` prefix from a resolved
+// URL so the gate-checker sees the actual scheme. The fragment
+// (#<ref>) stays intact.
+func normalizeGitResolved(s string) string {
+	return strings.TrimPrefix(s, "git+")
 }
 
 // stripNodeModulesPath turns a lockfile key into a bare package name.

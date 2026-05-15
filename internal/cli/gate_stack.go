@@ -46,6 +46,18 @@ func buildCheckerStack(probes *gate.Probes, threshold time.Duration, opts checke
 	prov.Require = opts.RequireProvenance
 	stack = append(stack, prov)
 
+	// Git-URL trust evaluator (v0.11.1) fires only on
+	// PackageRef{Ecosystem:"git"} entries; for every registry
+	// package it's a no-op. The npm/yarn/pnpm/pip resolvers
+	// emit Ecosystem:"git" when a git+url replaces the
+	// canonical registry URL.
+	gitChecker := gate.NewGitURLCheck()
+	if opts.Config != nil {
+		gitChecker.AllowedHosts = opts.Config.GitHosts
+		gitChecker.AllowBranchRefs = opts.Config.AllowBranchRefs
+	}
+	stack = append(stack, gitChecker)
+
 	if !opts.SkipStatic {
 		ss := &gate.StaticScan{
 			Probes:   probes,

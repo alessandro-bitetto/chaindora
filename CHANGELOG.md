@@ -10,6 +10,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md).
 
+## [0.11.1] — 2026-05-16
+
+Closes the final v0.11 gap: the git-URL trust evaluator. With
+this v0.11 ships all six features from the threat-model-driven
+roadmap.
+
+### Added — git-URL trust evaluator
+
+The threat model's "worst-trust-model" code-entry vector: git
+URLs supplied to `npm install user/repo`, `pip install
+git+https://...`, `go get` against unknown hosts, CMake
+`FetchContent_Declare`. These have no central registry, no
+signing, no publish-time, no maintainer metadata. The only
+levers we have are host-trust, ref-pinning, and transport
+scheme.
+
+`internal/gate/giturl.go` — new gate checker that evaluates
+`PackageRef{Ecosystem: "git"}` entries:
+
+| Host | Ref | Verdict |
+|---|---|---|
+| Well-known (github / gitlab / bitbucket / codeberg / sr.ht) + 40-hex SHA | Approve |
+| Well-known + tag | Warn (tags are mutable) |
+| Well-known + branch | Block (fully mutable) |
+| Allowlisted (chaindora.yml `allow.git_hosts`) + SHA | Approve |
+| Unknown host + SHA | Warn (auditable bytes, no community oversight) |
+| Unknown host + tag/branch | Block |
+| `http://` or `git://` scheme | Block (no transport security) |
+
+`chaindora.yml` schema additions:
+```yaml
+git_hosts:           # corporate self-hosted to trust like well-known
+  - gitea.corp.local
+  - gitlab.internal
+allow_branch_refs: false   # set true to downgrade branch-ref Block → Warn
+```
+
+### Added — npm resolver: git+url detection
+
+`internal/gate/resolve_npm.go` now parses the `resolved` field
+of each package-lock.json entry. When it matches `git+...` /
+`git://` / `git@` / `ssh://git@`, the resolver emits a
+PackageRef with `Ecosystem: "git"` so the git-URL checker
+fires and the registry-model checkers (cooldown, OSV,
+publisher-change, etc.) skip cleanly via early-return.
+
+### Changed — cooldown + OSV passthrough for git ecosystem
+
+cooldown and OSV checks previously returned `Verdict=Unknown`
+for ecosystems with no registry probe — under Strict policy
+that would block legitimate pinned-SHA git deps. Both now
+return Approve passthrough for `Ecosystem: "git"` because
+those checks are registry-model and don't apply.
+
+### Live-verified
+
+| Test case | Verdict |
+|---|---|
+| `https://github.com/expressjs/express#<40-hex>` | Approve |
+| `https://github.com/expressjs/express#main` | Block (mutable branch) |
+| `https://random.example.com/u/r#v1.0` | Block (unknown host + tag) |
+| `http://github.com/u/r#<sha>` | Block (insecure transport) |
+
+### Roadmap status
+
+v0.11 is feature-complete. All six features from
+docs/threat-model.md's v0.11 milestone shipped:
+
+- ✅ git-URL trust evaluator (this commit)
+- ✅ build-time + import-time static scan (v0.11.0)
+- ✅ trust-anchor drift forensics (v0.11.0)
+- ✅ RubyGems + crates.io + Maven Central full stacks (v0.11.0)
+- ✅ PyPI gate parity completion (v0.11.0)
+- ✅ ecosystem-pluggable gate refactor (v0.11.0)
+
+Next: v0.12 — IaC supply chain (Terraform / Helm / Ansible / Composer / NuGet).
+
 ## [0.11.0] — 2026-05-16
 
 The "boundaries" milestone — driven by the threat model rather

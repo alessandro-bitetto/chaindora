@@ -37,6 +37,14 @@ func (o *OSVCheck) Name() string { return "osv-malicious" }
 
 func (o *OSVCheck) Check(ctx context.Context, ref PackageRef) CheckResult {
 	result := CheckResult{Checker: o.Name()}
+	if ref.Ecosystem == "git" {
+		// Git-URL packages aren't OSV-cataloged (OSV's unit is a
+		// registry package). The git-url checker handles their
+		// trust evaluation; OSV passes through.
+		result.Verdict = VerdictApprove
+		result.Reason = "osv: git-URL deps not registry-cataloged"
+		return result
+	}
 	ecosystem := mapEcosystemToOSV(ref.Ecosystem)
 	if ecosystem == "" {
 		result.Verdict = VerdictUnknown

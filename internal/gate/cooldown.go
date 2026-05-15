@@ -43,6 +43,16 @@ func (c *Cooldown) Name() string { return "cooldown" }
 
 func (c *Cooldown) Check(ctx context.Context, ref PackageRef) CheckResult {
 	result := CheckResult{Checker: c.Name()}
+	if ref.Ecosystem == "git" {
+		// Git-URL packages have no registry publish-date concept.
+		// The GitURLCheck handles them via ref-pinning + host-
+		// trust. We pass through cleanly here so the fail-closed
+		// Unknown policy doesn't block legitimate pinned-SHA
+		// git deps.
+		result.Verdict = VerdictApprove
+		result.Reason = "cooldown: git-URL deps evaluated by git-url checker, not registry cooldown"
+		return result
+	}
 	if ref.Version == "" {
 		result.Verdict = VerdictUnknown
 		result.Reason = "no resolved version to check"

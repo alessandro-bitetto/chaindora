@@ -455,10 +455,12 @@ surface gap identified there.
   static-scan patterns (Go `init()`, Rust `build.rs`); trust-
   anchor drift forensics (`.npmrc` / `pip.conf` / `git insteadOf`
   / CA store baseline + drift detection).
-- **v0.11.1** — git-URL trust evaluator (the remaining piece of
-  the original v0.11 plan): `pip install git+...`,
-  `npm install user/repo`, CMake `FetchContent_Declare`,
-  `go get` against unknown hosts.
+- **v0.11.1** ✅ shipped — git-URL trust evaluator: evaluates
+  `npm install user/repo`, `pip install git+...`, CMake
+  `FetchContent` style deps on host-trust + ref-pinning +
+  transport scheme. Well-known host + 40-hex SHA = Approve;
+  branch refs / unknown hosts / http:// = Block under strict
+  policy.
 - **v0.12** — IaC supply chain: Terraform / OpenTofu modules +
   providers, Helm charts (deps + hooks), Ansible Galaxy,
   Composer/Packagist (PHP), NuGet (.NET).
