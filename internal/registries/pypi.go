@@ -42,10 +42,64 @@ type pypiPackageDoc struct {
 }
 
 type pypiReleaseFile struct {
-	UploadTime string `json:"upload_time_iso_8601"`
-	URL        string `json:"url"`
-	Filename   string `json:"filename"`
-	Packagetype string `json:"packagetype"` // "sdist" or "bdist_wheel"
+	UploadTime   string            `json:"upload_time_iso_8601"`
+	URL          string            `json:"url"`
+	Filename     string            `json:"filename"`
+	Packagetype  string            `json:"packagetype"` // "sdist" or "bdist_wheel"
+	// Provenance: PyPI's PEP 740 "Index API" exposes
+	// per-file attestations under `provenance` (URL pointer
+	// to the Sigstore bundle). Presence + non-empty value
+	// indicates publisher used `--attestations` on publish.
+	// We don't parse the bundle contents in v0.11.2 — just
+	// signal presence/absence.
+	Provenance   *string           `json:"provenance,omitempty"`
+}
+
+// HasProvenance reports whether ANY file in the requested
+// version has a sigstore provenance attestation. PyPI's PEP 740
+// attestation rollout is gradual — the field may be absent
+// entirely for older versions even on packages whose publisher
+// adopted attestations later.
+func (p *PyPI) HasProvenance(ctx context.Context, name, version string) (bool, error) {
+	status, doc, err := p.fetchPackage(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	if status != http.StatusOK || doc == nil {
+		return false, nil
+	}
+	rel, ok := doc.Releases[version]
+	if !ok {
+		return false, nil
+	}
+	for _, f := range rel {
+		if f.Provenance != nil && *f.Provenance != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// AnyVersionHasProvenance reports whether ANY version of the
+// package has attestations on at least one file. Used by the
+// gate's provenance checker to detect the "publisher used
+// attestations before, then stopped" regression case.
+func (p *PyPI) AnyVersionHasProvenance(ctx context.Context, name string) (bool, error) {
+	status, doc, err := p.fetchPackage(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	if status != http.StatusOK || doc == nil {
+		return false, nil
+	}
+	for _, files := range doc.Releases {
+		for _, f := range files {
+			if f.Provenance != nil && *f.Provenance != "" {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // PublishedAtVersion returns the upload timestamp for a specific

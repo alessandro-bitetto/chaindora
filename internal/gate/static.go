@@ -2,6 +2,7 @@ package gate
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -143,12 +144,60 @@ type StaticFinding struct {
 // PyPI uses "<name>-<version>/...") but stripFirstDir handles
 // both.
 func scanTarball(data []byte, maxBytes int64) ([]StaticFinding, error) {
+	// Auto-detect archive format from magic bytes. npm and PyPI
+	// sdists are gzip+tar; Maven JARs and PyPI wheels are zip;
+	// rare other shapes (.crate is gzip+tar, .gem is plain tar
+	// containing nested gzip+tar) handle below.
+	switch {
+	case isGzipMagic(data):
+		return scanGzipTar(data, maxBytes)
+	case isZipMagic(data):
+		return scanZip(data, maxBytes)
+	case isPlainTarMagic(data):
+		return scanPlainTar(data, maxBytes)
+	}
+	return nil, fmt.Errorf("unknown archive format (not gzip, zip, or tar)")
+}
+
+// isGzipMagic — gzip files start with 0x1F 0x8B.
+func isGzipMagic(data []byte) bool {
+	return len(data) >= 2 && data[0] == 0x1F && data[1] == 0x8B
+}
+
+// isZipMagic — zip files start with "PK\x03\x04" (or "PK\x05\x06"
+// for an empty archive). JARs and PyPI wheels are zip.
+func isZipMagic(data []byte) bool {
+	return len(data) >= 4 && data[0] == 'P' && data[1] == 'K' &&
+		(data[2] == 0x03 || data[2] == 0x05) &&
+		(data[3] == 0x04 || data[3] == 0x06)
+}
+
+// isPlainTarMagic — POSIX tar has "ustar" at offset 257.
+// RubyGems' .gem files are this shape (a plain tar containing
+// metadata.gz + data.tar.gz inside).
+func isPlainTarMagic(data []byte) bool {
+	return len(data) >= 265 && string(data[257:262]) == "ustar"
+}
+
+// scanGzipTar handles the npm / PyPI sdist / crate / .deb format.
+func scanGzipTar(data []byte, maxBytes int64) ([]StaticFinding, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("gunzip: %w", err)
 	}
 	defer gz.Close()
-	tr := tar.NewReader(gz)
+	return scanTarReader(tar.NewReader(gz), maxBytes)
+}
+
+func scanPlainTar(data []byte, maxBytes int64) ([]StaticFinding, error) {
+	return scanTarReader(tar.NewReader(bytes.NewReader(data)), maxBytes)
+}
+
+// scanTarReader is the shared inner loop. Reads each regular
+// file from the tar stream, strips the leading directory (npm's
+// "package/" or PyPI's "<name>-<version>/"), and runs the
+// per-file pattern detectors.
+func scanTarReader(tr *tar.Reader, maxBytes int64) ([]StaticFinding, error) {
 	var findings []StaticFinding
 	var consumed int64
 	for {
@@ -162,8 +211,6 @@ func scanTarball(data []byte, maxBytes int64) ([]StaticFinding, error) {
 		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
 			continue
 		}
-		// Per-file 4MB cap so a single huge JSON file doesn't
-		// blow the budget.
 		if hdr.Size > 4<<20 {
 			continue
 		}
@@ -180,14 +227,53 @@ func scanTarball(data []byte, maxBytes int64) ([]StaticFinding, error) {
 		content = content[:n]
 		consumed += int64(n)
 
-		// Strip the leading "package/" directory entries the
-		// npm tarball convention adds.
 		relPath := hdr.Name
 		if i := strings.Index(relPath, "/"); i >= 0 {
 			relPath = relPath[i+1:]
 		}
-
 		findings = append(findings, scanFile(relPath, content)...)
+	}
+	return findings, nil
+}
+
+// scanZip walks a zip archive — Maven JARs and PyPI wheels.
+// JARs have no leading directory prefix (file names start at
+// the package root); wheels do (`<name>-<version>.dist-info/`
+// alongside the package modules). We don't strip anything for
+// zip; the per-file detectors look at filename suffixes which
+// makes the strip irrelevant.
+func scanZip(data []byte, maxBytes int64) ([]StaticFinding, error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("zip open: %w", err)
+	}
+	var findings []StaticFinding
+	var consumed int64
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		if f.UncompressedSize64 > 4<<20 {
+			continue
+		}
+		remaining := maxBytes - consumed
+		if remaining <= 0 {
+			break
+		}
+		readLimit := int64(f.UncompressedSize64)
+		if readLimit > remaining {
+			readLimit = remaining
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		content := make([]byte, readLimit)
+		n, _ := io.ReadFull(rc, content)
+		rc.Close()
+		content = content[:n]
+		consumed += int64(n)
+		findings = append(findings, scanFile(f.Name, content)...)
 	}
 	return findings, nil
 }
@@ -213,13 +299,19 @@ func scanFile(path string, content []byte) []StaticFinding {
 		hits = append(hits, detectRustBuildRsSuspicious(path, content)...)
 	}
 	if isRustSource(path) {
-		// Rust source files: still scan for obfuscated blobs and
-		// network calls in lib.rs / main.rs / mod.rs. Most attack
-		// payloads in Rust ship via build.rs since that runs at
-		// compile time, but it's not impossible to defer to a
-		// macro expanded into lib.rs.
 		hits = append(hits, detectObfuscatedBlob(path, content)...)
 		hits = append(hits, detectRustImportTimeNetwork(path, content)...)
+	}
+	if isJVMSource(path) {
+		// Java / Kotlin sources inside a JAR. Static
+		// initializer blocks + Runtime.exec are the JVM
+		// equivalent of Go init() + exec.Command. The actual
+		// bytecode that ships is in .class files which we
+		// can't read without a class-file parser — those are
+		// future work; flagging source-form static initializers
+		// catches the careless attacker who ships sources.
+		hits = append(hits, detectJVMStaticInitSuspicious(path, content)...)
+		hits = append(hits, detectObfuscatedBlob(path, content)...)
 	}
 	return hits
 }
@@ -255,6 +347,66 @@ func isRustBuildScript(path string) bool {
 
 func isRustSource(path string) bool {
 	return strings.HasSuffix(path, ".rs") && !isRustBuildScript(path)
+}
+
+// isJVMSource matches Java / Kotlin / Scala sources inside a
+// JAR (or sources jar). Production JARs ship .class bytecode,
+// not .java — but Maven Central commonly publishes
+// `-sources.jar` artifacts and many libraries include their
+// sources inside the main JAR. When sources are absent the
+// only signal is `META-INF/MANIFEST.MF` (covered separately).
+func isJVMSource(path string) bool {
+	return strings.HasSuffix(path, ".java") ||
+		strings.HasSuffix(path, ".kt") ||
+		strings.HasSuffix(path, ".kts") ||
+		strings.HasSuffix(path, ".scala") ||
+		strings.HasSuffix(path, ".groovy")
+}
+
+// detectJVMStaticInitSuspicious flags Java/Kotlin source files
+// containing a static initializer block AND high-risk runtime
+// behavior. JVM static init runs at class load — same
+// "runs at import time without consent" shape as Go init() /
+// Python module-level code. Source-level detection catches the
+// lazy attacker; bytecode-level detection is future work.
+var (
+	jvmStaticInitPattern   = regexp.MustCompile(`(?m)\bstatic\s*\{`)
+	jvmRuntimeExecPattern  = regexp.MustCompile(`Runtime\.getRuntime\(\)\.exec|ProcessBuilder\s*\(`)
+	jvmHTTPPattern         = regexp.MustCompile(`new\s+URL\s*\(|HttpURLConnection|HttpClient\.`)
+	jvmBase64DecodePattern = regexp.MustCompile(`Base64\.getDecoder\(\)\.decode|Base64\.getMimeDecoder\(\)\.decode`)
+)
+
+func detectJVMStaticInitSuspicious(path string, content []byte) []StaticFinding {
+	hasStaticInit := jvmStaticInitPattern.Match(content)
+	if !hasStaticInit {
+		return nil
+	}
+	var hits []StaticFinding
+	if jvmRuntimeExecPattern.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "jvm-static-init-with-exec",
+			Path:    path,
+			Snippet: "class has static{} block AND uses Runtime.exec / ProcessBuilder",
+			Weight:  3,
+		})
+	}
+	if jvmHTTPPattern.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "jvm-static-init-with-network",
+			Path:    path,
+			Snippet: "class has static{} block AND makes HTTP / URL calls",
+			Weight:  2,
+		})
+	}
+	if jvmBase64DecodePattern.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "jvm-static-init-base64-decode",
+			Path:    path,
+			Snippet: "class has static{} block AND uses Base64 decode — payload-obfuscation shape",
+			Weight:  1,
+		})
+	}
+	return hits
 }
 
 // detectMaliciousInstallScript inspects package.json's "scripts"

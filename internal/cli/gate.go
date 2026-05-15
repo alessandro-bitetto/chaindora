@@ -25,7 +25,9 @@ func buildGateProbes() *gate.Probes {
 	p.Register("rubygems", registries.NewRubyGems())
 	p.Register("crates", registries.NewCrates())
 	p.Register("maven", registries.NewMavenCentral())
+	p.Register("go", registries.NewGoMod())
 	p.RegisterProvenance("npm", registries.NewNPM())
+	p.RegisterProvenance("pypi", registries.NewPyPI())
 	return p
 }
 

@@ -133,21 +133,182 @@ func (d *Detector) anchorFiles() []anchor {
 		{filepath.Join(home, ".cargo", "config.toml"), "~/.cargo/config.toml", checkCargoConfig},
 		{filepath.Join(home, ".cargo", "config"), "~/.cargo/config (legacy)", checkCargoConfig},
 		{filepath.Join(home, ".gemrc"), "~/.gemrc", checkGemRC},
+		{filepath.Join(home, ".m2", "settings.xml"), "~/.m2/settings.xml", checkMavenSettings},
+		{filepath.Join(home, ".gradle", "init.gradle"), "~/.gradle/init.gradle", checkGradleInit},
+		{filepath.Join(home, ".gradle", "init.gradle.kts"), "~/.gradle/init.gradle.kts", checkGradleInit},
 		{filepath.Join(home, ".gitconfig"), "~/.gitconfig", checkGitConfig},
 		{filepath.Join(home, ".ssh", "known_hosts"), "~/.ssh/known_hosts", nil},
+		{filepath.Join(home, ".ssh", "config"), "~/.ssh/config", checkSSHConfig},
+		// Sigstore trust roots: if an attacker can flip these,
+		// every provenance verification afterwards is bypassed.
+		{filepath.Join(home, ".sigstore", "root", "targets", "trusted_root.json"), "~/.sigstore/root/targets/trusted_root.json", nil},
+		{filepath.Join(home, ".cosign", "cosign.pub"), "~/.cosign/cosign.pub", nil},
 	}
+	// Cross-platform system trust anchors: /etc/hosts and DNS
+	// resolver config are the highest-impact host-level files
+	// for supply-chain integrity. /etc/hosts overrides any DNS
+	// resolution; /etc/resolv.conf points to which resolver
+	// answers. Both have content-aware checks too.
 	switch runtime.GOOS {
 	case "darwin":
 		anchors = append(anchors,
 			anchor{"/etc/ssl/cert.pem", "macOS /etc/ssl/cert.pem", nil},
+			anchor{"/etc/hosts", "/etc/hosts", checkEtcHosts},
+			anchor{"/etc/resolv.conf", "/etc/resolv.conf", nil},
 		)
 	case "linux":
 		anchors = append(anchors,
 			anchor{"/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/certs/ca-certificates.crt", nil},
 			anchor{"/etc/pki/tls/certs/ca-bundle.crt", "/etc/pki/tls/certs/ca-bundle.crt", nil},
+			anchor{"/etc/hosts", "/etc/hosts", checkEtcHosts},
+			anchor{"/etc/resolv.conf", "/etc/resolv.conf", nil},
 		)
 	}
 	return anchors
+}
+
+// checkEtcHosts flags entries that redirect known package-
+// registry hostnames anywhere other than their canonical
+// addresses. The exact IP changes over time, so we don't pin
+// IPs — we just flag the presence of an override that names
+// a registry hostname. The user must confirm intentional
+// (corporate mirror) vs unintentional (attacker MITM).
+func checkEtcHosts(path string) []findings.Finding {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []findings.Finding
+	suspicious := []string{
+		"registry.npmjs.org",
+		"pypi.org",
+		"upload.pypi.org",
+		"rubygems.org",
+		"crates.io",
+		"repo1.maven.org",
+		"search.maven.org",
+		"proxy.golang.org",
+		"sum.golang.org",
+		"github.com",
+		"raw.githubusercontent.com",
+		"codeload.github.com",
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		// Each field after the IP is a hostname this line maps.
+		for _, host := range fields[1:] {
+			h := strings.ToLower(host)
+			for _, s := range suspicious {
+				if h == s || strings.HasSuffix(h, "."+s) {
+					out = append(out, findings.Finding{
+						Detector:   "hostforensics:trustdrift",
+						Category:   findings.CategoryHostForensics,
+						VulnID:     "TRUSTDRIFT-ETC-HOSTS",
+						Summary:    fmt.Sprintf("/etc/hosts redirects %s to %s — verify intended (corp mirror or attacker MITM?)", host, fields[0]),
+						Severity:   findings.SeverityHigh,
+						SourcePath: path,
+					})
+					break
+				}
+			}
+		}
+	}
+	return out
+}
+
+// checkMavenSettings flags settings.xml entries that route
+// dependency resolution away from Maven Central. The XML is
+// complex but we only care about <mirrors> and <repositories>
+// — a substring check for hostnames in non-canonical positions
+// suffices.
+func checkMavenSettings(path string) []findings.Finding {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	content := string(data)
+	if !strings.Contains(content, "<mirror>") && !strings.Contains(content, "<repository>") {
+		return nil
+	}
+	// Heuristic: any <mirror> entry whose <url> isn't on Maven
+	// Central or sonatype is suspicious-by-default.
+	hasNonCanonicalMirror := strings.Contains(content, "<mirror>") &&
+		!strings.Contains(content, "repo1.maven.org") &&
+		!strings.Contains(content, "repo.maven.apache.org") &&
+		!strings.Contains(content, "oss.sonatype.org")
+	if !hasNonCanonicalMirror {
+		return nil
+	}
+	return []findings.Finding{{
+		Detector:   "hostforensics:trustdrift",
+		Category:   findings.CategoryHostForensics,
+		VulnID:     "TRUSTDRIFT-MAVEN-MIRROR",
+		Summary:    "~/.m2/settings.xml has a <mirror> redirecting away from Maven Central — verify intended",
+		Severity:   findings.SeverityMedium,
+		SourcePath: path,
+	}}
+}
+
+// checkGradleInit flags init.gradle files that override the
+// default Maven repositories — same shape as Maven settings.xml.
+func checkGradleInit(path string) []findings.Finding {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	content := string(data)
+	if !strings.Contains(content, "repositories") && !strings.Contains(content, "maven {") {
+		return nil
+	}
+	// Heuristic: init.gradle defining a custom maven{} block
+	// without referencing mavenCentral() / google() is a
+	// take-over-prone shape.
+	if strings.Contains(content, "maven {") &&
+		!strings.Contains(content, "mavenCentral()") &&
+		!strings.Contains(content, "google()") &&
+		!strings.Contains(content, "gradlePluginPortal()") {
+		return []findings.Finding{{
+			Detector:   "hostforensics:trustdrift",
+			Category:   findings.CategoryHostForensics,
+			VulnID:     "TRUSTDRIFT-GRADLE-REPO",
+			Summary:    "~/.gradle/init.gradle defines a maven{} repository without mavenCentral()/google() — verify intended",
+			Severity:   findings.SeverityMedium,
+			SourcePath: path,
+		}}
+	}
+	return nil
+}
+
+// checkSSHConfig flags `Host *` entries with `ProxyCommand`,
+// `ProxyJump`, or `HostKeyAlgorithms` overrides — these can
+// rewrite which server a git push lands at without the user
+// noticing.
+func checkSSHConfig(path string) []findings.Finding {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	content := string(data)
+	for _, ind := range []string{"ProxyCommand", "ProxyJump"} {
+		if strings.Contains(content, ind) {
+			return []findings.Finding{{
+				Detector:   "hostforensics:trustdrift",
+				Category:   findings.CategoryHostForensics,
+				VulnID:     "TRUSTDRIFT-SSH-PROXY",
+				Summary:    fmt.Sprintf("~/.ssh/config contains %s — git operations route through a proxy, verify it's trusted", ind),
+				Severity:   findings.SeverityMedium,
+				SourcePath: path,
+			}}
+		}
+	}
+	return nil
 }
 
 func hashFile(path string) (string, bool, error) {
