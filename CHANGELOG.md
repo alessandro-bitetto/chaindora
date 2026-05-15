@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.5] — 2026-05-15
+
+### Added
+
+- **`chdora audit` — one-word entry point for "scan the whole
+  machine."** Runs every detector at once, with sensible defaults so
+  users don't have to remember five flags. Equivalent to:
+
+  ```
+  chdora forensics --scan-projects $HOME --deep --extensions \
+                   --persistence --ssh-check --verbose
+  ```
+
+  Internally a thin wrapper: forensicsCmd's body was extracted into a
+  shared `runForensicsFlow(ctx)`; auditCmd sets the same package-level
+  flag vars with audit's defaults (all opt-in detectors ON) and calls
+  the same flow. JSON / SARIF / text output formats are honored.
+
+  Each detector has an `--skip-X` opt-out:
+    - `--skip-deep` — globally-installed packages
+    - `--skip-extensions` — browser / IDE extensions
+    - `--skip-persistence` — cron / launchd / systemd / Scheduled Tasks
+    - `--skip-ssh-check` — ~/.ssh/authorized_keys diff
+    - `--skip-hunt` — incident-pack file-artifact walk
+    - `--skip-osv` — OSV.dev queries (offline mode)
+    - `--skip-heuristic` — behavioural heuristics on discovered projects
+
+  Plus the standard `--root <path>` (default `$HOME`),
+  `--incidents <dir>`, `--exclude <basenames>`, `--format`,
+  `--fix-plan` / `--fix` / `--yes` / `--fix-aggressive`.
+
+  `chdora forensics` continues to work exactly as before — `audit`
+  is purely additive.
+
 ## [0.5.4] — 2026-05-15
 
 ### Fixed

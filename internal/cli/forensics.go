@@ -48,7 +48,17 @@ var forensicsCmd = &cobra.Command{
   - Shell rc tampering (curl|bash, eval base64/curl, netcat listeners)
   - Incident-pack file artifacts hunted across a search root (default: $HOME)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+		return runForensicsFlow(context.Background())
+	},
+}
+
+// runForensicsFlow is the shared body for the `forensics` and `audit` commands.
+// It reads the forensics-* package-level flag vars; callers configure those
+// before invoking. The audit command is a thin wrapper that defaults the
+// opt-in detectors (--deep / --extensions / --persistence / --ssh-check) to
+// true and points --scan-projects at the user's home.
+func runForensicsFlow(ctx context.Context) error {
+	{
 		home := forensicsHome
 		if home == "" {
 			home, _ = os.UserHomeDir()
@@ -207,7 +217,7 @@ var forensicsCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		return nil
-	},
+	}
 }
 
 func init() {

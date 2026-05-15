@@ -21,7 +21,7 @@ For deeper coverage see [docs/architecture.md](./docs/architecture.md),
 
 ## Quick orientation
 
-Six top-level commands:
+Seven top-level commands:
 
 - `chdora scan [path]` — project-tree scan; runs OSV + incident pack +
   heuristics over inventory.
@@ -40,6 +40,12 @@ Six top-level commands:
 - `chdora update` — refresh the curated incident pack from
   `github.com/alessandro-bitetto/chaindora` into
   `~/.chaindora/incidents/`.
+- `chdora audit` — single-word entry point for "scan everything on this
+  machine." Thin wrapper around the forensics flow with every opt-in
+  detector defaulted ON (`--deep`, `--extensions`, `--persistence`,
+  `--ssh-check`) and `--scan-projects` pointed at `$HOME`. Each
+  detector has a `--skip-X` opt-out. Internally calls the shared
+  `runForensicsFlow(ctx)` helper that `forensics` also uses.
 - `chdora upgrade` — self-upgrade the binary. Fetches the latest
   GitHub release archive, verifies SHA-256 against the published
   checksums file, and atomically replaces the running binary
@@ -90,7 +96,7 @@ against the repo itself with `--exclude testdata --fail-on critical,high`.
 cmd/chdora/                 entry point (cobra root)
 internal/
   cli/                         top-level commands + flag wiring + fix runner integration
-    {root,scan,ci,forensics,fix,update,upgrade}.go
+    {root,scan,ci,forensics,audit,fix,update,upgrade}.go
     {render,fixhelpers,scanprojects}.go
   inventory/                   per-ecosystem lockfile / manifest parsers
     {npm,pip,yarn,pnpm,uv,pipfile,poetry}.go   (npm + PyPI)

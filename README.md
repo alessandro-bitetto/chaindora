@@ -101,6 +101,28 @@ chdora scan . --incidents ./my-incidents     # custom incident pack
 chdora scan . --exclude testdata,vendor      # skip directories by basename
 ```
 
+### `chdora audit`
+
+The one-word "scan everything on this machine" entry point. Walks `--root`
+(default `$HOME`) for every project manifest and runs a full scan against
+each; enumerates globally-installed packages, browser/IDE extensions, and
+user-level persistence (cron / launchd / systemd / Scheduled Tasks);
+snapshots/diffs `~/.ssh/authorized_keys` against a baseline; plus the
+default host-state checks (credential files, shell rc tampering, file
+artifact hunt). Equivalent to a fully-flagged `chdora forensics
+--scan-projects $HOME --deep --extensions --persistence --ssh-check`.
+
+```sh
+chdora audit                              # full audit, all detectors on
+chdora audit --root /Users/me/code        # narrower root
+chdora audit --skip-deep --skip-extensions   # disable individual detectors
+chdora audit --format json > audit.json   # pipe-friendly
+chdora audit --fix-plan                   # show remediation plan
+```
+
+Each detector can be individually disabled with its `--skip-X` flag (see
+`chdora audit --help`).
+
 ### `chdora forensics`
 
 Host-state hunt. Inspects `~/.npmrc` / `~/.pypirc` / `~/.docker/config.json`
