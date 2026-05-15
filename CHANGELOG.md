@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.8] — 2026-05-15
+
+### Added
+
+- **`.github/dependabot.yml`** — Dependabot configured for two
+  ecosystems:
+    - `github-actions` (weekly, Mondays): bumps the SHA pins
+      introduced in v0.5.7 whenever any pinned action ships a new
+      tagged release. Without this, our SHAs would freeze at v0.5.7's
+      checkpoints and we'd silently miss security fixes to
+      `actions/checkout`, `actions/setup-go`, `goreleaser/goreleaser-
+      action`, `github/codeql-action`. Updates to GitHub-published
+      actions are grouped (`actions/*` + `github/codeql-action*`)
+      into a single PR to avoid weekly churn.
+    - `gomod` (weekly, Mondays): polls our two direct Go deps
+      (`spf13/cobra`, `gopkg.in/yaml.v3`). chdora intentionally keeps
+      the dependency set minimal — this is more for advisory awareness
+      than routine updates.
+
+  Both use commit-message prefixes (`ci` for actions, `deps` for go
+  modules) so the goreleaser changelog generator groups them
+  predictably.
+
 ## [0.5.7] — 2026-05-15
 
 ### Fixed

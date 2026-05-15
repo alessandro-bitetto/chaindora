@@ -1,0 +1,38 @@
+# Dependabot keeps SHA-pinned GitHub Actions current. Without this,
+# `.github/workflows/*.yml` would freeze at whatever commit SHA was
+# checked in — security fixes to actions/checkout, actions/setup-go,
+# goreleaser/goreleaser-action, github/codeql-action would never reach
+# us. With weekly checks Dependabot opens a PR whenever any pinned
+# action has a newer tagged release on its tracked major branch.
+#
+# See https://docs.github.com/en/code-security/dependabot/working-with-dependabot
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci"
+    open-pull-requests-limit: 5
+    # Bundle updates to GitHub-published actions into one PR so we
+    # don't churn through 3 separate PRs every time GitHub does a
+    # coordinated release across checkout / setup-go / codeql-action.
+    groups:
+      github-actions-core:
+        patterns:
+          - "actions/*"
+          - "github/codeql-action*"
+
+  # Go modules: chdora intentionally minimal (cobra + yaml.v3 only).
+  # Weekly polling keeps us informed of security advisories without
+  # being noisy.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps"
+    open-pull-requests-limit: 3
