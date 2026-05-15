@@ -33,6 +33,8 @@ func PURL(eco Ecosystem, name, version string) string {
 		typ = "azurepipelines"
 	case EcosystemDocker:
 		typ = "docker"
+	case EcosystemGoModules:
+		typ = "golang"
 	case EcosystemHomebrew:
 		typ = "brew"
 	case EcosystemDebian:
@@ -72,9 +74,10 @@ func PURL(eco Ecosystem, name, version string) string {
 			}
 		}
 	}
-	// Docker image names commonly span path segments (registry/namespace/image).
-	// Preserve them as PURL path separators rather than URL-encoding the slashes.
-	if eco == EcosystemDocker {
+	// Docker and Go module names commonly span path segments
+	// (registry/namespace/image; github.com/owner/repo/subpath). Preserve
+	// them as PURL path separators rather than URL-encoding the slashes.
+	if eco == EcosystemDocker || eco == EcosystemGoModules {
 		parts := strings.Split(name, "/")
 		for i, p := range parts {
 			parts[i] = purlEscape(p)

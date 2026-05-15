@@ -1,0 +1,32 @@
+schema: 1
+id: BROWSEREXT-CHROME-GREAT-SUSPENDER-2021
+name: The Great Suspender (Chrome) — post-sale ad injection / telemetry
+severity: high
+date: "2021-02-04"
+summary: |
+  The popular "The Great Suspender" Chrome extension was sold by its original
+  maintainer in mid-2020. The new owner shipped versions that injected
+  third-party advertising and added user-tracking telemetry without the
+  original maintainer's CSP-restricted privacy posture. Google removed the
+  extension from the Chrome Web Store in February 2021 citing malware.
+
+  Affected users had the extension auto-update silently into the
+  compromised builds — a textbook supply-chain takeover where the trust
+  bridge was the maintainer transfer rather than a single bad release.
+
+references:
+  - "https://github.com/greatsuspender/thegreatsuspender/issues/1263"
+  - "https://www.theregister.com/2021/02/05/great_suspender_chrome_extension_removed/"
+  - "https://chromewebstore.google.com/detail/the-great-suspender/klbibkeccnjlkjkiokjodocebajanakg"
+
+# Browser extensions use the extension ID as the canonical "name" — Chrome
+# Web Store IDs are stable 32-character a-p strings derived from the public
+# key. The version range below reflects the publicly-disclosed first-bad
+# release; if you've ever had this extension installed, audit any
+# credentials accessible to a Chrome tab during 2020-2021.
+packages:
+  - ecosystem: Browser Extension
+    name: "klbibkeccnjlkjkiokjodocebajanakg"
+    versions:
+      - "7.1.8"
+      - "7.1.9"

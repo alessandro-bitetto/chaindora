@@ -22,6 +22,7 @@ const (
 	EcosystemDebian         Ecosystem = "Debian"
 	EcosystemBrowserExt     Ecosystem = "Browser Extension"
 	EcosystemIDEExt         Ecosystem = "IDE Extension"
+	EcosystemGoModules      Ecosystem = "Go"
 )
 
 // Package represents one resolved dependency discovered in a manifest or lockfile.
@@ -159,6 +160,14 @@ func Scan(root string, opts ...ScanOption) (*Inventory, error) {
 			}
 			inv.Packages = append(inv.Packages, pkgs...)
 			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemPyPI, Kind: "Pipfile.lock"})
+		case "go.mod":
+			pkgs, perr := parseGoMod(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "go.mod "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemGoModules, Kind: "go.mod"})
 		case ".gitlab-ci.yml", ".gitlab-ci.yaml":
 			pkgs, perr := parseGitLabCI(path)
 			if perr != nil {
