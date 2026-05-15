@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.7] — 2026-05-15
+
+### Fixed
+
+- `.goreleaser.yml` — `archives.builds` renamed to `archives.ids`
+  per the goreleaser v2 deprecation notice
+  (https://goreleaser.com/deprecations#archivesbuilds). Same
+  semantics, just the new key name. v0.5.6's release log was
+  emitting a yellow `DEPRECATED:` line; future goreleaser majors
+  will hard-fail on the old key.
+
+- **CI workflows now SHA-pin every action.** Pinning to a 40-char
+  commit SHA closes the unpinned-action-ref class of attack and
+  resolves the `HEUR-UNPINNED-REF` LOW findings that chdora's own
+  dogfood self-scan was reporting against itself. Each pin is
+  annotated with a `# v4`-style comment so version intent stays
+  legible:
+
+  - `actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4`
+  - `actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff   # v5`
+  - `goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a  # v6`
+  - `github/codeql-action/upload-sarif@458d36d7d4f47d0dd16ca424c1d3cda0060f1360  # v3`
+
+  Side-benefit: kills the GitHub Actions Node 20 deprecation
+  warnings indirectly (each action will publish Node-24 builds
+  under a new SHA, which Dependabot or a manual bump will pick up).
+
+  Tradeoff: dependency updates to these actions are now opt-in
+  rather than automatic. Set up Dependabot for `.github/workflows`
+  to keep them current.
+
 ## [0.5.6] — 2026-05-15
 
 ### Added

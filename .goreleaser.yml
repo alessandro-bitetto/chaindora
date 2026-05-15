@@ -28,7 +28,7 @@ builds:
 
 archives:
   - id: chaindora
-    builds: [chaindora]
+    ids: [chaindora]
     formats: [tar.gz]
     format_overrides:
       - goos: windows
