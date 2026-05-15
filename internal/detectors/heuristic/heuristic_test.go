@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 )
@@ -101,23 +102,40 @@ func TestDetectInstallScriptsRoot(t *testing.T) {
 	}
 }
 
-func TestDetectInstallScriptsDependency(t *testing.T) {
+func TestDetectInstallScriptsDependency_FreshFires(t *testing.T) {
+	// v0.6.0: install-script firings require registry evidence.
+	// A fresh, low-traffic package with hooks → fires.
+	probe := newFakeProbe()
+	probe.published["sneaky-fresh-pkg"] = time.Now().AddDate(0, 0, -5)
+	probe.downloads["sneaky-fresh-pkg"] = 12
 	inv := &inventory.Inventory{
 		Packages: []inventory.Package{
-			{Ecosystem: inventory.EcosystemNPM, Name: "node-gyp", Version: "10.0.0", HasInstallScript: true},
-			{Ecosystem: inventory.EcosystemNPM, Name: "lodash", Version: "4.17.20", HasInstallScript: false},
-			{Ecosystem: inventory.EcosystemPyPI, Name: "urllib3", Version: "1.26.4", HasInstallScript: true}, // wrong ecosystem
+			{Ecosystem: inventory.EcosystemNPM, Name: "sneaky-fresh-pkg", Version: "0.0.1", HasInstallScript: true},
 		},
 	}
-	fs := scanDependencyInstallScripts(inv)
+	fs := scanDependencyInstallScripts(context.Background(), inv, Config{NPMProbe: probe})
 	if len(fs) != 1 {
-		t.Fatalf("expected 1 finding, got %d: %+v", len(fs), fs)
-	}
-	if fs[0].Name != "node-gyp" {
-		t.Errorf("wrong name: %+v", fs[0])
+		t.Fatalf("expected 1 finding for fresh+low-traffic install hook, got %d: %+v", len(fs), fs)
 	}
 	if !strings.Contains(fs[0].VulnID, "DEP-INSTALL-SCRIPT") {
 		t.Errorf("wrong VulnID: %+v", fs[0])
+	}
+}
+
+func TestDetectInstallScriptsDependency_MaturePopularSuppressed(t *testing.T) {
+	// node-gyp has had install scripts for ~10 years and millions of
+	// weekly downloads. Legitimate. Don't fire.
+	probe := newFakeProbe()
+	probe.published["node-gyp"] = time.Now().AddDate(-10, 0, 0)
+	probe.downloads["node-gyp"] = 10_000_000
+	inv := &inventory.Inventory{
+		Packages: []inventory.Package{
+			{Ecosystem: inventory.EcosystemNPM, Name: "node-gyp", Version: "10.0.0", HasInstallScript: true},
+		},
+	}
+	fs := scanDependencyInstallScripts(context.Background(), inv, Config{NPMProbe: probe})
+	if len(fs) != 0 {
+		t.Errorf("mature + popular install-script package should be suppressed, got %+v", fs)
 	}
 }
 

@@ -33,6 +33,7 @@ var (
 	auditYes          bool
 	auditAggressive   bool
 	auditSSHBaseline  string
+	auditSkipRegistry bool
 )
 
 // wholeMachineExcludes adds curated directory-basename skips on top of the
@@ -114,6 +115,7 @@ Each detector can be individually disabled with its --skip-X flag.`,
 		forensicsSkipOSV = auditSkipOSV
 		forensicsSkipHeur = auditSkipHeur
 		forensicsSkipHunt = auditSkipHunt
+		forensicsSkipRegistry = auditSkipRegistry
 		forensicsFixPlan = auditFixPlan
 		forensicsFix = auditFix
 		forensicsYes = auditYes
@@ -192,6 +194,8 @@ func init() {
 		"do not query OSV.dev (offline mode)")
 	auditCmd.Flags().BoolVar(&auditSkipHeur, "skip-heuristic", false,
 		"do not run behavioural heuristics on discovered projects")
+	auditCmd.Flags().BoolVar(&auditSkipRegistry, "skip-registry", false,
+		"do not query npm/PyPI for evidence (offline mode; dep-confusion / typosquat / install-script heuristics become silent)")
 
 	auditCmd.Flags().StringVar(&auditSSHBaseline, "ssh-baseline", "",
 		"alternative path for the SSH baseline file (default ~/.chaindora/ssh-baseline.txt)")
