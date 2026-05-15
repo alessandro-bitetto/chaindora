@@ -18,12 +18,13 @@ import (
 )
 
 var (
-	jsonOut       bool
-	scanFormat    string
-	incidentsDir  string
-	skipOSV       bool
-	skipIncidents bool
-	skipHeuristic bool
+	jsonOut          bool
+	scanFormat       string
+	incidentsDir     string
+	skipOSV          bool
+	skipIncidents    bool
+	skipHeuristic    bool
+	scanFreshPopular bool
 )
 
 var scanCmd = &cobra.Command{
@@ -84,7 +85,9 @@ var scanCmd = &cobra.Command{
 		}
 
 		if !skipHeuristic {
-			det := heuristic.New()
+			det := heuristic.New(heuristic.Config{
+				FreshPopular: heuristic.FreshPopularConfig{Enabled: scanFreshPopular},
+			})
 			results, err := det.Detect(ctx, inv, root)
 			if err != nil {
 				return fmt.Errorf("heuristic detector: %w", err)
@@ -108,6 +111,7 @@ func init() {
 	scanCmd.Flags().StringVar(&incidentsDir, "incidents", "", "path to incident-pack YAML directory (default: ./incidents or ~/.chaindora/incidents)")
 	scanCmd.Flags().BoolVar(&skipOSV, "skip-osv", false, "skip OSV.dev queries")
 	scanCmd.Flags().BoolVar(&skipIncidents, "skip-incidents", false, "skip the curated incident pack")
-	scanCmd.Flags().BoolVar(&skipHeuristic, "skip-heuristic", false, "skip behavioral heuristics (unpinned refs, CI shell patterns, install scripts)")
+	scanCmd.Flags().BoolVar(&skipHeuristic, "skip-heuristic", false, "skip behavioral heuristics (unpinned refs, CI shell patterns, install scripts, typosquat, dep-confusion)")
+	scanCmd.Flags().BoolVar(&scanFreshPopular, "fresh-popular", false, "also check whether popular npm/PyPI deps were published in the last 14 days (requires network)")
 	rootCmd.AddCommand(scanCmd)
 }

@@ -19,14 +19,15 @@ import (
 )
 
 var (
-	ciFailOn        string
-	ciFormat        string
-	ciSARIFPath     string
-	ciIncidentsDir  string
-	ciSkipOSV       bool
-	ciSkipIncidents bool
-	ciSkipHeuristic bool
-	ciVerbose       bool
+	ciFailOn         string
+	ciFormat         string
+	ciSARIFPath      string
+	ciIncidentsDir   string
+	ciSkipOSV        bool
+	ciSkipIncidents  bool
+	ciSkipHeuristic  bool
+	ciFreshPopular   bool
+	ciVerbose        bool
 )
 
 var ciCmd = &cobra.Command{
@@ -109,7 +110,9 @@ continuous-integration use:
 		}
 
 		if !ciSkipHeuristic {
-			det := heuristic.New()
+			det := heuristic.New(heuristic.Config{
+				FreshPopular: heuristic.FreshPopularConfig{Enabled: ciFreshPopular},
+			})
 			results, err := det.Detect(ctx, inv, root)
 			if err != nil {
 				return fmt.Errorf("heuristic detector: %w", err)
@@ -213,6 +216,7 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciSkipOSV, "skip-osv", false, "skip OSV.dev queries")
 	ciCmd.Flags().BoolVar(&ciSkipIncidents, "skip-incidents", false, "skip the curated incident pack")
 	ciCmd.Flags().BoolVar(&ciSkipHeuristic, "skip-heuristic", false, "skip behavioral heuristics")
+	ciCmd.Flags().BoolVar(&ciFreshPopular, "fresh-popular", false, "also check publish dates of top-N popular npm/PyPI deps (requires network)")
 	ciCmd.Flags().BoolVar(&ciVerbose, "verbose", false, "emit diagnostic logs to stderr")
 	rootCmd.AddCommand(ciCmd)
 }

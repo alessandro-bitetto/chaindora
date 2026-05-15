@@ -131,7 +131,7 @@ func TestDetectorIntegration(t *testing.T) {
 			{Ecosystem: inventory.EcosystemActions, Name: "actions/checkout", Version: "v3", Pinned: false},
 		},
 	}
-	d := New()
+	d := New(Config{})
 	got, err := d.Detect(context.Background(), inv, tmp)
 	if err != nil {
 		t.Fatal(err)
