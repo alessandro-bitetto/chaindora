@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.1] — 2026-05-15
+
+### Fixed
+
+- `chdora --version` / `chdora -v` now work. v0.5.0 shipped without
+  wiring the package-level `Version` variable into cobra's
+  `rootCmd.Version`, so `chdora --version` returned an unknown-flag
+  error. The version is now exposed via cobra's standard `--version`
+  flag and formatted as `chdora <version>`. Workaround for v0.5.0
+  users: `chdora upgrade --check` prints `current: <version>, latest:
+  <version>` as a side effect of comparing against the GitHub
+  Releases API.
+
 ## [0.5.0] — 2026-05-15
 
 Self-upgrade, broader fix coverage, and a near-tripled incident
