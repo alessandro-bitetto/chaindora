@@ -205,6 +205,22 @@ func scanFile(path string, content []byte) []StaticFinding {
 		hits = append(hits, detectChildProcessNetwork(path, content)...)
 		hits = append(hits, detectEncodedURLs(path, content)...)
 	}
+	if isGoSource(path) {
+		hits = append(hits, detectGoInitSuspicious(path, content)...)
+		hits = append(hits, detectObfuscatedBlob(path, content)...) // generic
+	}
+	if isRustBuildScript(path) {
+		hits = append(hits, detectRustBuildRsSuspicious(path, content)...)
+	}
+	if isRustSource(path) {
+		// Rust source files: still scan for obfuscated blobs and
+		// network calls in lib.rs / main.rs / mod.rs. Most attack
+		// payloads in Rust ship via build.rs since that runs at
+		// compile time, but it's not impossible to defer to a
+		// macro expanded into lib.rs.
+		hits = append(hits, detectObfuscatedBlob(path, content)...)
+		hits = append(hits, detectRustImportTimeNetwork(path, content)...)
+	}
 	return hits
 }
 
@@ -215,6 +231,30 @@ func isJSish(path string) bool {
 		}
 	}
 	return false
+}
+
+// isGoSource matches Go source files but NOT test files (which
+// have legitimate reasons to exec / open network — test fixtures).
+// We're after package-level init() execution, not unit-test setup.
+func isGoSource(path string) bool {
+	if !strings.HasSuffix(path, ".go") {
+		return false
+	}
+	if strings.HasSuffix(path, "_test.go") {
+		return false
+	}
+	return true
+}
+
+// isRustBuildScript matches the special build.rs at the root of
+// a crate. This is THE high-risk file in Rust supply chain —
+// it runs as the developer at compile time.
+func isRustBuildScript(path string) bool {
+	return path == "build.rs" || strings.HasSuffix(path, "/build.rs")
+}
+
+func isRustSource(path string) bool {
+	return strings.HasSuffix(path, ".rs") && !isRustBuildScript(path)
 }
 
 // detectMaliciousInstallScript inspects package.json's "scripts"
@@ -397,6 +437,137 @@ func shannonEntropy(b []byte) float64 {
 		h -= p * math.Log2(p)
 	}
 	return h
+}
+
+// detectGoInitSuspicious flags Go `init()` functions that contain
+// patterns associated with malicious behavior. Go's init() runs
+// at import time — there's no "you opted in" gesture — so the
+// bar for "suspicious" is lower than for runtime code. We score
+// on the COMBINATION: init() + (network OR exec OR sensitive-
+// file-read OR base64-decode), not individual signals (init()
+// alone is benign; net.Dial in a regular function is benign).
+var (
+	goInitFuncPattern         = regexp.MustCompile(`(?m)^\s*func\s+init\s*\(\s*\)\s*\{`)
+	goNetCallPattern          = regexp.MustCompile(`\b(?:net\.Dial|http\.Get|http\.Post|http\.NewRequest|net\.Listen)\b`)
+	goExecCallPattern         = regexp.MustCompile(`\bexec\.(?:Command|CommandContext)\b`)
+	goSensitiveFilePattern    = regexp.MustCompile(`os\.(?:Open|ReadFile)\s*\(\s*["']/(?:etc/(?:passwd|shadow|hosts)|root/\.ssh|home/[^"']*/\.(?:aws|ssh|npmrc|pypirc|gnupg))`)
+	goBase64DecodePattern     = regexp.MustCompile(`\bbase64\.(?:StdEncoding|RawStdEncoding|URLEncoding)\.DecodeString\b`)
+)
+
+func detectGoInitSuspicious(path string, content []byte) []StaticFinding {
+	initLoc := goInitFuncPattern.FindIndex(content)
+	if initLoc == nil {
+		return nil
+	}
+	// Look at the file as a whole — Go's init() can call
+	// helpers defined later, and our scope-tracking would be
+	// expensive. False-positive rate is acceptable for the
+	// gate's "warn / block" semantics since the user can
+	// allowlist legitimate cases.
+	var hits []StaticFinding
+	if goNetCallPattern.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "go-init-with-network",
+			Path:    path,
+			Snippet: "package has init() AND makes network calls — runs at import time without consent",
+			Weight:  2,
+		})
+	}
+	if goExecCallPattern.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "go-init-with-exec",
+			Path:    path,
+			Snippet: "package has init() AND spawns subprocesses",
+			Weight:  3,
+		})
+	}
+	if goSensitiveFilePattern.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "go-init-reads-sensitive-file",
+			Path:    path,
+			Snippet: "package has init() AND opens credential / ssh / hosts files",
+			Weight:  3,
+		})
+	}
+	if goBase64DecodePattern.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "go-init-base64-decode",
+			Path:    path,
+			Snippet: "package has init() AND uses base64 decode — payload-obfuscation shape",
+			Weight:  1,
+		})
+	}
+	return hits
+}
+
+// detectRustBuildRsSuspicious flags patterns in build.rs that
+// indicate code-at-build-time abuse. build.rs runs with the
+// developer's privileges at `cargo build` time — the same
+// privilege level as `npm postinstall` but invoked far more
+// often because it fires on every recompile too.
+var (
+	rustHttpClientPattern   = regexp.MustCompile(`\b(?:reqwest|ureq|surf|isahc|hyper::Client)\b`)
+	rustRawNetPattern       = regexp.MustCompile(`std::net::(?:TcpStream|UdpSocket)::connect`)
+	rustProcessCommand      = regexp.MustCompile(`std::process::Command::new`)
+	rustEnvSensitivePattern = regexp.MustCompile(`std::env::var\s*\(\s*"(?:HOME|AWS_|GITHUB_TOKEN|NPM_TOKEN|PYPI_TOKEN|CARGO_REGISTRY_TOKEN)`)
+	rustFsRead              = regexp.MustCompile(`std::fs::(?:read|read_to_string|read_dir|File::open)\s*\(\s*"(?:/etc/|/root/|/home/|.ssh|/var/lib/secrets)`)
+)
+
+func detectRustBuildRsSuspicious(path string, content []byte) []StaticFinding {
+	var hits []StaticFinding
+	if rustHttpClientPattern.Match(content) || rustRawNetPattern.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "rust-build-rs-network",
+			Path:    path,
+			Snippet: "build.rs makes HTTP / TCP calls at compile time — exfil shape",
+			Weight:  3,
+		})
+	}
+	if rustProcessCommand.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "rust-build-rs-process-spawn",
+			Path:    path,
+			Snippet: "build.rs spawns subprocesses at compile time",
+			Weight:  2,
+		})
+	}
+	if rustEnvSensitivePattern.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "rust-build-rs-reads-secret-env",
+			Path:    path,
+			Snippet: "build.rs reads credential-shaped env vars at compile time",
+			Weight:  3,
+		})
+	}
+	if rustFsRead.Match(content) {
+		hits = append(hits, StaticFinding{
+			Pattern: "rust-build-rs-reads-sensitive-file",
+			Path:    path,
+			Snippet: "build.rs reads system / credential / ssh files",
+			Weight:  3,
+		})
+	}
+	return hits
+}
+
+// detectRustImportTimeNetwork flags `lazy_static!` /
+// `once_cell::Lazy` blocks with network calls inside lib.rs —
+// the closest analogue to Go's init() in Rust.
+func detectRustImportTimeNetwork(path string, content []byte) []StaticFinding {
+	if !rustHttpClientPattern.Match(content) && !rustRawNetPattern.Match(content) {
+		return nil
+	}
+	// Only flag when lazy initialization is also present — a
+	// network call in a normal fn is fine.
+	if !regexp.MustCompile(`lazy_static\s*!\s*\{|once_cell::sync::Lazy::new`).Match(content) {
+		return nil
+	}
+	return []StaticFinding{{
+		Pattern: "rust-lazy-init-network",
+		Path:    path,
+		Snippet: "lazy_static / once_cell Lazy contains network call — runs first time module is touched",
+		Weight:  2,
+	}}
 }
 
 func snippetAround(content []byte, offset, span int) string {
