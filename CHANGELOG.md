@@ -9,6 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.8.0] — 2026-05-15
+
+### Added
+
+- **Persistent fix plans.** Every `scan` / `ci` / `forensics` /
+  `audit` command now accepts `--save-plan`. With the flag, chdora
+  writes the generated fix-plan to `~/.chaindora/fix-plans/<id>.json`
+  (ID format `YYYY-MM-DD-<4hex>`) and prints the ID with three
+  ready-to-paste follow-up commands. This decouples scan from fix:
+  run the audit in one terminal, hand the plan ID to a coworker,
+  apply it tomorrow in a different shell — without re-running the
+  scan. The saved JSON includes the full plan list, scan-time
+  metadata (chdora version, command line, scan root, total
+  findings), and an `applied_at` + `applied_results` history block
+  that re-applies update.
+
+- **`chdora plans` command tree.** Manage saved plans without
+  touching the filesystem directly:
+    - `chdora plans list` — tabular view (ID, created-at, fix count,
+      category breakdown, status).
+    - `chdora plans show <id>` — full plan render, grouped by
+      FixCategory (safe / semi-safe / unsafe / manual) with stable
+      ordering.
+    - `chdora plans apply <id> [--yes] [--aggressive] [--dry-run]`
+      — apply a saved plan (shortcut for `chdora fix --plan <id>`).
+    - `chdora plans delete <id>` (aliased `rm`) — remove one plan.
+    - `chdora plans prune [--older-than 30d]` — batch cleanup,
+      accepting Go duration syntax or `d` / `w` shorthand.
+
+- **`chdora fix --plan <id>`.** Apply a saved plan by ID. Bypasses
+  scanning entirely — commit to what was generated.
+
+- **End-of-run footer.** When a scan / ci / audit run produces
+  fixes but the user didn't pass `--fix` or `--save-plan`, chdora
+  now prints a three-option nudge:
+    `→ save for later:    re-run with --save-plan`
+    `→ apply now:         re-run with --fix --yes --fix-aggressive`
+    `→ save AND apply:    re-run with --save-plan --fix --yes`
+  Suppressed when there are no fixes (clean run) or when the user
+  already opted in to one of the three actions.
+
+### Changed
+
+- **`chdora fix --plan` is now a string flag (plan ID), not a
+  boolean.** The previous boolean `--plan` (dry-run / describe-
+  only) has been renamed to `--dry-run`. Reflects the v0.8.0
+  primary use case: applying saved plans by ID.
+
+- **`fix` no longer requires `--from`.** Either `--from <path>` or
+  `--plan <id>` is required; they're mutually exclusive.
+
+### Added (internal)
+
+- `internal/fixplan` package — Plan / Summary / AppliedResult types
+  + DiskStore with atomic writes (temp file + rename), path-
+  traversal validation on IDs, deterministic listing (most-recent
+  first), and `MarkApplied` for write-back history.
+
 ## [0.7.2] — 2026-05-15
 
 ### Fixed

@@ -33,6 +33,7 @@ var (
 	ciFix            bool
 	ciYes            bool
 	ciAggressive     bool
+	ciSavePlan       bool
 	ciSkipRegistry   bool
 	ciExcludeCVEs    bool
 	ciExcludeSupply  bool
@@ -174,8 +175,16 @@ continuous-integration use:
 			}
 		}
 
+		plans := buildAllFixPlans(all)
+		var savedID string
+		if ciSavePlan && len(plans) > 0 {
+			id, sErr := saveFixPlan(plans, len(all), root)
+			if sErr != nil {
+				return fmt.Errorf("save plan: %w", sErr)
+			}
+			savedID = id
+		}
 		if ciFixPlan || ciFix {
-			plans := buildAllFixPlans(all)
 			allowed := []findings.FixCategory{findings.FixSafe}
 			if ciAggressive {
 				allowed = append(allowed, findings.FixSemiSafe)
@@ -189,6 +198,7 @@ continuous-integration use:
 				return fErr
 			}
 		}
+		emitEndOfRunFooter(os.Stderr, plans, ciSavePlan && savedID != "", savedID, ciFixPlan || ciFix)
 
 		if shouldFail(all, ciFailOn) {
 			os.Exit(1)
@@ -278,5 +288,6 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
 	ciCmd.Flags().BoolVar(&ciYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	ciCmd.Flags().BoolVar(&ciAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes")
+	ciCmd.Flags().BoolVar(&ciSavePlan, "save-plan", false, "save the generated fix-plan to ~/.chaindora/fix-plans/ and print its ID")
 	rootCmd.AddCommand(ciCmd)
 }

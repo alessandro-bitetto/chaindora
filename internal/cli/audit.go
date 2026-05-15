@@ -32,6 +32,7 @@ var (
 	auditFix          bool
 	auditYes          bool
 	auditAggressive   bool
+	auditSavePlan     bool
 	auditSSHBaseline  string
 	auditSkipRegistry bool
 	auditExcludeCVEs   bool
@@ -130,6 +131,7 @@ Each detector can be individually disabled with its --skip-X flag.`,
 		forensicsFix = auditFix
 		forensicsYes = auditYes
 		forensicsAggressive = auditAggressive
+		forensicsSavePlan = auditSavePlan
 
 		// Single-root case: identical to before, one full flow.
 		if len(roots) == 1 {
@@ -231,6 +233,8 @@ func init() {
 		"auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	auditCmd.Flags().BoolVar(&auditAggressive, "fix-aggressive", false,
 		"also auto-apply `semi-safe` fixes under --yes")
+	auditCmd.Flags().BoolVar(&auditSavePlan, "save-plan", false,
+		"save the generated fix-plan to ~/.chaindora/fix-plans/ and print its ID")
 
 	rootCmd.AddCommand(auditCmd)
 }

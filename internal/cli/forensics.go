@@ -36,6 +36,7 @@ var (
 	forensicsFix          bool
 	forensicsYes          bool
 	forensicsAggressive   bool
+	forensicsSavePlan     bool
 	forensicsSkipRegistry bool
 	forensicsExcludeCVEs   bool
 	forensicsExcludeSupply bool
@@ -250,8 +251,20 @@ func runForensicsFlow(ctx context.Context) error {
 			return err
 		}
 
+		plans := buildAllFixPlans(all)
+		var savedID string
+		if forensicsSavePlan && len(plans) > 0 {
+			scanRoot := forensicsScanProjects
+			if scanRoot == "" {
+				scanRoot = forensicsHome
+			}
+			id, sErr := saveFixPlan(plans, len(all), scanRoot)
+			if sErr != nil {
+				return fmt.Errorf("save plan: %w", sErr)
+			}
+			savedID = id
+		}
 		if forensicsFixPlan || forensicsFix {
-			plans := buildAllFixPlans(all)
 			allowed := []findings.FixCategory{findings.FixSafe}
 			if forensicsAggressive {
 				allowed = append(allowed, findings.FixSemiSafe)
@@ -265,6 +278,7 @@ func runForensicsFlow(ctx context.Context) error {
 				return fErr
 			}
 		}
+		emitEndOfRunFooter(os.Stderr, plans, forensicsSavePlan && savedID != "", savedID, forensicsFixPlan || forensicsFix)
 
 		if len(all) > 0 {
 			os.Exit(1)
@@ -295,6 +309,7 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
 	forensicsCmd.Flags().BoolVar(&forensicsYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	forensicsCmd.Flags().BoolVar(&forensicsAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes")
+	forensicsCmd.Flags().BoolVar(&forensicsSavePlan, "save-plan", false, "save the generated fix-plan to ~/.chaindora/fix-plans/ and print its ID")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipRegistry, "skip-registry", false, "do not query npm/PyPI for evidence (offline mode; dep-confusion / typosquat / install-script heuristics become silent)")
 	forensicsCmd.Flags().BoolVar(&forensicsExcludeCVEs, "exclude-cves", false, "hide the dependency-CVE section")
 	forensicsCmd.Flags().BoolVar(&forensicsExcludeSupply, "exclude-supply-chain", false, "hide the supply-chain attack section")

@@ -30,6 +30,7 @@ var (
 	scanFix          bool
 	scanYes          bool
 	scanAggressive   bool
+	scanSavePlan     bool
 	scanSkipRegistry bool
 	scanExcludeCVEs    bool
 	scanExcludeSupply  bool
@@ -135,8 +136,16 @@ var scanCmd = &cobra.Command{
 			return err
 		}
 
+		plans := buildAllFixPlans(all)
+		var savedID string
+		if scanSavePlan && len(plans) > 0 {
+			id, sErr := saveFixPlan(plans, len(all), root)
+			if sErr != nil {
+				return fmt.Errorf("save plan: %w", sErr)
+			}
+			savedID = id
+		}
 		if scanFixPlan || scanFix {
-			plans := buildAllFixPlans(all)
 			allowed := []findings.FixCategory{findings.FixSafe}
 			if scanAggressive {
 				allowed = append(allowed, findings.FixSemiSafe)
@@ -150,6 +159,7 @@ var scanCmd = &cobra.Command{
 				return fErr
 			}
 		}
+		emitEndOfRunFooter(os.Stderr, plans, scanSavePlan && savedID != "", savedID, scanFixPlan || scanFix)
 
 		if len(all) > 0 {
 			os.Exit(1)
@@ -177,5 +187,6 @@ func init() {
 	scanCmd.Flags().BoolVar(&scanFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
 	scanCmd.Flags().BoolVar(&scanYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	scanCmd.Flags().BoolVar(&scanAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes (uninstalls, project-lockfile upgrades)")
+	scanCmd.Flags().BoolVar(&scanSavePlan, "save-plan", false, "save the generated fix-plan to ~/.chaindora/fix-plans/ and print its ID (apply later with 'chdora fix --plan ID')")
 	rootCmd.AddCommand(scanCmd)
 }

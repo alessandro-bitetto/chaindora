@@ -21,7 +21,7 @@ For deeper coverage see [docs/architecture.md](./docs/architecture.md),
 
 ## Quick orientation
 
-Seven top-level commands:
+Eight top-level commands:
 
 - `chdora scan [path]` — project-tree scan; runs OSV + incident pack +
   heuristics over inventory.
@@ -37,6 +37,12 @@ Seven top-level commands:
 - `chdora fix --from <findings.json>` — audit-then-apply remediation.
   Reads a previously-emitted findings JSON, runs the same fix pipeline
   `--fix` provides on the scan commands, without rescanning.
+- `chdora fix --plan <id>` (v0.8.0) — apply a previously saved
+  fix-plan by ID. `--save-plan` on scan/ci/forensics/audit writes
+  `~/.chaindora/fix-plans/<id>.json` and prints the ID; `plans
+  list / show / delete / prune / apply` round out the management
+  surface. Decouples scan-time from fix-time so they can happen in
+  different terminals, different days, different people.
 - `chdora update` — refresh the curated incident pack from
   `github.com/alessandro-bitetto/chaindora` into
   `~/.chaindora/incidents/`.
@@ -96,8 +102,10 @@ against the repo itself with `--exclude testdata --fail-on critical,high`.
 cmd/chdora/                 entry point (cobra root)
 internal/
   cli/                         top-level commands + flag wiring + fix runner integration
-    {root,scan,ci,forensics,audit,fix,update,upgrade}.go
-    {render,fixhelpers,scanprojects}.go
+    {root,scan,ci,forensics,audit,fix,plans,update,upgrade}.go
+    {render,fixhelpers,saveplan,preflight,scanprojects}.go
+  fixplan/                     persistent fix plans (v0.8.0)
+    {fixplan,diskstore}.go     Plan / Summary / AppliedResult; DiskStore at ~/.chaindora/fix-plans/
   inventory/                   per-ecosystem lockfile / manifest parsers
     {npm,pip,yarn,pnpm,uv,pipfile,poetry}.go   (npm + PyPI)
     {ghactions,gitlabci,bitbucket,circleci,azure}.go (CI systems)
