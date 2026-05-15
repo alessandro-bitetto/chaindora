@@ -39,7 +39,155 @@ func NewNPM() *NPM {
 }
 
 type npmPackageDoc struct {
-	Time map[string]string `json:"time"` // version → ISO8601 publish date; "created" / "modified" reserved keys
+	Time     map[string]string             `json:"time"` // version → ISO8601 publish date; "created" / "modified" reserved keys
+	Versions map[string]npmVersionMetadata `json:"versions,omitempty"`
+}
+
+// npmVersionMetadata captures the per-version subset we use for
+// gate-time checks (publisher, install scripts, dependencies, repo).
+// We deliberately don't pull in `dist.shasum` etc. — keeps the
+// cache footprint bounded for packages with hundreds of versions.
+type npmVersionMetadata struct {
+	Name       string            `json:"name"`
+	Version    string            `json:"version"`
+	NPMUser    *npmAuthor        `json:"_npmUser,omitempty"`
+	Author     interface{}       `json:"author,omitempty"`
+	Scripts    map[string]string `json:"scripts,omitempty"`
+	Repository interface{}       `json:"repository,omitempty"`
+	HasBindGyp bool              `json:"-"` // populated in code if binding.gyp present
+}
+
+type npmAuthor struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// PublishedAtVersion returns the publish timestamp for a specific
+// (name, version) pair. Zero time + nil error means "package exists
+// but the version isn't in the .time map" (rare — happens for
+// recently-yanked versions). The gate's cooldown check uses this:
+// if the version is younger than the threshold, the install is
+// refused.
+func (n *NPM) PublishedAtVersion(ctx context.Context, name, version string) (time.Time, error) {
+	status, doc, err := n.fetchPackage(ctx, name)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if status == http.StatusNotFound {
+		return time.Time{}, nil
+	}
+	if status != http.StatusOK || doc == nil {
+		return time.Time{}, fmt.Errorf("npm publishedAtVersion %s@%s: HTTP %d", name, version, status)
+	}
+	ts, ok := doc.Time[version]
+	if !ok {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("npm publishedAtVersion %s@%s: parse %q: %w", name, version, ts, err)
+	}
+	return t, nil
+}
+
+// PublisherOfVersion returns the npm-user account that published a
+// given version. Used by the gate's publisher-change check: a
+// version published by a different account than the prior trusted
+// version is a takeover indicator.
+//
+// Returns ("", nil) when the registry response doesn't carry
+// `_npmUser` (older publishes, registry mirrors). Callers should
+// treat this as "unknown" rather than "no publisher" — the gate
+// degrades to Verdict=Unknown in that case.
+func (n *NPM) PublisherOfVersion(ctx context.Context, name, version string) (string, error) {
+	status, doc, err := n.fetchPackage(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK || doc == nil {
+		return "", nil
+	}
+	vm, ok := doc.Versions[version]
+	if !ok {
+		return "", nil
+	}
+	if vm.NPMUser != nil && vm.NPMUser.Name != "" {
+		return vm.NPMUser.Name, nil
+	}
+	return "", nil
+}
+
+// VersionMetadata returns the per-version blob the gate needs for
+// the static-pattern, install-script, and version-bump-diff
+// checkers. Returns (nil, nil) when the version doesn't exist —
+// callers should treat that as Unknown.
+func (n *NPM) VersionMetadata(ctx context.Context, name, version string) (*VersionInfo, error) {
+	status, doc, err := n.fetchPackage(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK || doc == nil {
+		return nil, nil
+	}
+	vm, ok := doc.Versions[version]
+	if !ok {
+		return nil, nil
+	}
+	publisher := ""
+	if vm.NPMUser != nil {
+		publisher = vm.NPMUser.Name
+	}
+	publishedAt := time.Time{}
+	if ts, ok := doc.Time[version]; ok {
+		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+			publishedAt = t
+		}
+	}
+	return &VersionInfo{
+		Name:        vm.Name,
+		Version:     vm.Version,
+		Publisher:   publisher,
+		PublishedAt: publishedAt,
+		Scripts:     vm.Scripts,
+	}, nil
+}
+
+// AllVersions returns the timeline of every published version
+// (in chronological order by publish date) for a package.
+// Used by the publisher-change check to find "the prior trusted
+// version" given the version we're about to install.
+func (n *NPM) AllVersions(ctx context.Context, name string) ([]VersionInfo, error) {
+	status, doc, err := n.fetchPackage(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK || doc == nil {
+		return nil, nil
+	}
+	out := make([]VersionInfo, 0, len(doc.Versions))
+	for ver, vm := range doc.Versions {
+		publisher := ""
+		if vm.NPMUser != nil {
+			publisher = vm.NPMUser.Name
+		}
+		publishedAt := time.Time{}
+		if ts, ok := doc.Time[ver]; ok {
+			if t, err := time.Parse(time.RFC3339, ts); err == nil {
+				publishedAt = t
+			}
+		}
+		out = append(out, VersionInfo{
+			Name:        name,
+			Version:     ver,
+			Publisher:   publisher,
+			PublishedAt: publishedAt,
+			Scripts:     vm.Scripts,
+		})
+	}
+	// Sort chronologically — oldest first, which is the order the
+	// publisher-change check wants ("find the last version before X").
+	sortVersionsByPublishedAt(out)
+	return out, nil
 }
 
 func (n *NPM) Exists(ctx context.Context, name string) (bool, error) {

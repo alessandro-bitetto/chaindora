@@ -19,6 +19,7 @@ package registries
 
 import (
 	"context"
+	"sort"
 	"time"
 )
 
@@ -57,6 +58,45 @@ type PackageInfo struct {
 // Fresh reports whether p was fetched within the given TTL.
 func (p PackageInfo) Fresh(ttl time.Duration) bool {
 	return !p.FetchedAt.IsZero() && time.Since(p.FetchedAt) < ttl
+}
+
+// VersionInfo is the per-version metadata the gate-time checks
+// (cooldown, publisher-change, install-script, version-bump-diff)
+// share. Cross-ecosystem: filled by NPM.VersionMetadata,
+// PyPI.VersionMetadata, etc.
+type VersionInfo struct {
+	Name        string            `json:"name"`
+	Version     string            `json:"version"`
+	Publisher   string            `json:"publisher,omitempty"`
+	PublishedAt time.Time         `json:"published_at,omitempty"`
+	Scripts     map[string]string `json:"scripts,omitempty"`
+}
+
+// HasInstallScript reports whether this version declares any of the
+// install-time lifecycle scripts npm executes (preinstall,
+// install, postinstall). PyPI's "scripts" notion is different;
+// PyPI.VersionMetadata fills this field for setup.py-vs-pyproject
+// equivalents.
+func (v VersionInfo) HasInstallScript() bool {
+	for _, k := range []string{"preinstall", "install", "postinstall"} {
+		if v.Scripts[k] != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// sortVersionsByPublishedAt orders versions oldest-first. Zero-time
+// publish dates (legacy metadata) sort last. Used by publisher-change
+// to find "the version before X."
+func sortVersionsByPublishedAt(vs []VersionInfo) {
+	sort.SliceStable(vs, func(i, j int) bool {
+		if vs[i].PublishedAt.IsZero() != vs[j].PublishedAt.IsZero() {
+			// Zero times sink to the end.
+			return !vs[i].PublishedAt.IsZero()
+		}
+		return vs[i].PublishedAt.Before(vs[j].PublishedAt)
+	})
 }
 
 // Noop returns a Probe that reports every package as nonexistent / unknown.
