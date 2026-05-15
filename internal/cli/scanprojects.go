@@ -27,21 +27,36 @@ type projectScanOpts struct {
 	FreshPopular  bool
 	Verbose       bool
 	Excludes      []string
+	// PreInventory, if non-nil, bypasses inventory.Scan and runs the detector
+	// pipeline against the supplied Inventory directly. Used by deep-mode
+	// (`chaindora forensics --deep`) where the inventory comes from
+	// `npm ls -g` / `pip list` rather than a filesystem walk.
+	PreInventory *inventory.Inventory
 }
 
 // scanProject runs the full chaindora scan pipeline against a single project
 // root and returns the aggregated findings. Returns nil for an empty inventory
 // (no project markers actually parseable at that root).
 func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]findings.Finding, error) {
-	inv, err := inventory.Scan(root, inventory.WithExcludes(opts.Excludes...))
-	if err != nil {
-		return nil, err
+	var inv *inventory.Inventory
+	if opts.PreInventory != nil {
+		inv = opts.PreInventory
+	} else {
+		var err error
+		inv, err = inventory.Scan(root, inventory.WithExcludes(opts.Excludes...))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(inv.Packages) == 0 && len(inv.Sources) == 0 {
 		return nil, nil
 	}
 	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "  %s: %d pkgs / %d sources\n", root, len(inv.Packages), len(inv.Sources))
+		label := root
+		if opts.PreInventory != nil {
+			label = "--deep (global packages)"
+		}
+		fmt.Fprintf(os.Stderr, "  %s: %d pkgs / %d sources\n", label, len(inv.Packages), len(inv.Sources))
 	}
 
 	var all []findings.Finding

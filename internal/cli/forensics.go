@@ -27,6 +27,7 @@ var (
 	forensicsSkipHeur     bool
 	forensicsVerbose      bool
 	forensicsExcludes     []string
+	forensicsDeep         bool
 )
 
 var forensicsCmd = &cobra.Command{
@@ -110,6 +111,32 @@ var forensicsCmd = &cobra.Command{
 			}
 		}
 
+		if forensicsDeep {
+			if forensicsVerbose {
+				fmt.Fprintln(os.Stderr, "enumerating globally-installed packages")
+			}
+			globalInv := hostforensics.ScanGlobalPackages()
+			if forensicsVerbose {
+				fmt.Fprintf(os.Stderr, "global packages: %d (sources: %d)\n",
+					len(globalInv.Packages), len(globalInv.Sources))
+			}
+			results, err := scanProject(ctx, "", projectScanOpts{
+				IncidentsDir:  forensicsIncidentsDir,
+				SkipOSV:       forensicsSkipOSV,
+				SkipIncidents: false,
+				SkipHeuristic: forensicsSkipHeur,
+				FreshPopular:  false,
+				Verbose:       forensicsVerbose,
+				Excludes:      forensicsExcludes,
+				PreInventory:  globalInv,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warn: deep scan: %v\n", err)
+			} else {
+				all = append(all, results...)
+			}
+		}
+
 		if err := renderFindings(os.Stdout, all, effectiveFormat(forensicsFormat, forensicsJSON)); err != nil {
 			return err
 		}
@@ -133,5 +160,6 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsSkipHeur, "skip-heuristic", false, "skip behavioral heuristics during --scan-projects")
 	forensicsCmd.Flags().BoolVar(&forensicsVerbose, "verbose", false, "log per-project scanned + per-host check counts to stderr")
 	forensicsCmd.Flags().StringSliceVar(&forensicsExcludes, "exclude", nil, "directory basename(s) to skip during the hunt / project scans")
+	forensicsCmd.Flags().BoolVar(&forensicsDeep, "deep", false, "also enumerate globally-installed packages (npm -g, pip) and run the detector pipeline against them")
 	rootCmd.AddCommand(forensicsCmd)
 }

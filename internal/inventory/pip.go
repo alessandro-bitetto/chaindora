@@ -9,10 +9,14 @@ import (
 
 var pypiNormRe = regexp.MustCompile(`[-_.]+`)
 
-// normalizePyPIName applies PEP 503 normalization: lowercase, runs of [-_.] → "-".
-func normalizePyPIName(name string) string {
+// NormalizePyPIName applies PEP 503 normalization: lowercase, runs of [-_.] → "-".
+func NormalizePyPIName(name string) string {
 	return strings.ToLower(pypiNormRe.ReplaceAllString(name, "-"))
 }
+
+// normalizePyPIName is kept as a private alias for backward-compatibility
+// within the package.
+func normalizePyPIName(name string) string { return NormalizePyPIName(name) }
 
 // parsePipRequirements handles exact pins (name==version). Range specifiers,
 // editable installs, and -r includes are intentionally skipped in v1.
