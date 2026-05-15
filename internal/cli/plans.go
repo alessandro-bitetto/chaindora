@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -172,6 +173,38 @@ type applyOpts struct {
 	DryRun     bool
 }
 
+// emitPriorApplyBanner surfaces the "this plan was already applied"
+// signal that v0.8.2 was missing. When a user re-runs `chdora fix
+// --plan <id>` against an already-applied plan, the preflight check
+// silently drops every fix as already-satisfied and the runner says
+// "no fixable findings" — accurate but mysterious. The banner tells
+// the user what's happening up front so they don't burn a fifth run
+// trying to "make it work."
+//
+// We never refuse the re-apply: the lockfile is the source of truth,
+// preflight is the authoritative check, and there are real cases
+// where re-applying is desired (a teammate rolled back the install,
+// the project was reset from git, etc.). Just inform.
+func emitPriorApplyBanner(w io.Writer, plan fixplan.Plan) {
+	if plan.AppliedAt == nil {
+		return
+	}
+	applied, satisfied, skipped := 0, 0, 0
+	for _, r := range plan.AppliedResults {
+		switch r.Status {
+		case "applied":
+			applied++
+		case "already-satisfied":
+			satisfied++
+		case "skipped":
+			skipped++
+		}
+	}
+	fmt.Fprintf(w, "[chdora] NOTE: this plan was previously applied %s — applied=%d already-satisfied=%d skipped=%d\n",
+		plan.AppliedAt.Local().Format("2006-01-02 15:04:05"), applied, satisfied, skipped)
+	fmt.Fprintln(w, "        re-applying anyway — preflight will skip anything already at the required version.")
+}
+
 // applyStoredPlan runs the fixes recorded in a saved plan and writes
 // back the results so `plans list` shows the applied status. It does
 // not re-run the scan — that is the whole point of saved plans: you
@@ -187,6 +220,7 @@ func applyStoredPlan(ctx context.Context, store *fixplan.DiskStore, plan fixplan
 	}
 	fmt.Fprintf(os.Stderr, "applying plan %s (%d fix(es), created %s)\n",
 		plan.ID, len(plan.Plans), plan.CreatedAt.Local().Format("2006-01-02 15:04"))
+	emitPriorApplyBanner(os.Stderr, plan)
 	filtered, skipped, notes := preflightFilterSatisfied(plan.Plans)
 	emitPreflightNotes(os.Stderr, notes, skipped)
 	_, _, err := findings.RunFixes(ctx, filtered, findings.RunOptions{

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.8.3] — 2026-05-15
+
+### Added
+
+- **Prior-apply banner on `chdora fix --plan <id>`.** When a saved
+  plan is re-applied (its `applied_at` is non-nil from a previous
+  run), chdora now prints a clear banner before preflight runs:
+  `[chdora] NOTE: this plan was previously applied 2026-05-15 20:48:23
+  — applied=N already-satisfied=N skipped=N`. Without this, the
+  2nd+ re-run silently passed through preflight (every fix dropped
+  as already-satisfied) and reported "no fixable findings" — accurate
+  but mysterious if the user wasn't sure whether the first apply had
+  worked. We don't refuse re-apply: the lockfile is the source of
+  truth and preflight is the authoritative check, plus there are
+  legitimate re-apply scenarios (teammate reverted the install,
+  project was reset from git, etc.).
+
 ## [0.8.2] — 2026-05-15
 
 ### Fixed
