@@ -166,6 +166,18 @@ func watchOnePass(ctx context.Context, statePath string) error {
 			}
 		}
 	}
+	// v0.13: if a chdora-server is configured (--server URL or
+	// the agent is enrolled), push the FULL current state on
+	// every pass. The server's own dedup handles "we've seen
+	// this fingerprint before" — clients don't need a separate
+	// delta protocol.
+	if c, _ := loadAgentConfig(agentConfigPath); c != nil && c.ServerURL != "" {
+		if _, err := pushFindingsToServer(c, fs, strings.Join(os.Args, " ")); err != nil {
+			fmt.Fprintf(os.Stderr, "[chdora watch] server push failed: %v\n", err)
+		} else if watchVerbose {
+			fmt.Fprintf(os.Stderr, "[chdora watch] pushed %d finding(s) to %s\n", len(fs), c.ServerURL)
+		}
+	}
 	if watchVerbose {
 		fmt.Fprintf(os.Stderr, "[chdora watch] pass: scanned %d finding(s); %d new; %d resolved\n",
 			len(fs), len(newFindings), len(resolvedFps))

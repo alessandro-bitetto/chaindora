@@ -10,6 +10,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md).
 
+## [0.13.0] — 2026-05-16
+
+The "fleet mode" milestone. A single chdora-server process now
+accepts findings from many agents and serves a multi-machine
+dashboard. Opt-in by config; the default single-machine workflow
+is untouched.
+
+(Skipping v0.12 — IaC supply chain is still planned but server
+mode unblocks larger orgs first.)
+
+### Added — `chdora server`
+
+`internal/server/` — new package with JSON-backed store +
+HTTP routes + embedded HTML dashboard.
+
+**Store**: single-file state at `<data-dir>/state.json`.
+Atomic-write (temp + rename). Pure stdlib JSON; no SQLite
+dep. Scales to tens-to-hundreds of agents; v0.14+ migration
+path to SQL if usage grows past that.
+
+**Auth**: per-agent bearer tokens. Server generates the raw
+token at enrollment time, shows it once, stores only the
+SHA-256 hash. Optional shared `--enrollment-secret` gates who
+can enroll.
+
+**HTTP routes**:
+- `POST /api/v1/agents/enroll` — register an agent
+- `POST /api/v1/agents/<id>/scan` — upload findings (Bearer auth)
+- `GET /api/v1/agents` — list enrolled agents
+- `GET /api/v1/agents/<id>` — agent details
+- `DELETE /api/v1/agents/<id>` — graceful decommission (Bearer auth)
+- `GET /api/v1/findings?agent=&severity=&latest=1&limit=` — query
+- `GET /api/v1/summary` — fleet aggregates
+- `GET /api/v1/version`, `GET /healthz` — probes
+- `GET /` — embedded HTML dashboard
+
+**Dashboard**: single static page, no JS framework, no build
+step. Live-fetches `/api/v1/summary` + `/api/v1/findings` every
+30s. Severity-colored cards + agent table + recent-findings
+table. Renders fine in any modern browser.
+
+**Graceful shutdown**: SIGINT/SIGTERM flushes state before exit
+so the last in-flight push isn't lost. Access log to stderr
+in one-line-per-request format.
+
+### Added — `chdora agent`
+
+Three subcommands:
+- `chdora agent enroll --server <url> --name <id> [--enrollment-secret X]`
+  — registers and saves credentials to `~/.chaindora/agent.json`
+  (mode 0600). The api_key is persisted client-side only.
+- `chdora agent push --findings <path>` — upload a scan JSON.
+- `chdora agent status` — show enrollment + ping server.
+
+### Added — watch integration
+
+`chdora watch` now auto-pushes to the configured server on every
+pass when `~/.chaindora/agent.json` exists. No new flags needed
+— enrollment is the opt-in. Existing `--webhook` path still
+works for non-server flows.
+
+### Quick start
+
+```sh
+# Server box
+chdora server start --addr :8080 --data-dir /var/lib/chdora \
+                    --enrollment-secret RANDOM-LONG-STRING
+
+# Each agent (laptop / CI node / etc.)
+chdora agent enroll --server https://chaindora.corp:8080 \
+                     --name $(hostname) \
+                     --enrollment-secret RANDOM-LONG-STRING
+chdora watch --interval 1h  # auto-pushes every pass
+```
+
+### Deferred to v0.13.x
+
+- TLS termination — for v0.13.0, stand the server behind nginx
+  / caddy / Cloudflare Tunnel
+- Webhook ingest (`POST /api/v1/webhook/{github,gitlab,manual}`)
+  for git-push-triggered scans
+- Scheduled fleet scans (server pushes scan jobs to agents)
+- SAML/OIDC auth for the dashboard
+- SQL backend for >1000-agent fleets
+- Multi-tenant orgs
+
+### Tests
+
+httptest end-to-end: enroll → push → list → summary → dashboard.
+State-persistence roundtrip. Wrong-token-rejected. All green
+under `go test ./... -race`.
+
 ## [0.11.2] — 2026-05-16
 
 The "no asymmetry" milestone — closes every "npm only" /

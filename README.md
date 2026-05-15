@@ -464,8 +464,12 @@ surface gap identified there.
 - **v0.12** — IaC supply chain: Terraform / OpenTofu modules +
   providers, Helm charts (deps + hooks), Ansible Galaxy,
   Composer/Packagist (PHP), NuGet (.NET).
-- **v0.13** — Server mode: scheduled fleet scans, findings DB,
-  webhook ingest, multi-machine dashboard. Opt-in by config.
+- **v0.13** ✅ shipped — Server mode: `chdora server start` accepts
+  findings from many `chdora agent` clients, persists them to a
+  single-file JSON store, serves a fleet dashboard at `/` and a
+  JSON API at `/api/v1/*`. Per-agent bearer tokens; optional
+  enrollment secret. `chdora watch` auto-pushes when enrolled.
+  Scheduled scans + webhook ingest + TLS land in v0.13.x.
 - **v0.14** — AI / ML supply chain: HuggingFace pickle scanner,
   PyTorch / TF / Keras model file scanner, MCP server / Claude
   Code skill auditor, Gradle (separate parser from Maven).
