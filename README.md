@@ -448,15 +448,17 @@ surface gap identified there.
   suppression / PR comments); yarn + pnpm gate resolvers; PyPI gate
   parity for cooldown / OSV / static-pattern; `chdora watch` daemon;
   sigstore-provenance check.
-- **v0.11** — close the highest-leverage gaps: git-URL trust
-  evaluator (`pip install git+...`, `npm install user/repo`, CMake
-  `FetchContent`, `go get` against unknown hosts), build-time +
-  import-time static scan for Go `init()` and Rust `build.rs`
-  (proc-macros), trust-anchor drift forensics
-  (`.npmrc registry=`, `pip.conf index-url`, `git insteadOf`,
-  ssh `known_hosts`, CA store), RubyGems + crates + Maven Central
-  detection + cooldown + OSV, PyPI gate parity for
-  publisher-change / maintainer-trust / version-diff.
+- **v0.11** ✅ shipped — ecosystem-pluggable gate refactor;
+  RubyGems + crates.io + Maven Central full-stack ecosystems;
+  PyPI gate parity completed (publisher-change /
+  maintainer-trust / version-diff); build-time + import-time
+  static-scan patterns (Go `init()`, Rust `build.rs`); trust-
+  anchor drift forensics (`.npmrc` / `pip.conf` / `git insteadOf`
+  / CA store baseline + drift detection).
+- **v0.11.1** — git-URL trust evaluator (the remaining piece of
+  the original v0.11 plan): `pip install git+...`,
+  `npm install user/repo`, CMake `FetchContent_Declare`,
+  `go get` against unknown hosts.
 - **v0.12** — IaC supply chain: Terraform / OpenTofu modules +
   providers, Helm charts (deps + hooks), Ansible Galaxy,
   Composer/Packagist (PHP), NuGet (.NET).

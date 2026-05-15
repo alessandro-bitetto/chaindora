@@ -10,6 +10,151 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md).
 
+## [0.11.0] — 2026-05-16
+
+The "boundaries" milestone — driven by the threat model rather
+than by ecosystem checklist. v0.11 closes five of the six gaps
+the threat model called out; the sixth (git-URL trust evaluator)
+slides to v0.11.1.
+
+### Added — gate ecosystem pluggability (refactor)
+
+- `internal/gate/probes.go`: `VersionProbe` + `ProvenanceProbe`
+  interfaces + `Probes` registry. Every gate checker now
+  dispatches through the table. Adding a new ecosystem is
+  one-line registration in `cli/gate.go`'s `buildGateProbes()`
+  — the existing seven checkers (allowlist, OSV, cooldown,
+  publisher-change, maintainer-trust, provenance, static-pattern
+  + version-diff) light up automatically.
+- Canonicalization map: `pip`→`pypi`, `cargo`→`crates`,
+  `gem`/`rubygems`→`rubygems`, `maven-central`→`maven`. Users
+  can pass either form on `--ecosystem`.
+- `internal/cli/gate_stack.go`: single `buildCheckerStack` helper
+  shared by `gate check` and `gate exec` so the two surfaces
+  can't drift.
+
+### Added — PyPI gate parity
+
+- registries.PyPI now satisfies `VersionProbe` end-to-end
+  (`PublisherOfVersion` uses `info.maintainer_email` /
+  `info.author_email` as project-level publisher; `AllVersions`
+  returns the full release timeline). Publisher-change,
+  maintainer-trust, version-diff all fire for PyPI.
+- Live-verified: `chdora gate check requests@2.32.0
+  --ecosystem pypi` reports publisher "Ian Stapleton Cordasco,
+  Nate Prewitt", unchanged since 2.31.0.
+
+### Added — three new ecosystems (full stack)
+
+**RubyGems** (`Gemfile.lock` → rubygems.org/api/v1):
+- `internal/inventory/rubygems.go`: Bundler lockfile parser
+- `internal/registries/rubygems.go`: `/versions/<name>.json` for
+  publish times + authors (used as publisher); `<name>-<v>.gem`
+  for tarballs; gem files are tar archives, scanned by the
+  existing static-pattern infrastructure
+- OSV ecosystem mapping (`RubyGems`)
+- PURL type (`gem`)
+
+**crates.io** (`Cargo.lock` → crates.io/api/v1):
+- `internal/inventory/cargo.go`: TOML lockfile parser (hand-
+  parsed; deliberately doesn't add a TOML dep)
+- `internal/registries/crates.go`: per-version
+  `published_by.login` is the publisher (more reliable than
+  PyPI's project-level field)
+- OSV ecosystem mapping (`crates.io`)
+- PURL type (`cargo`)
+- Cargo `build.rs` static-pattern detection from previous
+  commit lights up here
+
+**Maven Central** (`pom.xml` → search.maven.org Solr API):
+- `internal/inventory/maven.go`: pom.xml XML parser with
+  single-level property substitution; skips `test`-scoped deps
+- `internal/registries/maven.go`: Solr search for publish
+  timestamps + version timeline
+- Name format `groupId:artifactId` (PURL spec splits these into
+  namespace/name)
+- Per-version publisher returns "" — public API doesn't expose
+  deployer identity; publisher-change degrades to Unknown
+- JAR static-pattern returns Unknown until scanTarball gains
+  zip-walker support (v0.11.x)
+- OSV ecosystem mapping (`Maven`)
+- PURL type (`maven`)
+
+Live-verified all three against real registries:
+- `rails@7.0.4` (RubyGems): publisher "David Heinemeier Hansson",
+  516 versions, CVE detected
+- `serde@1.0.193` (crates): publisher "dtolnay", 312 versions
+- `com.google.guava:guava@32.0.0-jre` (Maven): 150 versions,
+  cooldown ✓, publisher Unknown by design
+
+### Added — build-time / import-time static-scan patterns
+
+- **Go `init()` detection** (only fires when init() function
+  present in the same file):
+  - `go-init-with-network` (weight 2): http.Get / net.Dial
+  - `go-init-with-exec` (weight 3): exec.Command
+  - `go-init-reads-sensitive-file` (3): /etc/passwd, ~/.ssh
+  - `go-init-base64-decode` (1): base64.DecodeString
+  - Test files (*_test.go) explicitly skipped
+
+- **Rust `build.rs`** patterns (every signal is high-severity
+  because build.rs runs as the developer at compile time):
+  - `rust-build-rs-network` (3): reqwest / ureq / std::net
+  - `rust-build-rs-process-spawn` (2): std::process::Command
+  - `rust-build-rs-reads-secret-env` (3): reads GITHUB_TOKEN /
+    NPM_TOKEN / CARGO_REGISTRY_TOKEN / AWS_*
+  - `rust-build-rs-reads-sensitive-file` (3): /etc, /root,
+    ~/.ssh
+  - `rust-lazy-init-network` for `lazy_static!` / `once_cell`
+    with network calls in regular Rust source
+
+### Added — trust-anchor drift forensics
+
+New detector layer `internal/detectors/trustdrift/`. Two-layer
+defense:
+- **Content-aware** warnings fire on first run for high-risk
+  shapes regardless of baseline state (`.npmrc registry=`
+  pointing somewhere non-canonical, `git config insteadOf`
+  rewrites, `pip.conf index-url` flipped).
+- **Drift detection**: baseline at first run
+  (`~/.chaindora/trustdrift-baseline.json`), report Added /
+  Modified / Removed on subsequent runs.
+
+Monitored anchors:
+- `~/.npmrc`, `~/.pypirc`, `~/.pip/pip.conf`,
+  `~/.config/pip/pip.conf`
+- `~/.cargo/config.toml`, `~/.gemrc`
+- `~/.gitconfig` (insteadOf rewrites = HIGH severity)
+- `~/.ssh/known_hosts`
+- OS CA bundle (macOS / Linux)
+
+Flags via `chdora forensics`:
+- `--skip-trust-drift` (skip the layer entirely)
+- `--trust-drift-update-baseline` (refresh after intentional
+  registry changes)
+
+Live-verified: a synthetic `.npmrc` redirecting to
+`https://evil-mirror.example.com/` + a `.gitconfig insteadOf`
+rewrite both fire HIGH-severity findings on the first
+forensics run.
+
+### Deferred to v0.11.1
+
+- **Git-URL trust evaluator** (`pip install git+...`,
+  `npm install user/repo`, `go get` against unknown hosts,
+  CMake `FetchContent_Declare`). The hardest remaining piece
+  per the threat model — requires a fundamentally different
+  trust model than registry-backed packages. Lands in v0.11.1.
+
+### Tests
+
+All ecosystem stacks tested via the existing stub-probe
+infrastructure (`internal/gate/testprobes_test.go`).
+Build-time scan tested with synthetic Go / Rust fixtures
+for both positive (attack-shape) and negative (legitimate-use)
+cases. Trust-drift detector tested in CLI E2E. All green
+under `go test ./... -race`.
+
 ## [0.10.1] — 2026-05-16
 
 ### Docs

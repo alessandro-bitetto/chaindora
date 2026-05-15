@@ -10,6 +10,7 @@ import (
 
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/hostforensics"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/trustdrift"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
@@ -37,6 +38,9 @@ var (
 	forensicsYes          bool
 	forensicsAggressive   bool
 	forensicsSavePlan     bool
+	// v0.11 trust-anchor drift
+	forensicsSkipTrustDrift          bool
+	forensicsTrustDriftUpdateBaseline bool
 	forensicsSkipRegistry bool
 	forensicsExcludeCVEs   bool
 	forensicsExcludeSupply bool
@@ -89,6 +93,23 @@ func runForensicsFlow(ctx context.Context) error {
 		}
 		tally.AbsorbFindings(results)
 		all = append(all, results...)
+
+		// Trust-anchor drift — high-leverage check per the threat
+		// model. Baselines on first run, alerts on subsequent
+		// drift. Content-aware warnings fire even on first run
+		// for high-risk shapes (.npmrc redirected away from
+		// canonical registry, git insteadOf rewrites, etc.).
+		if !forensicsSkipTrustDrift {
+			trustDet := trustdrift.New(home)
+			trustDet.UpdateBaseline = forensicsTrustDriftUpdateBaseline
+			tdResults, terr := trustDet.Detect(ctx)
+			if terr != nil {
+				fmt.Fprintf(os.Stderr, "warn: trust-drift: %v\n", terr)
+			} else {
+				tally.AbsorbFindings(tdResults)
+				all = append(all, tdResults...)
+			}
+		}
 
 		if !forensicsSkipHunt {
 			huntRoot := forensicsHunt
@@ -322,6 +343,8 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	forensicsCmd.Flags().BoolVar(&forensicsAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes")
 	forensicsCmd.Flags().BoolVar(&forensicsSavePlan, "save-plan", false, "save the generated fix-plan to ~/.chaindora/fix-plans/ and print its ID")
+	forensicsCmd.Flags().BoolVar(&forensicsSkipTrustDrift, "skip-trust-drift", false, "skip the trust-anchor drift check (.npmrc registry, .gitconfig insteadOf, CA store, etc.)")
+	forensicsCmd.Flags().BoolVar(&forensicsTrustDriftUpdateBaseline, "trust-drift-update-baseline", false, "rewrite the trust-drift baseline to current state — use after intentional registry/config changes")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipRegistry, "skip-registry", false, "do not query npm/PyPI for evidence (offline mode; dep-confusion / typosquat / install-script heuristics become silent)")
 	forensicsCmd.Flags().BoolVar(&forensicsExcludeCVEs, "exclude-cves", false, "hide the dependency-CVE section")
 	forensicsCmd.Flags().BoolVar(&forensicsExcludeSupply, "exclude-supply-chain", false, "hide the supply-chain attack section")
