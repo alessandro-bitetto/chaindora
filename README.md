@@ -1,65 +1,74 @@
 # chaindora
 
-> **Supply chain compromise scanner** — detect known IOCs, post-compromise
-> host artifacts, suspicious dependencies, and rogue install-time code across
-> npm, pip, six CI/CD platforms, and Docker.
+Supply-chain attack prevention and detection for software projects.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/alessandro-bitetto/chaindora.svg)](https://pkg.go.dev/github.com/alessandro-bitetto/chaindora)
+[![Release](https://img.shields.io/github/v/release/alessandro-bitetto/chaindora)](https://github.com/alessandro-bitetto/chaindora/releases)
 
-The CLI is `chdora` (the project is `chaindora`). It answers one question:
-**"Did I get hit by a supply chain attack?"**
+The project is **chaindora**. The CLI binary is **`chdora`**. Apache-2.0,
+single static Go binary, no agents, no daemons, no telemetry.
 
-It runs three commands:
+`chaindora.dev` (in progress) will host the long-form documentation.
+This README is the on-ramp.
 
-- **`chdora scan`** — inventories every locked dependency in a project,
-  matches them against [OSV.dev](https://osv.dev) and a curated incident
-  pack, walks CI YAMLs for compromised actions/orbs/pipes/images, and
-  applies behavioral heuristics.
-- **`chdora forensics`** — hunts post-compromise artifacts on the host:
-  leaked credentials, shell-rc tampering, and worm-deployed files like
-  `shai-hulud-workflow.yml`.
-- **`chdora ci`** — same scan, gated for CI/CD pipelines: autodetects
-  GitHub Actions / GitLab / CircleCI / Bitbucket / Azure / Drone / Jenkins,
-  applies `--fail-on critical,high`, writes a SARIF sidecar for upload.
+---
 
-## Quick example
+## What it does
 
-```text
-$ chdora scan .
-inventoried 142 packages from 11 sources
-3 finding(s):
+chaindora has **two modes**. Pick the one that matches what you actually
+need — most users want both.
 
-  [CRITICAL] [incident-pack] pkg:npm/%40ctrl/tinycolor@4.1.1
-    SHAI-HULUD-2025 — Shai-Hulud npm worm
-    source: package-lock.json
-    ref: https://socket.dev/blog/shai-hulud-npm-worm
+| Mode | When it runs | What it does | Command |
+|---|---|---|---|
+| **Prevention** | Before `npm install` writes bytes | Resolves the full transitive install tree, runs 7 independent checks against every node, refuses the install if any node fails | `chdora gate ...` |
+| **Detection** | After packages are already on disk | Scans lockfiles, host state, and CI manifests for indicators of a compromise that already happened | `chdora scan` / `audit` / `forensics` / `ci` |
 
-  [HIGH] [osv-ioc] pkg:npm/lodash@4.17.20
-    GHSA-35jh-r3h4-6jhm — Command Injection in lodash
-    source: package-lock.json
+Both modes share the same incident pack, the same OSV.dev integration, and
+the same finding format. They are complementary: prevention catches new
+attacks at the install boundary; detection catches sleepers, late-discovered
+malware, and the inventory you already installed before chaindora existed.
 
-  [MEDIUM] [heuristic:typosquat] pkg:pypi/requets@2.0.0
-    HEUR-TYPOSQUAT — PyPI package "requets" is 1 edit(s) away from popular package "requests". Verify this is not a typosquat.
-```
+---
+
+## What it catches
+
+| Class | Detection | Prevention |
+|---|:---:|:---:|
+| Packages in OpenSSF Malicious Packages feed (`MAL-*`) | yes | yes |
+| Known CVEs on dependencies (`GHSA-*` / `CVE-*` via OSV.dev) | yes | yes (warn) |
+| Versions published less than 72h ago | — | yes |
+| Account takeover (publisher changed since prior version) | — | yes |
+| Sleeper-pattern indicators (obfuscation, install-script payloads, eval-of-dynamic, base64-encoded URLs) | — | yes |
+| Suspicious change between version bumps (new postinstall, new `child_process` import) | — | yes |
+| Brand-new packages / single-version maintainers / multi-month dormancy | — | yes |
+| Compromised CI components (unpinned actions, curl-pipe-shell in scripts) | yes | — |
+| Host-state compromise indicators (leaked tokens, shell rc tampering, worm-deployed files) | yes | — |
+| Post-compromise persistence (cron, launchd, systemd, Scheduled Tasks) | yes | — |
+| Compromised browser / VS Code extensions | yes | — |
+
+Honest scope: chaindora prevents roughly 95% of real-world npm supply-chain
+attacks at install time. The 5% it misses are sophisticated sleepers like
+xz-utils that masquerade as legitimate code for years — for those the
+detection-mode + auto-rollback story applies retroactively when community
+detection lands.
+
+---
 
 ## Install
 
 ### Pre-built binary (recommended)
 
-Download the archive for your OS/arch from the
-[Releases page](https://github.com/alessandro-bitetto/chaindora/releases),
-extract, and move `chdora` somewhere on your `$PATH` (the archive is
-named `chaindora_<version>_<os>_<arch>` after the project; the binary
-inside is `chdora`):
+Pick the matching archive from the [Releases page](https://github.com/alessandro-bitetto/chaindora/releases),
+extract, place `chdora` on `$PATH`:
 
 ```sh
-# macOS / Linux example
 curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_<version>_<os>_<arch>.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
+chdora --version
 ```
 
-Each release publishes a `chaindora_<version>_checksums.txt` for verification:
+Each release publishes a `chaindora_<version>_checksums.txt`:
 
 ```sh
 shasum -a 256 -c chaindora_<version>_checksums.txt
@@ -69,169 +78,253 @@ shasum -a 256 -c chaindora_<version>_checksums.txt
 
 ```sh
 go install github.com/alessandro-bitetto/chaindora/cmd/chdora@latest
+export PATH="$PATH:$(go env GOPATH)/bin"   # if `command not found: chdora`
 ```
 
-Requires Go 1.22+. After `go install`, make sure your Go bin directory is on
-`$PATH` so the binary is reachable as `chdora`:
+Requires Go 1.22+.
+
+### Self-upgrade
 
 ```sh
-# One-off check
-ls "$(go env GOPATH)/bin/chdora"
-
-# Add to PATH (persist by adding to ~/.zshrc or ~/.bashrc)
-export PATH="$PATH:$(go env GOPATH)/bin"
+chdora upgrade               # latest tagged release
+chdora upgrade --check       # report only, don't download
+chdora upgrade --version v0.9.0
 ```
 
-If you see `command not found: chdora` right after a successful install,
-this is the fix.
+`upgrade` refuses on Homebrew-managed binaries — use `brew upgrade` there.
 
-## Commands
+---
 
-### `chdora scan [path]`
+## Mode 1: Prevention (`chdora gate`)
 
-Project-tree scan. Runs OSV.dev queries, incident-pack matching, and
-behavioral heuristics by default.
+The gate sits between you and the package registry. Every `npm install`
+resolves the full transitive tree, runs every node through a stack of
+seven independent checkers, and refuses the install if any node fails the
+configured policy. Fail-closed by design: network errors block, not pass.
+
+### Activating the gate
 
 ```sh
-chdora scan .                                # scan current directory
-chdora scan ./my-project --format sarif      # SARIF 2.1.0 to stdout
-chdora scan . --skip-osv                     # offline (no OSV queries)
-chdora scan . --fresh-popular                # also check publish dates
-chdora scan . --incidents ./my-incidents     # custom incident pack
-chdora scan . --exclude testdata,vendor      # skip directories by basename
+chdora gate install
+# Add to ~/.zshrc or ~/.bashrc:
+export PATH="$HOME/.chaindora/bin:$PATH"
 ```
 
-### `chdora audit`
-
-The one-word "scan everything on this machine" entry point. Walks `--root`
-(default `$HOME`) for every project manifest and runs a full scan against
-each; enumerates globally-installed packages, browser/IDE extensions, and
-user-level persistence (cron / launchd / systemd / Scheduled Tasks);
-snapshots/diffs `~/.ssh/authorized_keys` against a baseline; plus the
-default host-state checks (credential files, shell rc tampering, file
-artifact hunt). Equivalent to a fully-flagged `chdora forensics
---scan-projects $HOME --deep --extensions --persistence --ssh-check`.
+In a fresh shell, every `npm install <pkgs>` now routes through chaindora.
+`npm test`, `npm run build`, `npm uninstall` etc. pass through unchanged.
 
 ```sh
-chdora audit                                # full audit under $HOME
-chdora audit --root /Users/me/code          # narrower root
-sudo chdora audit --whole-machine           # entire filesystem ('/' with curated system-noise skips)
-chdora audit --root /Users --root /opt --root /Applications   # multi-root
-chdora audit --skip-deep --skip-extensions  # disable individual detectors
-chdora audit --format json > audit.json     # pipe-friendly
-chdora audit --fix-plan                     # show remediation plan
+chdora gate status            # which managers are gated, is the shim on PATH
+chdora gate disable           # remove the shims
 ```
 
-`--whole-machine` adds a curated skip list (`System`, `private`, `Volumes`,
-`.Spotlight-V100`, `proc`, `sys`, `dev`, `run`, `boot`, ...) so the walk
-ignores macOS / Linux system + virtual filesystems. Use `sudo` for full
-coverage of other users' homes + `/var` + `/etc`; without it those paths
-are silently skipped.
-
-When stderr is a TTY, a `[chdora] hunting under /: 234,567 items, 4 hits`
-status line refreshes every 200ms during the slow walks so you know it's
-not frozen. `NO_COLOR=1` or piping to a file disables the indicator.
-
-Each detector can be individually disabled with its `--skip-X` flag (see
-`chdora audit --help`).
-
-### `chdora forensics`
-
-Host-state hunt. Inspects `~/.npmrc` / `~/.pypirc` / `~/.docker/config.json`
-/ `~/.aws/credentials` / `~/.gem/credentials` / `~/.cargo/credentials.toml`
-for leaked tokens, scans **shell rc files** (`.bashrc`, `.zshrc`,
-`.profile`, …) and **PowerShell profiles** (cross-platform `pwsh` plus
-Windows-specific Documents paths) for `curl|bash` / `iex (irm …)` /
-`eval $(base64 …)` / AV-bypass patterns, lists Windows Credential
-Manager blobs when present, and hunts incident-pack file artifacts
-(e.g. `shai-hulud-workflow.yml`) across `$HOME`.
+Without the shim you can still gate ad-hoc:
 
 ```sh
-chdora forensics                             # tokens + shell rc + PowerShell + artifact hunt
-chdora forensics --hunt-root ~/code          # narrower artifact hunt
-chdora forensics --skip-hunt                 # tokens + shell rc only
-chdora forensics --format json | jq          # pipe to jq
-
-# Optional add-on detectors (each requires its own flag):
-chdora forensics --ssh-check                 # baseline/diff ~/.ssh/authorized_keys
-chdora forensics --persistence               # cron, launchd, systemd, Scheduled Tasks
-chdora forensics --extensions                # Chromium + VSCode/Cursor extensions
-
-# Full-machine mode: discover EVERY project on disk and scan each.
-chdora forensics --scan-projects ~ --verbose
-chdora forensics --scan-projects ~/code --skip-osv --skip-heuristic
-
-# Deep mode: also enumerate globally-installed npm/pip/brew/apt packages.
-chdora forensics --deep --verbose
-
-# Combine all add-ons for a comprehensive single-machine audit:
-chdora forensics --scan-projects ~ --deep --extensions --persistence --ssh-check
+chdora gate exec npm install lodash@4.17.21
+chdora gate check lodash@4.17.21        # single-package CI check
 ```
 
-The `--scan-projects <root>` flag walks the filesystem for project
-manifests (`package.json`, `requirements.txt`, `Cargo.toml`, `go.mod`,
-`Dockerfile`, `.gitlab-ci.yml`, `.circleci/`, …), deduplicates nested
-manifests, and runs a full scan against each discovered project root
-alongside the host-state checks. Skips `node_modules` / `.venv` /
-`.git` / `vendor` / `target` / `dist` / caches / `Library` / `AppData`
-by default.
+### What the gate actually does
 
-### `chdora update`
+For every `(ecosystem, name, version)` in the resolved tree:
 
-Refreshes the curated incident pack from the upstream repo into
-`~/.chaindora/incidents/`. **Without periodic updates, chaindora only knows
-about the incidents that existed when you installed the binary** — run this
-command after every reported supply-chain attack against an ecosystem you
-use (or set up a daily cron / scheduled task).
+| Checker | Verdict logic |
+|---|---|
+| `allowlist` | Approve if listed in `chaindora.yml` allow; Block if listed in deny; otherwise pass through to the next checker |
+| `osv-malicious` | Block on OpenSSF `MAL-*` match; Warn on `GHSA-*` / `CVE-*` |
+| `cooldown` | Block if version published less than 72h ago (configurable) |
+| `publisher-change` | Warn if `_npmUser` differs from the prior version's; first-publish-ever also warns |
+| `maintainer-trust` | Warn on soft signals: <30d since first publish, <3 total versions, >6mo dormancy gap |
+| `static-pattern` | Downloads the tarball, scans for curl-pipe-shell in scripts, `eval(<dynamic>)`, base64-encoded URLs, 256+ char high-entropy blobs. Score ≥3 → Block, ≥1 → Warn |
+| `version-diff` | Scores the *delta* in static-pattern hits between requested and prior version. Catches "previously clean, now malicious" without false-positiving on libraries that always used eval |
+
+Per-package decision = worst Verdict across all checkers. Whole-install
+decision = worst per-package decision.
+
+### Policies
+
+- **Strict** (default): block on `Block`, `Warn`, and `Unknown` (fail-closed).
+- **Lenient**: block only on `Block`; allow `Warn` through with a notice.
+- **Allow-offline**: also allow `Unknown` through; appropriate for CI runs
+  with no registry access. Disables fail-closed.
 
 ```sh
-chdora update                                # fetch from upstream
-chdora update --dry-run                      # report changes only
-chdora update --dest /opt/chaindora/incidents  # custom location
-chdora update --source https://api.github.com/repos/myfork/chaindora/contents/incidents?ref=main
+chdora gate exec --lenient npm install lodash      # one-shot
+chdora gate exec --allow-offline npm install ...   # CI with no network
 ```
 
-`chdora scan` automatically prefers `~/.chaindora/incidents/` over the
-bundled `./incidents/` directory if both exist, so an `update` immediately
-takes effect on the next scan.
+Persistent overrides go in `chaindora.yml` (next section).
 
-### `chdora upgrade`
+---
 
-Self-upgrades the binary. Queries the GitHub Releases API, picks the
-goreleaser archive matching the current GOOS/GOARCH, verifies its
-SHA-256 against the published checksums file, and atomically replaces
-the running binary. **`chdora update` refreshes the *incident pack*;
-`chdora upgrade` refreshes the *binary itself*** — run both periodically.
+## Mode 2: Detection (`scan` / `forensics` / `audit` / `ci`)
+
+Four detection commands. The difference is **what they look at**, not how.
+
+| Command | Looks at | Use when |
+|---|---|---|
+| **`chdora scan <path>`** | One project tree — its lockfiles, manifests, CI YAMLs | You want to audit a specific repo |
+| **`chdora forensics`** | The host machine's persistent state — credential files, shell rc, persistence entries, SSH keys, browser/IDE extensions, globally-installed packages | You suspect a host-level compromise, or after responding to one |
+| **`chdora audit`** | Everything: `forensics` + every project tree it can find under `$HOME` (or `/` with `--whole-machine`) | Full single-machine sweep — the "is my laptop OK?" command |
+| **`chdora ci <path>`** | Same as `scan`, but tuned for CI: autodetects the CI env, applies `--fail-on critical,high`, emits SARIF | Project-level gate inside GitHub Actions / GitLab / CircleCI / etc. |
+
+All four emit identical `Finding` objects. The four commands just differ in
+what populates the inventory.
+
+### Finding categories
+
+Each finding belongs to exactly one category. Four categories total:
+
+| Category | What it is | Detector(s) | Example |
+|---|---|---|---|
+| **Supply-chain attack** | Confirmed malicious package or worm artifact | `incident-pack`, OSV `MAL-*`, evidence-based heuristics | `@ctrl/tinycolor@4.1.1` (Shai-Hulud) |
+| **Dependency CVE** | Known security advisory on a normal dependency | OSV `GHSA-*` / `CVE-*` | `lodash@4.17.20` (CVE-2021-23337) |
+| **Configuration risk** | Setup that widens attack surface but isn't itself compromised | `heuristic:unpinned`, `heuristic:cishell` | Unpinned `actions/checkout@main` in a workflow |
+| **Host state** | Indicator of post-compromise activity on the host | `hostforensics:*` | `~/.npmrc` contains a leaked token; `shai-hulud-workflow.yml` found at `$HOME` |
+
+### Hiding categories from output
+
+By default scan/audit/forensics/ci print every category. The
+`--exclude-<category>` flags hide whole sections from the rendered output
+without skipping the detection itself (the findings still exist in
+`--format=json` output):
 
 ```sh
-chdora upgrade                                # latest release
-chdora upgrade --check                        # report only, no download
-chdora upgrade --dry-run                      # download + verify, no swap
-chdora upgrade --version v0.4.0               # pin to a specific tag
-chdora upgrade --force                        # re-install / override pkg-mgr guard
+chdora scan . --exclude-cves               # hide the dependency-CVE section
+chdora audit --exclude-config              # hide unpinned-action warnings
+chdora audit --exclude-host                # hide credential-file warnings
+chdora audit --exclude-supply-chain        # hide the incident-pack section (rare)
 ```
 
-If the binary path looks Homebrew- or snap-managed, `upgrade` refuses
-with a hint to use the package manager instead (override with `--force`).
-On Windows the previous `.exe` is parked alongside as `chdora.exe.old`
-because Windows refuses to overwrite a running executable.
+`--exclude-cves` is the most useful: it lets you scan a project for
+*supply-chain attacks* without drowning in the dependency-CVE noise that
+already lives in your `npm audit` workflow.
 
-### `chdora ci [path]`
+### Skipping directories during walks
 
-CI gate. Autodetects the running CI from environment variables, picks an
-appropriate output format, applies `--fail-on critical,high` by default,
-and optionally writes a SARIF sidecar for code-scanning dashboards.
+A separate flag, `--exclude <basename>`, controls which directories the
+inventory walker skips:
 
 ```sh
-chdora ci .                                  # autodetect everything
-chdora ci . --fail-on any                    # strictest gate
-chdora ci . --sarif chdora.sarif          # also write a sidecar
-chdora ci . --fail-on none                   # informational, always 0
+chdora scan . --exclude testdata,vendor
+chdora audit --exclude node_modules,.venv     # already skipped by default
 ```
 
-A typical GitHub Actions step:
+By default the walker skips: `node_modules`, `.venv`, `venv`, `.git`,
+`vendor`, `target`, `dist`, `build`, `Library`, `AppData`, plus
+`testdata/` inside chaindora's own source tree.
+
+### Skipping detector layers
+
+The `--skip-<layer>` flags disable an entire detector across the run:
+
+```sh
+chdora scan . --skip-osv          # no network — offline scan
+chdora scan . --skip-incidents    # don't match against the incident pack
+chdora scan . --skip-heuristic    # no behavioral heuristics
+chdora audit --skip-deep          # don't enumerate globally-installed pkgs
+chdora audit --skip-ssh-check     # don't snapshot ~/.ssh/authorized_keys
+```
+
+`--offline` is a meta-flag equivalent to `--skip-osv --skip-registry`.
+
+### Output formats
+
+```sh
+chdora scan . --format text           # default; human-readable
+chdora scan . --format json           # pretty JSON array
+chdora scan . --format jsonl          # one finding per line; log-shipper friendly
+chdora scan . --format sarif          # SARIF 2.1.0 — GitHub code-scanning, GitLab, etc.
+chdora scan . --format github         # ::error file=...,line=...:: annotations
+```
+
+Text output goes to stdout; diagnostic / progress output goes to stderr.
+`chdora scan . --format json | jq` works without filtering.
+
+---
+
+## Configuration: `chaindora.yml`
+
+A per-project file at the repo root configures gate policy and allow/deny
+lists. Discovered by walking up from cwd. Optional — sensible defaults
+work without one.
 
 ```yaml
+# Gate policy
+cooldown_hours: 72          # block versions less than this old (gate)
+allow_on_warn: false        # Strict (true → Lenient)
+allow_on_unknown: false     # fail-closed (true → --allow-offline default)
+
+# Per-(ecosystem, package) allow/deny
+allow:
+  npm:
+    - "lodash@4.17.21"          # exact version
+    - "@my-org/internal-utils"  # any version; we trust the scope
+    - "react"                   # any version
+  pypi:
+    - "requests"
+deny:
+  npm:
+    - "moment"                  # standardized on date-fns
+```
+
+Allow entries skip every gate check. Deny entries block at the gate
+regardless of other check results. Both are evaluated per-(ecosystem,
+package), so `lodash` allowed for `npm` does not silently allow
+`lodash` for `pypi`.
+
+---
+
+## Remediation: `fix` and `plans`
+
+Detection produces findings. Findings produce fix plans. Fix plans can be
+applied immediately, saved for later, or shared with a coworker.
+
+```sh
+# 1. Scan and save the fix plan
+chdora audit --save-plan
+# → [chdora] 142 fix(es) saved to plan 2026-05-15-a558
+
+# 2. Manage saved plans
+chdora plans list
+chdora plans show 2026-05-15-a558
+chdora plans prune --older-than 30d
+
+# 3. Apply later (in a different shell / different day / different person)
+chdora fix --plan 2026-05-15-a558 --yes
+chdora fix --plan 2026-05-15-a558 --yes --aggressive    # also semi-safe fixes
+chdora fix --plan 2026-05-15-a558 --dry-run             # describe without executing
+
+# Or apply from a saved findings.json without ever calling --save-plan
+chdora scan . --format json > findings.json
+chdora fix --from findings.json --yes
+```
+
+Fix categories — only `safe` runs without `--yes`; `semi-safe` requires
+`--aggressive`; `unsafe` and `manual` are never executed:
+
+| Category | Example | Auto-applied? |
+|---|---|---|
+| `safe` | `npm install -g pkg@latest` (global upgrade, no project impact) | with `--yes` |
+| `semi-safe` | `cd /proj && npm install pkg@^X.Y.Z` (in-major caret pin) | with `--yes --aggressive` |
+| `unsafe` | Anything requiring `sudo` | Never (manual steps printed) |
+| `manual` | Rotate credentials, edit shell rc, remove SSH keys | Never (manual steps printed) |
+
+Project-lockfile upgrades pin to the minimum-fixed-version-in-major
+(`^X.Y.Z`) to avoid breaking peer dependencies. Package-level dedup
+collapses N CVE plans on the same package into one upgrade pinned to
+the highest required version. A preflight check skips fixes whose
+target version is already satisfied by the current `package-lock.json`.
+
+---
+
+## CI integration
+
+Drop into any pipeline as a non-blocking warning or a hard gate:
+
+```yaml
+# GitHub Actions
 - run: chdora ci . --sarif chdora.sarif
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
@@ -239,83 +332,124 @@ A typical GitHub Actions step:
     sarif_file: chdora.sarif
 ```
 
-See [docs/ci-integration.md](./docs/ci-integration.md) for recipes covering
-GitLab CI, CircleCI, Bitbucket Pipelines, Azure Pipelines, and Jenkins.
+```yaml
+# GitLab CI
+chaindora-scan:
+  script: chdora ci . --format json > chdora.json
+  artifacts:
+    paths: [chdora.json]
+```
 
-## Detection layers
+`chdora ci` autodetects GitHub Actions, GitLab CI, CircleCI, Bitbucket
+Pipelines, Azure Pipelines, Drone, and Jenkins from their respective env
+vars, and picks an appropriate output format. Exit codes:
 
-| Layer | Detector | Highlights |
-|---|---|---|
-| Known IOC | OSV.dev | Full coverage of npm, PyPI, and OCI (Docker base images); CVSS v3 severity parsing for real-world prioritization |
-| Curated incidents | `incident-pack` | 14+ entries covering Shai-Hulud, qix chalk/debug, ctx PyPI, ua-parser-js, event-stream/flatmap-stream, eslint-scope, colors+faker sabotage, node-ipc / peacenotwar, lottie-player, python3-dateutil + jeIlyfish typosquats, torchtriton dep-confusion, ultralytics, xz-utils (CVE-2024-3094), Great Suspender — with package-version matches, `"*"` wildcards for pure-malware namespaces, file-artifact globs, `safe_version` upgrade pins, and `post_compromise` rotation guidance. [Contribute new entries.](./docs/incident-pack.md) |
-| Host forensics | `hostforensics:*` | Credential files, shell rc tampering, Shai-Hulud workflow files, all incident-pack file artifacts across `$HOME` |
-| Heuristics | `heuristic:*` | Unpinned CI refs, `curl\|bash` in CI scripts, npm install scripts, typosquats (Levenshtein vs top-N popular), dependency confusion, fresh-popular versions (opt-in) |
+- `0` — no findings at or above `--fail-on` (default: `critical,high`)
+- `1` — at least one finding at the threshold
+- Set `--fail-on none` for informational mode; `any` for the strictest gate
 
-Severity for OSV findings comes from a fully implemented CVSS v3 base-score
-calculator (see [internal/osv/cvss.go](./internal/osv/cvss.go)).
+For per-CI recipes including Bitbucket / Azure / Drone / Jenkins, see
+[docs/ci-integration.md](./docs/ci-integration.md).
+
+---
+
+## Maintenance commands
+
+### `chdora update` — refresh the incident pack
+
+The bundled incident pack is whatever was in your binary at build time.
+The community-maintained pack lives upstream and updates as new attacks
+land. **Without periodic `update`, chaindora only knows about incidents
+that existed when you installed the binary.**
+
+```sh
+chdora update                  # fetch the latest into ~/.chaindora/incidents
+chdora update --dry-run        # report changes without writing
+chdora update --verbose
+```
+
+A daily cron (`0 9 * * * chdora update`) is the recommended setup.
+
+### `chdora upgrade` — refresh the binary
+
+```sh
+chdora upgrade                 # latest tagged release
+chdora upgrade --check         # what's available
+chdora upgrade --version v0.9.0
+```
+
+Verifies the SHA-256 against the published checksums file before swap.
+On Windows the previous `.exe` is parked as `.exe.old` (Windows doesn't
+overwrite running executables).
+
+---
 
 ## Supported ecosystems
 
-| Ecosystem | Manifests | OSV |
-|---|---|---|
-| npm | `package-lock.json` (v1/v2/v3), `yarn.lock` (v1 + Berry), `pnpm-lock.yaml` | yes |
-| PyPI | `requirements.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock` | yes |
-| Docker | `Dockerfile`, `docker-compose.yml`, every CI YAML's `image:` field | yes (OCI) |
-| GitHub Actions | `.github/workflows/*.yml` | no (incident pack + heuristics) |
-| Gitea Actions | `.gitea/workflows/*.yml` | no (incident pack + heuristics) |
-| GitLab CI | `.gitlab-ci.yml` (`include:`) | no |
-| Bitbucket Pipelines | `bitbucket-pipelines.yml` (`pipe:`) | no |
-| CircleCI Orbs | `.circleci/config.yml` (`orbs:`) | no |
-| Azure Pipelines | `azure-pipelines.yml` (`task:`) | no |
-| Drone / Woodpecker | `.drone.yml` / `.woodpecker.yml` | via Docker `image:` |
+| Ecosystem | Manifests recognized | OSV.dev | Gate |
+|---|---|:---:|:---:|
+| npm | `package-lock.json` (v1/v2/v3), `yarn.lock`, `pnpm-lock.yaml` | yes | **yes** |
+| PyPI | `requirements.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock` | yes | — (planned) |
+| Go modules | `go.sum` | yes | — |
+| Docker | `Dockerfile`, `docker-compose.yml`, CI YAML `image:` | yes (OCI) | — |
+| GitHub Actions | `.github/workflows/*.yml` | — | — |
+| Gitea Actions | `.gitea/workflows/*.yml` | — | — |
+| GitLab CI | `.gitlab-ci.yml` (`include:`) | — | — |
+| Bitbucket Pipelines | `bitbucket-pipelines.yml` (`pipe:`) | — | — |
+| CircleCI Orbs | `.circleci/config.yml` (`orbs:`) | — | — |
+| Azure Pipelines | `azure-pipelines.yml` (`task:`) | — | — |
+| Drone / Woodpecker | `.drone.yml` / `.woodpecker.yml` | via image | — |
 
-Findings normalize to [Package URLs (PURLs)](https://github.com/package-url/purl-spec)
-on top of a SARIF-compatible schema.
+Findings normalize to [Package URLs (PURLs)](https://github.com/package-url/purl-spec).
 
-## Output formats
-
-```sh
-chdora scan . --format text     # human-readable (default)
-chdora scan . --format json     # pretty JSON
-chdora scan . --format jsonl    # one finding per line (for log shippers)
-chdora scan . --format sarif    # SARIF 2.1.0 (GitHub code-scanning et al.)
-chdora scan . --format github   # ::error file=...,line=...:: annotations
-```
+---
 
 ## Platform support
 
 | OS | Status |
 |---|---|
-| Linux (amd64 / arm64) | Tier 1 — full support |
-| macOS (amd64 / arm64) | Tier 1 — full support |
-| Windows (amd64 / arm64) | Tier 1 — cross-compiles cleanly; host forensics includes PowerShell profile + Credential Manager checks. CI matrix coming with the GitHub Actions workflow. |
+| Linux amd64 / arm64 | Tier 1 — full feature parity, CI-verified each release |
+| macOS amd64 / arm64 | Tier 1 — full feature parity, CI-verified each release |
+| Windows amd64 / arm64 | Tier 1 — cross-compiles cleanly; PowerShell-profile and Credential Manager checks; gate shims use `.cmd` form |
+
+CI matrix runs `go test ./... -race` on all three OSes for every PR and
+every release tag.
+
+---
 
 ## Roadmap
 
-- **v0.2** (in progress) — `chdora update` for incident-pack refresh
-  (shipped), Windows-equivalent forensics (shipped), full-machine scan
-  via `forensics --scan-projects` and `forensics --deep`, signed
-  incident-pack tarballs, GitHub Actions CI on the repo itself.
-- **v0.3** — Static AST scan of installed `node_modules` /
-  `site-packages` for install-time exfiltration patterns (eval-of-base64,
-  hardcoded webhooks, `child_process` + network in postinstall, …).
-- **v0.4** — Server mode: scheduled fleet scans, findings DB, webhook
-  ingest.
-- **v0.5** — Expanded ecosystems: RubyGems, crates.io, Go modules,
-  Maven Central.
+- **v0.10** — PyPI parity for the gate (yarn/pnpm too, but they all share
+  the npm registry data); `chdora watch` daemon that polls OSV/MAL-* and
+  alerts on installed inventory; sigstore-provenance enforcement for
+  high-risk packages.
+- **v0.11** — Server mode: scheduled fleet scans, findings DB, webhook
+  ingest. Expanded ecosystems: RubyGems, crates.io, Maven Central.
+- **v1.0** — Reproducible-build verification: for packages with sigstore
+  provenance, verify the tarball matches what builds from the attested
+  git source. Closes the "registry compromised but source clean" gap.
 
-## Contributing
+---
 
-The most valuable contribution is **adding entries to the [curated
-incident pack](./incidents/)** — see [docs/incident-pack.md](./docs/incident-pack.md)
-for the PR flow.
+## Architecture, internals, contributing
 
-For everything else, see [CONTRIBUTING.md](./CONTRIBUTING.md).
+- [docs/architecture.md](./docs/architecture.md) — internal package layout
+  and data flow
+- [docs/incident-pack.md](./docs/incident-pack.md) — how to contribute new
+  incident entries (the highest-leverage contribution)
+- [docs/ci-integration.md](./docs/ci-integration.md) — per-CI recipes
+- [CLAUDE.md](./CLAUDE.md) — on-ramp for contributors (or AI agents)
+  walking into the repo cold
+- [SECURITY.md](./SECURITY.md) — responsible disclosure for vulnerabilities
+  in chaindora itself
 
-## Security
+The most valuable single contribution is **adding entries to the curated
+incident pack** when a new supply-chain attack lands. See
+[docs/incident-pack.md](./docs/incident-pack.md) for the PR flow and
+quality bar.
 
-Found a vulnerability in `chaindora` itself? See [SECURITY.md](./SECURITY.md).
+---
 
 ## License
 
-[Apache-2.0](./LICENSE)
+[Apache-2.0](./LICENSE). No CLA. No telemetry. No backdoors.

@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.9.2] — 2026-05-15
+
+### Docs
+
+- **README rewrite.** Old README dumped seven commands in arbitrary
+  order with no mental model. New README organizes around the two
+  modes — **prevention** (`chdora gate`) and **detection**
+  (`scan` / `forensics` / `audit` / `ci`) — and explicitly
+  disambiguates the four detection commands by what they look at:
+  `scan` = one project tree, `forensics` = host state, `audit` =
+  both, `ci` = scan tuned for CI. Adds a "what it catches" matrix,
+  the four finding categories (supply-chain-attack /
+  dependency-cve / configuration / host-state), the difference
+  between `--exclude <dir>` (skip dirs during walks) vs
+  `--exclude-<category>` (hide sections from output) vs
+  `--skip-<layer>` (disable detectors). Each gate checker gets a
+  one-row description so users can pick which to skip.
+
+- **CLAUDE.md rewrite.** Same two-mode framing for contributors.
+  Adds the v0.9 gate package to the per-package gotchas, fail-closed
+  invariants, the cross-platform `os.UserHomeDir` gotcha that broke
+  v0.9.0's Windows CI, the recursion guard in `findRealPackageManager`,
+  and per-pattern dedup in `static-pattern`. Repo layout updated
+  to show the gate package alongside the existing tree.
+
+No code changes. Tests remain green under `-race` across the
+ubuntu / macos / windows matrix.
+
 ## [0.9.1] — 2026-05-15
 
 ### Fixed
