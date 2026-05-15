@@ -7,77 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- `chaindora update` — refreshes the curated incident pack from
-  `github.com/alessandro-bitetto/chaindora` into `~/.chaindora/incidents/`.
-  Atomic per-file writes, YAML validation before commit, `.meta.json`
-  tracking last-update timestamp + source URL. Flags: `--source`,
-  `--dest`, `--dry-run`, `--verbose`.
-- **Windows-equivalent host forensics**:
-  - PowerShell profile scanner (`hostforensics:powershell`) covering
-    cross-platform `pwsh` (`~/.config/powershell/`) plus Windows-specific
-    paths (`Documents\PowerShell\` and `Documents\WindowsPowerShell\`).
-    Detects `iex (irm …)` malware loaders, `[Convert]::FromBase64String`
-    obfuscation, `Add-MpPreference -Exclusion` AV-bypass, and
-    `Set-MpPreference -DisableRealtimeMonitoring` defender-disable.
-  - Windows Credential Manager presence check
-    (`HOST-WINDOWS-CREDS-PRESENT`) — flags non-empty
-    `%LOCALAPPDATA%\Microsoft\Credentials\` and `%APPDATA%\Microsoft\Credentials\`
-    as MEDIUM informational findings.
-- Verified clean cross-compilation to `GOOS=windows GOARCH=amd64` and
-  `GOOS=windows GOARCH=arm64`.
-- `chaindora forensics --scan-projects <root>` — full-machine project
-  discovery. Walks the filesystem for project markers (`package.json`,
-  `requirements.txt`, `Cargo.toml`, `go.mod`, `Dockerfile`,
-  `.gitlab-ci.yml`, `.circleci/`, `.azure-pipelines/`, `.github/workflows/`,
-  …), deduplicates nested manifests via ancestor-preferring collapse,
-  and runs a full scan against each discovered project root alongside
-  the host-state checks. Skips `node_modules` / `.venv` / `.git` /
-  `vendor` / `target` / `dist` / caches / `Library` / `AppData` by
-  default. Demoed against `testdata/`: 11 project roots discovered, 24
-  findings aggregated.
-
-### Planned for v0.2
-- `chaindora forensics --deep` — global packages (`npm ls -g`, pip
-  system, Homebrew, apt), browser extensions, IDE extensions,
-  persistence mechanisms, `~/.ssh/authorized_keys` diff.
-- Static AST scan of `node_modules` / `site-packages` for install-time
-  exfiltration patterns.
-- Signed incident-pack tarballs and `--auto-update` opt-in on
-  `scan`/`ci`.
-- Pre-built binaries via `goreleaser`; Homebrew tap.
-- GitHub Actions CI on the `chaindora` repo itself.
+Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
 ## [0.1.0] — 2026-05-15
 
-First public release. Three commands, eight ecosystems, four detection
-layers.
+First public release. Four commands, nine ecosystems, four detection
+layers, five output formats, three desktop platforms.
 
 ### Added — Commands
-- `chaindora scan [path]` — project-tree scan with text / JSON / JSONL /
-  SARIF / GitHub-annotation output formats.
-- `chaindora forensics` — host-state hunt for leaked credentials, shell
-  rc tampering, and incident-pack file artifacts across `$HOME`.
-- `chaindora ci [path]` — CI-flavored wrapper with environment
-  autodetect, `--fail-on` policy, and SARIF sidecar.
+- `chaindora scan [path]` — project-tree scan with full detector pipeline.
+- `chaindora forensics` — host-state hunt: tokens, shell rc, PowerShell
+  profile, Windows Credential Manager, and incident-pack file-artifact
+  hunting across `$HOME`.
+- `chaindora forensics --scan-projects <root>` — full-machine project
+  discovery. Walks the filesystem for manifests (`package.json`,
+  `requirements.txt`, `Cargo.toml`, `go.mod`, `Dockerfile`,
+  `.gitlab-ci.yml`, `.circleci/`, `.azure-pipelines/`, `.github/workflows/`,
+  …), deduplicates nested manifests, and runs a full scan against each
+  project root alongside the host-state checks.
+- `chaindora ci [path]` — CI-flavored wrapper with environment autodetect
+  ($GITHUB_ACTIONS / $GITLAB_CI / $CIRCLECI / $BITBUCKET_BUILD_NUMBER /
+  $TF_BUILD / $DRONE / $JENKINS_HOME), `--fail-on critical,high|any|none`
+  policy, and `--sarif <path>` sidecar for upload to code-scanning
+  dashboards.
+- `chaindora update` — refreshes the curated incident pack from
+  `github.com/alessandro-bitetto/chaindora` into `~/.chaindora/incidents/`.
+  Atomic per-file writes, YAML validation, `.meta.json` provenance.
 
 ### Added — Detectors
-- **OSV-IOC** (`internal/detectors/osvioc/`) — batches inventory
-  packages to `api.osv.dev/v1/querybatch`, hydrates each vuln via
-  `/v1/vulns/{id}`, parses CVSS v3 vectors into qualitative severity.
+- **OSV-IOC** (`internal/detectors/osvioc/`) — batches inventory packages
+  to `api.osv.dev/v1/querybatch`, hydrates vulns via `/v1/vulns/{id}`,
+  parses CVSS v3 vectors into qualitative severity.
 - **Incident pack** (`internal/detectors/incident/`) — YAML-defined
-  curated incidents with package-version matches and file-artifact
-  globs (`**/` prefix supported). Seeded entries: Shai-Hulud worm
-  (Sep 2025), qix chalk/debug compromise (Sep 2025), ctx PyPI hijack
-  (May 2022), ua-parser-js compromise (Oct 2021).
-- **Host forensics** (`internal/detectors/hostforensics/`) — token
-  files (`~/.npmrc`, `~/.pypirc`, `~/.docker/config.json`,
-  `~/.aws/credentials`, `~/.gem/credentials`, `~/.cargo/credentials.toml`),
-  shell rc patterns (`curl|bash`, `wget|sh`, `eval $(base64 -d …)`,
-  `eval $(curl …)`, `nc -l`).
+  curated incidents with package-version matches and file-artifact globs
+  (`**/` prefix supported). Seeded entries: Shai-Hulud worm (Sep 2025),
+  qix chalk/debug compromise (Sep 2025), ctx PyPI hijack (May 2022),
+  ua-parser-js compromise (Oct 2021).
+- **Host forensics** (`internal/detectors/hostforensics/`):
+  - Token files (`.npmrc`, `.pypirc`, `.docker/config.json`,
+    `.aws/credentials`, `.gem/credentials`, `.cargo/credentials.toml`)
+  - Shell rc patterns (curl|bash, wget|sh, eval $(base64 -d …),
+    eval $(curl …), nc -l)
+  - PowerShell profile patterns (iex (irm/iwr …),
+    [Convert]::FromBase64String, Add-MpPreference -Exclusion,
+    Set-MpPreference -DisableRealtimeMonitoring)
+  - Windows Credential Manager presence check
 - **Heuristics** (`internal/detectors/heuristic/`):
   - Unpinned CI refs (GH Actions, GitLab CI, Docker)
-  - `curl|bash` / `eval $(…)` in CI `script:` / `run:` blocks
+  - curl|bash / eval $(…) in CI script blocks
   - npm install scripts (root `package.json` + lockfile
     `hasInstallScript`)
   - Typosquats (Levenshtein 1-2 vs curated top-N lists)
@@ -85,22 +62,32 @@ layers.
   - Fresh-popular publish dates (opt-in, registry API)
 
 ### Added — Inventory parsers
-- npm: `package-lock.json` (v1/v2/v3), `yarn.lock` (v1 + Berry),
+- **npm**: `package-lock.json` (v1/v2/v3), `yarn.lock` (v1 + Berry),
   `pnpm-lock.yaml`
-- PyPI: `requirements.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock`
-- CI/CD: GitHub Actions, Gitea Actions, GitLab CI, Bitbucket Pipelines,
-  CircleCI Orbs, Azure Pipelines (Drone/Woodpecker covered via Docker
-  walker)
-- Docker: `Dockerfile`, `docker-compose.yml`, every CI YAML's
+- **PyPI**: `requirements.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock`
+- **CI/CD**: GitHub Actions, Gitea Actions, GitLab CI, Bitbucket
+  Pipelines, CircleCI Orbs, Azure Pipelines (Drone/Woodpecker covered
+  transparently via the Docker walker)
+- **Docker**: `Dockerfile`, `docker-compose.yml`, every CI YAML's
   `image:` field
 
 ### Added — Output
 - SARIF 2.1.0 with deduplicated rules, `security-severity` property
   for GitHub code-scanning sort/filter, stable SHA-256
   `partialFingerprints` for cross-run dedup.
-- JSON-Lines streaming.
+- JSON-Lines streaming for log shippers.
 - GitHub Actions annotations (`::error file=…,line=…::…`) with proper
   `%`/`%0A`/`%0D` escaping.
+
+### Platform
+- Linux (amd64 / arm64) — Tier 1
+- macOS (amd64 / arm64) — Tier 1
+- Windows (amd64 / arm64) — Tier 1 (cross-compile verified)
+
+### CI
+- GitHub Actions workflow at `.github/workflows/test.yml` runs
+  `go vet` + `go test -race` + `go build` across Linux, macOS, and
+  Windows on every push and pull request.
 
 ### Notes
 - Released under [Apache-2.0](./LICENSE).
