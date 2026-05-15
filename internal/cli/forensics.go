@@ -28,6 +28,8 @@ var (
 	forensicsVerbose      bool
 	forensicsExcludes     []string
 	forensicsDeep         bool
+	forensicsSSHCheck     bool
+	forensicsSSHBaseline  string
 )
 
 var forensicsCmd = &cobra.Command{
@@ -111,6 +113,14 @@ var forensicsCmd = &cobra.Command{
 			}
 		}
 
+		if forensicsSSHCheck {
+			sshResults := hostforensics.ScanSSHAuthorizedKeys(home, forensicsSSHBaseline)
+			if forensicsVerbose {
+				fmt.Fprintf(os.Stderr, "ssh-check: %d finding(s)\n", len(sshResults))
+			}
+			all = append(all, sshResults...)
+		}
+
 		if forensicsDeep {
 			if forensicsVerbose {
 				fmt.Fprintln(os.Stderr, "enumerating globally-installed packages")
@@ -161,5 +171,7 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsVerbose, "verbose", false, "log per-project scanned + per-host check counts to stderr")
 	forensicsCmd.Flags().StringSliceVar(&forensicsExcludes, "exclude", nil, "directory basename(s) to skip during the hunt / project scans")
 	forensicsCmd.Flags().BoolVar(&forensicsDeep, "deep", false, "also enumerate globally-installed packages (npm -g, pip) and run the detector pipeline against them")
+	forensicsCmd.Flags().BoolVar(&forensicsSSHCheck, "ssh-check", false, "snapshot/diff ~/.ssh/authorized_keys against ~/.chaindora/ssh-baseline.txt; first run creates the baseline, subsequent runs flag added (HIGH) or removed (MEDIUM) keys")
+	forensicsCmd.Flags().StringVar(&forensicsSSHBaseline, "ssh-baseline", "", "alternative path for the SSH baseline file (default ~/.chaindora/ssh-baseline.txt)")
 	rootCmd.AddCommand(forensicsCmd)
 }

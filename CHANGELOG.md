@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to a follow-up release.
 - `inventory.NormalizePyPIName` is now exported so the global-pip scanner
   applies the same PEP 503 normalization the lockfile parsers do.
+- `chaindora forensics --ssh-check` — snapshots `~/.ssh/authorized_keys`
+  on first run into `~/.chaindora/ssh-baseline.txt`, then on subsequent
+  runs flags any new key (HIGH `HOST-SSH-KEY-ADDED`) or removed key
+  (MEDIUM `HOST-SSH-KEY-REMOVED`). Hashes are SHA-256, ignoring comments
+  and blank lines. Configurable baseline path via `--ssh-baseline`.
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
