@@ -31,6 +31,7 @@ var (
 	forensicsSSHCheck     bool
 	forensicsSSHBaseline  string
 	forensicsPersistence  bool
+	forensicsExtensions   bool
 )
 
 var forensicsCmd = &cobra.Command{
@@ -130,6 +131,28 @@ var forensicsCmd = &cobra.Command{
 			all = append(all, persistenceResults...)
 		}
 
+		if forensicsExtensions {
+			extInv := hostforensics.ScanExtensions(home)
+			if forensicsVerbose {
+				fmt.Fprintf(os.Stderr, "extensions: %d package(s) across %d source(s)\n",
+					len(extInv.Packages), len(extInv.Sources))
+			}
+			results, err := scanProject(ctx, "", projectScanOpts{
+				IncidentsDir:  forensicsIncidentsDir,
+				SkipOSV:       true, // OSV doesn't catalog browser/IDE extensions
+				SkipIncidents: false,
+				SkipHeuristic: true, // unpinned/install-script don't apply
+				Verbose:       forensicsVerbose,
+				Excludes:      forensicsExcludes,
+				PreInventory:  extInv,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warn: extensions scan: %v\n", err)
+			} else {
+				all = append(all, results...)
+			}
+		}
+
 		if forensicsDeep {
 			if forensicsVerbose {
 				fmt.Fprintln(os.Stderr, "enumerating globally-installed packages")
@@ -183,5 +206,6 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsSSHCheck, "ssh-check", false, "snapshot/diff ~/.ssh/authorized_keys against ~/.chaindora/ssh-baseline.txt; first run creates the baseline, subsequent runs flag added (HIGH) or removed (MEDIUM) keys")
 	forensicsCmd.Flags().StringVar(&forensicsSSHBaseline, "ssh-baseline", "", "alternative path for the SSH baseline file (default ~/.chaindora/ssh-baseline.txt)")
 	forensicsCmd.Flags().BoolVar(&forensicsPersistence, "persistence", false, "enumerate user-level persistence (cron, launchd, systemd, Scheduled Tasks); flag entries whose command matches a malware pattern as HIGH")
+	forensicsCmd.Flags().BoolVar(&forensicsExtensions, "extensions", false, "enumerate installed Chromium-based browser extensions and VSCode/Cursor extensions; match against the incident pack")
 	rootCmd.AddCommand(forensicsCmd)
 }
