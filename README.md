@@ -7,25 +7,26 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/alessandro-bitetto/chaindora.svg)](https://pkg.go.dev/github.com/alessandro-bitetto/chaindora)
 
-`chaindora` answers one question: **"Did I get hit by a supply chain attack?"**
+The CLI is `chdora` (the project is `chaindora`). It answers one question:
+**"Did I get hit by a supply chain attack?"**
 
 It runs three commands:
 
-- **`chaindora scan`** — inventories every locked dependency in a project,
+- **`chdora scan`** — inventories every locked dependency in a project,
   matches them against [OSV.dev](https://osv.dev) and a curated incident
   pack, walks CI YAMLs for compromised actions/orbs/pipes/images, and
   applies behavioral heuristics.
-- **`chaindora forensics`** — hunts post-compromise artifacts on the host:
+- **`chdora forensics`** — hunts post-compromise artifacts on the host:
   leaked credentials, shell-rc tampering, and worm-deployed files like
   `shai-hulud-workflow.yml`.
-- **`chaindora ci`** — same scan, gated for CI/CD pipelines: autodetects
+- **`chdora ci`** — same scan, gated for CI/CD pipelines: autodetects
   GitHub Actions / GitLab / CircleCI / Bitbucket / Azure / Drone / Jenkins,
   applies `--fail-on critical,high`, writes a SARIF sidecar for upload.
 
 ## Quick example
 
 ```text
-$ chaindora scan .
+$ chdora scan .
 inventoried 142 packages from 11 sources
 3 finding(s):
 
@@ -48,12 +49,14 @@ inventoried 142 packages from 11 sources
 
 Download the archive for your OS/arch from the
 [Releases page](https://github.com/alessandro-bitetto/chaindora/releases),
-extract, and move `chaindora` somewhere on your `$PATH`:
+extract, and move `chdora` somewhere on your `$PATH` (the archive is
+named `chaindora_<version>_<os>_<arch>` after the project; the binary
+inside is `chdora`):
 
 ```sh
 # macOS / Linux example
 curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_<version>_<os>_<arch>.tar.gz | tar xz
-sudo mv chaindora /usr/local/bin/
+sudo mv chdora /usr/local/bin/
 ```
 
 Each release publishes a `chaindora_<version>_checksums.txt` for verification:
@@ -65,40 +68,40 @@ shasum -a 256 -c chaindora_<version>_checksums.txt
 ### From source
 
 ```sh
-go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest
+go install github.com/alessandro-bitetto/chaindora/cmd/chdora@latest
 ```
 
 Requires Go 1.22+. After `go install`, make sure your Go bin directory is on
-`$PATH` so the binary is reachable as `chaindora`:
+`$PATH` so the binary is reachable as `chdora`:
 
 ```sh
 # One-off check
-ls "$(go env GOPATH)/bin/chaindora"
+ls "$(go env GOPATH)/bin/chdora"
 
 # Add to PATH (persist by adding to ~/.zshrc or ~/.bashrc)
 export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
-If you see `command not found: chaindora` right after a successful install,
+If you see `command not found: chdora` right after a successful install,
 this is the fix.
 
 ## Commands
 
-### `chaindora scan [path]`
+### `chdora scan [path]`
 
 Project-tree scan. Runs OSV.dev queries, incident-pack matching, and
 behavioral heuristics by default.
 
 ```sh
-chaindora scan .                                # scan current directory
-chaindora scan ./my-project --format sarif      # SARIF 2.1.0 to stdout
-chaindora scan . --skip-osv                     # offline (no OSV queries)
-chaindora scan . --fresh-popular                # also check publish dates
-chaindora scan . --incidents ./my-incidents     # custom incident pack
-chaindora scan . --exclude testdata,vendor      # skip directories by basename
+chdora scan .                                # scan current directory
+chdora scan ./my-project --format sarif      # SARIF 2.1.0 to stdout
+chdora scan . --skip-osv                     # offline (no OSV queries)
+chdora scan . --fresh-popular                # also check publish dates
+chdora scan . --incidents ./my-incidents     # custom incident pack
+chdora scan . --exclude testdata,vendor      # skip directories by basename
 ```
 
-### `chaindora forensics`
+### `chdora forensics`
 
 Host-state hunt. Inspects `~/.npmrc` / `~/.pypirc` / `~/.docker/config.json`
 / `~/.aws/credentials` / `~/.gem/credentials` / `~/.cargo/credentials.toml`
@@ -110,25 +113,25 @@ Manager blobs when present, and hunts incident-pack file artifacts
 (e.g. `shai-hulud-workflow.yml`) across `$HOME`.
 
 ```sh
-chaindora forensics                             # tokens + shell rc + PowerShell + artifact hunt
-chaindora forensics --hunt-root ~/code          # narrower artifact hunt
-chaindora forensics --skip-hunt                 # tokens + shell rc only
-chaindora forensics --format json | jq          # pipe to jq
+chdora forensics                             # tokens + shell rc + PowerShell + artifact hunt
+chdora forensics --hunt-root ~/code          # narrower artifact hunt
+chdora forensics --skip-hunt                 # tokens + shell rc only
+chdora forensics --format json | jq          # pipe to jq
 
 # Optional add-on detectors (each requires its own flag):
-chaindora forensics --ssh-check                 # baseline/diff ~/.ssh/authorized_keys
-chaindora forensics --persistence               # cron, launchd, systemd, Scheduled Tasks
-chaindora forensics --extensions                # Chromium + VSCode/Cursor extensions
+chdora forensics --ssh-check                 # baseline/diff ~/.ssh/authorized_keys
+chdora forensics --persistence               # cron, launchd, systemd, Scheduled Tasks
+chdora forensics --extensions                # Chromium + VSCode/Cursor extensions
 
 # Full-machine mode: discover EVERY project on disk and scan each.
-chaindora forensics --scan-projects ~ --verbose
-chaindora forensics --scan-projects ~/code --skip-osv --skip-heuristic
+chdora forensics --scan-projects ~ --verbose
+chdora forensics --scan-projects ~/code --skip-osv --skip-heuristic
 
 # Deep mode: also enumerate globally-installed npm/pip/brew/apt packages.
-chaindora forensics --deep --verbose
+chdora forensics --deep --verbose
 
 # Combine all add-ons for a comprehensive single-machine audit:
-chaindora forensics --scan-projects ~ --deep --extensions --persistence --ssh-check
+chdora forensics --scan-projects ~ --deep --extensions --persistence --ssh-check
 ```
 
 The `--scan-projects <root>` flag walks the filesystem for project
@@ -139,7 +142,7 @@ alongside the host-state checks. Skips `node_modules` / `.venv` /
 `.git` / `vendor` / `target` / `dist` / caches / `Library` / `AppData`
 by default.
 
-### `chaindora update`
+### `chdora update`
 
 Refreshes the curated incident pack from the upstream repo into
 `~/.chaindora/incidents/`. **Without periodic updates, chaindora only knows
@@ -148,37 +151,58 @@ command after every reported supply-chain attack against an ecosystem you
 use (or set up a daily cron / scheduled task).
 
 ```sh
-chaindora update                                # fetch from upstream
-chaindora update --dry-run                      # report changes only
-chaindora update --dest /opt/chaindora/incidents  # custom location
-chaindora update --source https://api.github.com/repos/myfork/chaindora/contents/incidents?ref=main
+chdora update                                # fetch from upstream
+chdora update --dry-run                      # report changes only
+chdora update --dest /opt/chaindora/incidents  # custom location
+chdora update --source https://api.github.com/repos/myfork/chaindora/contents/incidents?ref=main
 ```
 
-`chaindora scan` automatically prefers `~/.chaindora/incidents/` over the
+`chdora scan` automatically prefers `~/.chaindora/incidents/` over the
 bundled `./incidents/` directory if both exist, so an `update` immediately
 takes effect on the next scan.
 
-### `chaindora ci [path]`
+### `chdora upgrade`
+
+Self-upgrades the binary. Queries the GitHub Releases API, picks the
+goreleaser archive matching the current GOOS/GOARCH, verifies its
+SHA-256 against the published checksums file, and atomically replaces
+the running binary. **`chdora update` refreshes the *incident pack*;
+`chdora upgrade` refreshes the *binary itself*** — run both periodically.
+
+```sh
+chdora upgrade                                # latest release
+chdora upgrade --check                        # report only, no download
+chdora upgrade --dry-run                      # download + verify, no swap
+chdora upgrade --version v0.4.0               # pin to a specific tag
+chdora upgrade --force                        # re-install / override pkg-mgr guard
+```
+
+If the binary path looks Homebrew- or snap-managed, `upgrade` refuses
+with a hint to use the package manager instead (override with `--force`).
+On Windows the previous `.exe` is parked alongside as `chdora.exe.old`
+because Windows refuses to overwrite a running executable.
+
+### `chdora ci [path]`
 
 CI gate. Autodetects the running CI from environment variables, picks an
 appropriate output format, applies `--fail-on critical,high` by default,
 and optionally writes a SARIF sidecar for code-scanning dashboards.
 
 ```sh
-chaindora ci .                                  # autodetect everything
-chaindora ci . --fail-on any                    # strictest gate
-chaindora ci . --sarif chaindora.sarif          # also write a sidecar
-chaindora ci . --fail-on none                   # informational, always 0
+chdora ci .                                  # autodetect everything
+chdora ci . --fail-on any                    # strictest gate
+chdora ci . --sarif chdora.sarif          # also write a sidecar
+chdora ci . --fail-on none                   # informational, always 0
 ```
 
 A typical GitHub Actions step:
 
 ```yaml
-- run: chaindora ci . --sarif chaindora.sarif
+- run: chdora ci . --sarif chdora.sarif
 - uses: github/codeql-action/upload-sarif@v3
   if: always()
   with:
-    sarif_file: chaindora.sarif
+    sarif_file: chdora.sarif
 ```
 
 See [docs/ci-integration.md](./docs/ci-integration.md) for recipes covering
@@ -189,7 +213,7 @@ GitLab CI, CircleCI, Bitbucket Pipelines, Azure Pipelines, and Jenkins.
 | Layer | Detector | Highlights |
 |---|---|---|
 | Known IOC | OSV.dev | Full coverage of npm, PyPI, and OCI (Docker base images); CVSS v3 severity parsing for real-world prioritization |
-| Curated incidents | `incident-pack` | Shai-Hulud, qix chalk/debug, ctx PyPI, ua-parser-js, with package-version matches and file-artifact globs. [Contribute new entries.](./docs/incident-pack.md) |
+| Curated incidents | `incident-pack` | 14+ entries covering Shai-Hulud, qix chalk/debug, ctx PyPI, ua-parser-js, event-stream/flatmap-stream, eslint-scope, colors+faker sabotage, node-ipc / peacenotwar, lottie-player, python3-dateutil + jeIlyfish typosquats, torchtriton dep-confusion, ultralytics, xz-utils (CVE-2024-3094), Great Suspender — with package-version matches, `"*"` wildcards for pure-malware namespaces, file-artifact globs, `safe_version` upgrade pins, and `post_compromise` rotation guidance. [Contribute new entries.](./docs/incident-pack.md) |
 | Host forensics | `hostforensics:*` | Credential files, shell rc tampering, Shai-Hulud workflow files, all incident-pack file artifacts across `$HOME` |
 | Heuristics | `heuristic:*` | Unpinned CI refs, `curl\|bash` in CI scripts, npm install scripts, typosquats (Levenshtein vs top-N popular), dependency confusion, fresh-popular versions (opt-in) |
 
@@ -217,11 +241,11 @@ on top of a SARIF-compatible schema.
 ## Output formats
 
 ```sh
-chaindora scan . --format text     # human-readable (default)
-chaindora scan . --format json     # pretty JSON
-chaindora scan . --format jsonl    # one finding per line (for log shippers)
-chaindora scan . --format sarif    # SARIF 2.1.0 (GitHub code-scanning et al.)
-chaindora scan . --format github   # ::error file=...,line=...:: annotations
+chdora scan . --format text     # human-readable (default)
+chdora scan . --format json     # pretty JSON
+chdora scan . --format jsonl    # one finding per line (for log shippers)
+chdora scan . --format sarif    # SARIF 2.1.0 (GitHub code-scanning et al.)
+chdora scan . --format github   # ::error file=...,line=...:: annotations
 ```
 
 ## Platform support
@@ -234,7 +258,7 @@ chaindora scan . --format github   # ::error file=...,line=...:: annotations
 
 ## Roadmap
 
-- **v0.2** (in progress) — `chaindora update` for incident-pack refresh
+- **v0.2** (in progress) — `chdora update` for incident-pack refresh
   (shipped), Windows-equivalent forensics (shipped), full-machine scan
   via `forensics --scan-projects` and `forensics --deep`, signed
   incident-pack tarballs, GitHub Actions CI on the repo itself.

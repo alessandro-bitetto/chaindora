@@ -9,6 +9,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.0] — 2026-05-15
+
+Self-upgrade, broader fix coverage, and a near-tripled incident
+catalog. The release theme: chaindora is meant to know about supply
+chain attacks, so v0.5 leans hard into curated incidents.
+
+### Added
+
+- `chdora upgrade` — self-upgrade subcommand. Queries the GitHub
+  Releases API, picks the goreleaser archive matching the current
+  GOOS/GOARCH, verifies its SHA-256 against the published checksums
+  file, and atomically replaces the running binary. Flags: `--check`
+  (report only), `--dry-run` (download + verify but skip the swap),
+  `--force` (re-install same version or override the package-manager
+  guard), `--version vX.Y.Z` (pin to a specific tag), `--api-url`
+  (override for forks or testing), `--verbose`. On Windows the
+  previous `.exe` is parked as `chdora.exe.old` because Windows
+  refuses to overwrite a running executable. Refuses to act when the
+  binary path looks Homebrew-/snap-managed unless `--force`.
+
+- Incident-pack schema gains two optional fields:
+    - `packages[].safe_version: "X.Y.Z"` — when set, the fix layer
+      emits an upgrade command (`npm install pkg@<safe>`,
+      `python3 -m pip install --upgrade pkg==<safe>`,
+      `brew upgrade pkg`) instead of a bare uninstall. Drives
+      upgrade-path remediation for the new incidents.
+    - `post_compromise:` top-level list of strings — incident-specific
+      manual steps (e.g. "rotate the npm token in ~/.npmrc"). Surfaced
+      as ManualSteps on every plan emitted by the incident; the fix
+      runner never auto-applies them. Both fields are also threaded
+      through `findings.Finding` as `fix_upgrade_to` and
+      `post_compromise` so the JSON/SARIF reports carry the same hints.
+
+- Wildcard `versions: ["*"]` in incident YAMLs — matches any version of
+  the named package. Use only for pure-malware namespaces (typosquats,
+  dependency-confusion packages); the existing exact-version match path
+  is unchanged for legitimate packages where only some versions were
+  compromised.
+
+- 9 new curated incidents (incident pack now ships 14 entries):
+    - **npm — event-stream / flatmap-stream (Nov 2018)**: Bitcoin
+      wallet stealer targeting Copay desktop bundle.
+    - **npm — eslint-scope (July 2018)**: npm-token exfiltration via
+      maintainer account takeover.
+    - **npm — colors.js + faker.js (Jan 2022)**: maintainer
+      self-sabotage; infinite Zalgo loop / emptied package.
+    - **npm — node-ipc / peacenotwar (March 2022)**: geo-targeted
+      file wiper (CVE-2022-23812).
+    - **npm — @lottiefiles/lottie-player (Oct 2024)**: in-page Web3
+      wallet drainer via compromised maintainer credentials.
+    - **PyPI — python3-dateutil + jeIlyfish (Dec 2019)**: typosquat
+      pair stealing SSH / GnuPG / cloud creds.
+    - **PyPI — torchtriton (Dec 2022)**: dependency-confusion
+      exfiltration during PyTorch nightly install window.
+    - **PyPI — ultralytics (Dec 2024)**: GH-Actions injection
+      delivering token stealer + XMRig cryptominer.
+    - **Homebrew/Debian — xz-utils CVE-2024-3094 (March 2024)**:
+      Jia Tan sshd backdoor via liblzma ifunc resolver hook.
+
+### Changed
+
+- **CLI binary renamed `chaindora` → `chdora`** (project name unchanged).
+  The repo (`alessandro-bitetto/chaindora`), Go module path
+  (`github.com/alessandro-bitetto/chaindora`), release archive prefix
+  (`chaindora_<ver>_<os>_<arch>`), and data directory (`~/.chaindora/`)
+  all still use `chaindora` — only the executable invocation is now
+  shorter. `go install
+  github.com/alessandro-bitetto/chaindora/cmd/chdora@latest` produces
+  a `chdora` binary; release archives also contain `chdora` inside.
+  Breaking: anyone who installed v0.4 has a `chaindora` binary that
+  must be replaced (no v0.4 binary shipped `upgrade`, so there is no
+  silently-broken upgrade path).
+
+- `incident/fix.go` — package matches with a known `safe_version` now
+  emit an upgrade command per ecosystem (npm/pip/brew) at
+  `FixSemiSafe` instead of the bare uninstall fallback. Uninstall
+  remains the fallback when no `safe_version` is declared (and is
+  required for "*"-wildcard malware namespaces). Homebrew matches
+  emit `brew upgrade <pkg>` and surface the target version as a
+  verification step.
+- `incident.normalizeEcosystem` now accepts `Homebrew`/`brew`,
+  `Debian`/`deb`, `Browser Extension`/`browserext`,
+  `IDE Extension`/`ideext`, and `Go`/`golang`/`Go modules` —
+  previously only npm / PyPI / GitHub Actions were normalized, so
+  YAMLs targeting other ecosystems silently mismatched the
+  inventory's canonical ecosystem strings.
+
 ## [0.4.0] — 2026-05-15
 
 Broader fix coverage, audit-then-apply workflow, Go modules, first
@@ -32,7 +119,7 @@ browser-extension incident, and a fix for a real OSV API rejection.
       without parsing extras / hash specs)
   Each emits a "review the resulting lockfile diff before committing"
   step. Marked `FixSemiSafe` — auto-applied only under `--fix-aggressive`.
-- `chaindora fix --from <file>` — new top-level subcommand. Reads
+- `chdora fix --from <file>` — new top-level subcommand. Reads
   findings from a JSON file (output of `--format json`) and runs the
   same per-detector fix pipeline without rescanning. Useful for CI
   workflows that scan-then-apply across separate steps. Flags:
@@ -92,30 +179,30 @@ fix for many of the findings it surfaces.
 Full-machine forensics, broader inventory reach, and a packaged release pipeline.
 
 ### Added — Forensics
-- `chaindora forensics --ssh-check` — snapshots `~/.ssh/authorized_keys`
+- `chdora forensics --ssh-check` — snapshots `~/.ssh/authorized_keys`
   on first run into `~/.chaindora/ssh-baseline.txt`, then on subsequent
   runs flags any new key (HIGH `HOST-SSH-KEY-ADDED`) or removed key
   (MEDIUM `HOST-SSH-KEY-REMOVED`). Hashes are SHA-256, ignoring comments
   and blank lines. Configurable baseline path via `--ssh-baseline`.
-- `chaindora forensics --persistence` — enumerates user-level persistence
+- `chdora forensics --persistence` — enumerates user-level persistence
   mechanisms (cron via `crontab -l`, launchd `~/Library/LaunchAgents/*.plist`,
   systemd user units `~/.config/systemd/user/*.service`, Windows Scheduled
   Tasks via `schtasks /Query /FO CSV`). Each entry → LOW informational;
   entries whose command matches a shellrc malware pattern → HIGH
   `HOST-PERSISTENCE-SUSPICIOUS`.
-- `chaindora forensics --extensions` — enumerates installed extensions from
+- `chdora forensics --extensions` — enumerates installed extensions from
   Chromium-based browsers (Chrome / Edge / Brave / Vivaldi / Arc) and from
   VSCode-family editors (VSCode, VSCode Server, Cursor). New
   `EcosystemBrowserExt` and `EcosystemIDEExt` constants thread through to
   the existing detector pipeline so incident-pack entries can target
   specific extension IDs.
-- `chaindora forensics --deep` — enumerates globally-installed packages
+- `chdora forensics --deep` — enumerates globally-installed packages
   via `npm ls -g --json`, `pip list --format=json` (with pip3 fallback),
   `brew list --formula --versions`, and `dpkg-query -W -f='${Package}|${Version}\n'`.
   Each package manager is silently skipped when its binary isn't on PATH.
   Runs the full detector pipeline (OSV on npm/PyPI, incident pack on all,
   heuristics where applicable) against the resulting inventory.
-- `chaindora forensics --scan-projects <root>` — full-machine project
+- `chdora forensics --scan-projects <root>` — full-machine project
   discovery. Walks the filesystem for manifests, deduplicates nested
   manifests, and runs a full scan against each discovered project root.
 - Windows-equivalent host forensics: PowerShell profile scanner
@@ -138,7 +225,7 @@ Full-machine forensics, broader inventory reach, and a packaged release pipeline
   apply the same PEP 503 normalization the lockfile parsers do.
 
 ### Added — Updates & releases
-- `chaindora update` — refreshes the curated incident pack from the
+- `chdora update` — refreshes the curated incident pack from the
   upstream GitHub repo into `~/.chaindora/incidents/`. Atomic per-file
   writes, YAML validation before commit, `.meta.json` provenance.
   Flags: `--source`, `--dest`, `--dry-run`, `--verbose`.
@@ -147,7 +234,7 @@ Full-machine forensics, broader inventory reach, and a packaged release pipeline
   build `linux/darwin/windows` × `amd64/arm64`, publish SHA-256
   checksums, and create a GitHub Release with verification instructions.
 - Dogfood self-scan job in `.github/workflows/test.yml` runs
-  `./chaindora ci . --exclude testdata --fail-on critical,high` on every
+  `./chdora ci . --exclude testdata --fail-on critical,high` on every
   push and uploads the SARIF sidecar to GitHub code-scanning.
 
 ### Fixed
@@ -167,22 +254,22 @@ First public release. Four commands, nine ecosystems, four detection
 layers, five output formats, three desktop platforms.
 
 ### Added — Commands
-- `chaindora scan [path]` — project-tree scan with full detector pipeline.
-- `chaindora forensics` — host-state hunt: tokens, shell rc, PowerShell
+- `chdora scan [path]` — project-tree scan with full detector pipeline.
+- `chdora forensics` — host-state hunt: tokens, shell rc, PowerShell
   profile, Windows Credential Manager, and incident-pack file-artifact
   hunting across `$HOME`.
-- `chaindora forensics --scan-projects <root>` — full-machine project
+- `chdora forensics --scan-projects <root>` — full-machine project
   discovery. Walks the filesystem for manifests (`package.json`,
   `requirements.txt`, `Cargo.toml`, `go.mod`, `Dockerfile`,
   `.gitlab-ci.yml`, `.circleci/`, `.azure-pipelines/`, `.github/workflows/`,
   …), deduplicates nested manifests, and runs a full scan against each
   project root alongside the host-state checks.
-- `chaindora ci [path]` — CI-flavored wrapper with environment autodetect
+- `chdora ci [path]` — CI-flavored wrapper with environment autodetect
   ($GITHUB_ACTIONS / $GITLAB_CI / $CIRCLECI / $BITBUCKET_BUILD_NUMBER /
   $TF_BUILD / $DRONE / $JENKINS_HOME), `--fail-on critical,high|any|none`
   policy, and `--sarif <path>` sidecar for upload to code-scanning
   dashboards.
-- `chaindora update` — refreshes the curated incident pack from
+- `chdora update` — refreshes the curated incident pack from
   `github.com/alessandro-bitetto/chaindora` into `~/.chaindora/incidents/`.
   Atomic per-file writes, YAML validation, `.meta.json` provenance.
 

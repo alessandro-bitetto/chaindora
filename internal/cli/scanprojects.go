@@ -29,12 +29,12 @@ type projectScanOpts struct {
 	Excludes      []string
 	// PreInventory, if non-nil, bypasses inventory.Scan and runs the detector
 	// pipeline against the supplied Inventory directly. Used by deep-mode
-	// (`chaindora forensics --deep`) where the inventory comes from
+	// (`chdora forensics --deep`) where the inventory comes from
 	// `npm ls -g` / `pip list` rather than a filesystem walk.
 	PreInventory *inventory.Inventory
 }
 
-// scanProject runs the full chaindora scan pipeline against a single project
+// scanProject runs the full chdora scan pipeline against a single project
 // root and returns the aggregated findings. Returns nil for an empty inventory
 // (no project markers actually parseable at that root).
 func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]findings.Finding, error) {

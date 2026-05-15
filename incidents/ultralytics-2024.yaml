@@ -1,0 +1,42 @@
+schema: 1
+id: PYPI-ULTRALYTICS-2024-12
+name: ultralytics CI-injection cryptominer / token stealer
+severity: critical
+date: "2024-12-05"
+summary: |
+  On 2024-12-04/05, attackers exploited a GitHub Actions cache-poisoning
+  / pull-request-target misconfiguration in the `ultralytics/ultralytics`
+  YOLO repository to inject malicious code into the release pipeline.
+  Two PyPI releases were affected:
+
+  - ultralytics 8.3.41 — contained a token-exfiltration stage that
+    targeted GitHub Actions / CI environment secrets.
+  - ultralytics 8.3.42 — additionally bundled an XMRig cryptominer
+    that ran in the background on import.
+
+  Both versions were yanked from PyPI within hours. 8.3.43 was
+  published as the post-incident clean release and the maintainers
+  hardened the CI workflow against `pull_request_target` injection.
+
+  Because the package is widely used in CV training pipelines that run
+  on GPU hosts (high CPU / GPU resource budget, often with cloud
+  credentials in env), the blast-radius is meaningful even though the
+  exposure window was short.
+
+references:
+  - "https://github.com/ultralytics/ultralytics/issues/18027"
+  - "https://blog.gitguardian.com/ultralytics-python-package-compromise/"
+  - "https://github.com/advisories/GHSA-wfgw-2g8w-mfpg"
+
+packages:
+  - ecosystem: PyPI
+    name: "ultralytics"
+    versions:
+      - "8.3.41"
+      - "8.3.42"
+    safe_version: "8.3.43"
+
+post_compromise:
+  - "Rotate every secret that was readable by the CI job which installed the affected version: cloud API keys, GitHub tokens, registry credentials."
+  - "Check the host for an `xmrig` process (`ps -ef | grep -i xmrig`) and for outbound connections to mining pools (xmr.pool.minergate.com, xmr.f2pool.com, gulf.moneroocean.stream)."
+  - "Inspect crontab / systemd timer entries created during the install window — XMRig variants sometimes install persistence."

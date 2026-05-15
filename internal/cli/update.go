@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultUpdateSource = "https://api.github.com/repos/alessandro-bitetto/chaindora/contents/incidents?ref=main"
-	updateUserAgent     = "chaindora-update/"
+	updateUserAgent     = "chdora-update/"
 )
 
 var (
@@ -53,7 +53,7 @@ var updateCmd = &cobra.Command{
 chaindora repo into ~/.chaindora/incidents/ (or the directory passed via
 --dest).
 
-Without periodic updates, chaindora only knows about the incidents that
+Without periodic updates, chdora only knows about the incidents that
 existed in main at the time the binary was installed. Run this command
 after every reported supply-chain attack against an ecosystem you use.
 
@@ -230,7 +230,7 @@ func writeUpdateMeta(dest, source string, fileCount int) {
 		LastUpdated: time.Now().UTC().Format(time.RFC3339),
 		Source:      source,
 		FileCount:   fileCount,
-		Tool:        "chaindora/" + Version,
+		Tool:        "chdora/" + Version,
 	}
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {

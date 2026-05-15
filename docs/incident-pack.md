@@ -18,7 +18,7 @@ detection hooks:
    were compromised. Match in any project's inventory triggers a
    `[CRITICAL] [incident-pack]` finding.
 2. **`file_artifacts`** — filesystem globs whose presence anywhere in
-   a scan tree (or the `$HOME` directory under `chaindora forensics`)
+   a scan tree (or the `$HOME` directory under `chdora forensics`)
    indicates compromise. Optional `content_substr` gating prevents false
    positives on generic filenames.
 3. **`references`** — authoritative sources, displayed alongside every
@@ -103,13 +103,22 @@ false-positive amplification.
        versions:
          - "1.4.1"
          - "1.4.2"
+       safe_version: "1.4.3"   # optional; drives upgrade-command fixes
 
    file_artifacts:
      - glob: "**/.lefthood-data.json"
        severity: high
        description: Attacker-deployed exfiltration blob.
        content_substr: "trufflehog"
+
+   post_compromise:            # optional; surfaced as ManualSteps at fix time
+     - "Rotate any npm tokens published from machines that installed 1.4.1 / 1.4.2."
    ```
+
+   Use `versions: ["*"]` only for pure-malware namespaces (typosquats,
+   dependency-confusion packages where the entire name is
+   attacker-controlled — never for legitimate packages where only a
+   subset of versions are compromised).
 
 4. **Run the tests.** From the repo root:
 
@@ -121,8 +130,8 @@ false-positive amplification.
    If you added a fixture demonstrating the match, also run:
 
    ```sh
-   go build -o chaindora ./cmd/chaindora
-   ./chaindora scan testdata/<your-fixture> --skip-osv
+   go build -o chdora ./cmd/chdora
+   ./chdora scan testdata/<your-fixture> --skip-osv
    ```
 
 5. **Open a PR.** One incident per PR. In the description:
@@ -159,25 +168,25 @@ Same flow, but:
 
 ## Keeping your local copy fresh
 
-Each `chaindora` binary ships with whatever was in `incidents/` at build time.
+Each `chdora` binary ships with whatever was in `incidents/` at build time.
 To pick up entries added upstream after that, run:
 
 ```sh
-chaindora update
+chdora update
 ```
 
 This fetches the latest `incidents/*.yaml` files via the GitHub Contents
 API and writes them atomically into `~/.chaindora/incidents/`. `chaindora
-scan` and `chaindora ci` check that directory first, so the refresh takes
+scan` and `chdora ci` check that directory first, so the refresh takes
 effect on the next run without rebuilding.
 
 Recommended cadence:
 
-- **Daily**: schedule `chaindora update` in a cron / launchd / Task Scheduler
+- **Daily**: schedule `chdora update` in a cron / launchd / Task Scheduler
   job. Five seconds, ~10 KB.
 - **Manually** after every notable supply-chain incident (Socket / Aikido /
   StepSecurity blog post). Don't wait for the next scheduled run.
-- **In CI**: run `chaindora update` *before* `chaindora ci .` if the runner
+- **In CI**: run `chdora update` *before* `chdora ci .` if the runner
   has network access. For air-gapped runners, bake the latest `incidents/`
   into the runner image at build time.
 
@@ -188,7 +197,7 @@ upstream one, point `--source` at the same Contents API shape on your fork
 or internal mirror:
 
 ```sh
-chaindora update --source https://api.github.com/repos/myorg/chaindora-incidents/contents?ref=main
+chdora update --source https://api.github.com/repos/myorg/chaindora-incidents/contents?ref=main
 ```
 
 The endpoint just needs to return the same JSON shape (an array of objects

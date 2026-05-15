@@ -21,17 +21,17 @@ var (
 var fixCmd = &cobra.Command{
 	Use:   "fix",
 	Short: "Apply remediation against findings from a saved JSON file",
-	Long: `Read findings from a JSON file (the output of ` + "`chaindora scan --format json`" + `
+	Long: `Read findings from a JSON file (the output of ` + "`chdora scan --format json`" + `
 or any of the other commands with --format=json) and run the same fix
 pipeline that --fix provides on the scan commands — without re-scanning.
 
 Useful for CI workflows that scan once, archive the findings, review them,
 then apply fixes in a separate step:
 
-  chaindora scan . --format json > findings.json
+  chdora scan . --format json > findings.json
   # review findings.json, ship to security review, etc.
-  chaindora fix --from findings.json --yes              # apply safe fixes
-  chaindora fix --from findings.json --yes --aggressive # also semi-safe`,
+  chdora fix --from findings.json --yes              # apply safe fixes
+  chdora fix --from findings.json --yes --aggressive # also semi-safe`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if fixFromPath == "" {
 			return fmt.Errorf("--from <path> is required")

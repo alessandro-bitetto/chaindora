@@ -30,9 +30,9 @@ func New(incs []*incidents.Incident, excludes ...string) *Detector {
 
 // Detect runs incident-pack matching against the inventory and a filesystem
 // walk of scanRoot. Two finding sources:
-//   1. Package name+version matches in the inventory.
-//   2. File artifacts whose glob matches a file under scanRoot, optionally
-//      gated by a content substring.
+//  1. Package name+version matches in the inventory.
+//  2. File artifacts whose glob matches a file under scanRoot, optionally
+//     gated by a content substring.
 func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoot string) ([]findings.Finding, error) {
 	if len(d.incs) == 0 {
 		return nil, nil
@@ -56,24 +56,33 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 				continue
 			}
 			versionSet := make(map[string]struct{}, len(ip.Versions))
+			matchAny := false
 			for _, v := range ip.Versions {
+				if v == "*" {
+					matchAny = true
+					continue
+				}
 				versionSet[v] = struct{}{}
 			}
 			for _, p := range candidates {
-				if _, ok := versionSet[p.Version]; !ok {
-					continue
+				if !matchAny {
+					if _, ok := versionSet[p.Version]; !ok {
+						continue
+					}
 				}
 				out = append(out, findings.Finding{
-					Detector:   "incident-pack",
-					PURL:       p.PURL,
-					Ecosystem:  p.Ecosystem,
-					Name:       p.Name,
-					Version:    p.Version,
-					VulnID:     inc.ID,
-					Summary:    inc.Name,
-					Severity:   parseSeverity(inc.Severity),
-					References: inc.References,
-					SourcePath: p.SourcePath,
+					Detector:       "incident-pack",
+					PURL:           p.PURL,
+					Ecosystem:      p.Ecosystem,
+					Name:           p.Name,
+					Version:        p.Version,
+					VulnID:         inc.ID,
+					Summary:        inc.Name,
+					Severity:       parseSeverity(inc.Severity),
+					References:     inc.References,
+					SourcePath:     p.SourcePath,
+					FixUpgradeTo:   ip.SafeVersion,
+					PostCompromise: inc.PostCompromise,
 				})
 			}
 		}
@@ -125,12 +134,13 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 					}
 				}
 				out = append(out, findings.Finding{
-					Detector:   "incident-pack",
-					VulnID:     ar.Incident.ID,
-					Summary:    ar.Incident.Name + ": " + strings.TrimSpace(ar.Artifact.Description),
-					Severity:   parseSeverity(ar.Artifact.Severity),
-					References: ar.Incident.References,
-					SourcePath: path,
+					Detector:       "incident-pack",
+					VulnID:         ar.Incident.ID,
+					Summary:        ar.Incident.Name + ": " + strings.TrimSpace(ar.Artifact.Description),
+					Severity:       parseSeverity(ar.Artifact.Severity),
+					References:     ar.Incident.References,
+					SourcePath:     path,
+					PostCompromise: ar.Incident.PostCompromise,
 				})
 			}
 			return nil
@@ -141,8 +151,9 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoo
 }
 
 // globMatch supports a small but useful subset:
-//   "**/<path>" → match any file whose relative path ends with <path>
-//   "<path>"    → path.Match (no recursive ** support)
+//
+//	"**/<path>" → match any file whose relative path ends with <path>
+//	"<path>"    → path.Match (no recursive ** support)
 //
 // Both `pattern` and `rel` are normalized to forward slashes before matching,
 // and we use `path.Match` (which always treats `/` as the separator) rather
@@ -167,6 +178,16 @@ func normalizeEcosystem(s string) inventory.Ecosystem {
 		return inventory.EcosystemPyPI
 	case "github actions", "githubactions", "gh-actions":
 		return inventory.EcosystemActions
+	case "homebrew", "brew":
+		return inventory.EcosystemHomebrew
+	case "debian", "deb":
+		return inventory.EcosystemDebian
+	case "browser extension", "browserext", "browser-ext":
+		return inventory.EcosystemBrowserExt
+	case "ide extension", "ideext", "ide-ext":
+		return inventory.EcosystemIDEExt
+	case "go", "golang", "go modules":
+		return inventory.EcosystemGoModules
 	}
 	return inventory.Ecosystem(s)
 }

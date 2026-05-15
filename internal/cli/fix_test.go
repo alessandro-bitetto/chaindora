@@ -12,7 +12,7 @@ import (
 )
 
 // TestFixFromFileBuildsPlans is an integration test of the read-file →
-// buildAllFixPlans → RunFixes pipeline that backs `chaindora fix --from`.
+// buildAllFixPlans → RunFixes pipeline that backs `chdora fix --from`.
 // We don't invoke the cobra command itself (cobra flag wiring is exercised
 // in real `--help` tests); we verify the buildAllFixPlans dispatch + the
 // runner's plan-only mode produce the expected output shape.

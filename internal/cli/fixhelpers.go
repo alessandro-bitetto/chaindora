@@ -36,7 +36,7 @@ func buildAllFixPlans(fs []findings.Finding) []findings.FixPlan {
 
 // manualPlanFromFinding emits a manual-instructions FixPlan for findings the
 // scanner can't safely automate — credentials need rotation, shell rcs need
-// human triage, ssh keys can't be told apart by chaindora. The plan still
+// human triage, ssh keys can't be told apart by chdora. The plan still
 // surfaces clear remediation steps so the user has somewhere to start.
 func manualPlanFromFinding(f findings.Finding) *findings.FixPlan {
 	var steps []string

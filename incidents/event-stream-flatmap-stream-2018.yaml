@@ -1,0 +1,41 @@
+schema: 1
+id: NPM-EVENT-STREAM-FLATMAP-STREAM-2018-11
+name: event-stream / flatmap-stream Bitcoin wallet stealer
+severity: critical
+date: "2018-11-26"
+summary: |
+  In September 2018 the maintainer of the widely-depended-on `event-stream`
+  npm package (~2M weekly downloads) handed publish rights to a new
+  contributor, "right9ctrl". The new maintainer published event-stream
+  3.3.6, which added a new dependency: flatmap-stream@0.1.1. That
+  flatmap-stream package contained encrypted, layered payload that targeted
+  the Copay (BitPay) Bitcoin wallet desktop bundle and exfiltrated wallet
+  seeds.
+
+  flatmap-stream 0.1.1 and 0.1.2 are the malicious versions; the package
+  was pulled from npm on 2018-11-26 after disclosure on
+  dominictarr/event-stream#116.
+
+references:
+  - "https://github.com/dominictarr/event-stream/issues/116"
+  - "https://github.com/advisories/GHSA-mh6f-8j2x-4483"
+  - "https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident.html"
+
+packages:
+  - ecosystem: npm
+    name: "flatmap-stream"
+    versions:
+      - "0.1.1"
+      - "0.1.2"
+  # event-stream 3.3.6 introduced the bad dep; downgrading to 3.3.4 (or
+  # upgrading past the rollback to 4.0.x) removes flatmap-stream. We flag
+  # 3.3.6 itself because lockfiles cut during the attack window pinned to it.
+  - ecosystem: npm
+    name: "event-stream"
+    versions:
+      - "3.3.6"
+    safe_version: "4.0.1"
+
+post_compromise:
+  - "If this was a wallet-handling environment, treat all Bitcoin/Copay seeds as compromised — move funds to a freshly-generated wallet on a clean machine."
+  - "Audit any private keys / API tokens accessible to processes that imported event-stream during the attack window."

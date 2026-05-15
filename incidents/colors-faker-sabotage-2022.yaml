@@ -1,0 +1,44 @@
+schema: 1
+id: NPM-COLORS-FAKER-SABOTAGE-2022-01
+name: colors.js / faker.js maintainer self-sabotage (DoS)
+severity: high
+date: "2022-01-08"
+summary: |
+  Maintainer Marak Squires intentionally introduced breaking changes to
+  two of his own widely-used npm packages on 2022-01-08:
+
+  - `colors` 1.4.1 / 1.4.2 added an infinite "LIBERTY LIBERTY LIBERTY"
+    Zalgo loop that hangs any consumer's startup.
+  - `faker` 6.6.6 was published as an empty/broken package with a
+    README announcing the abandonment.
+
+  This was not a credential-theft compromise — there is no
+  exfiltration, no remote payload, no wallet stealer. The
+  blast-radius was a denial-of-service against ~20k downstream
+  packages (Cloudflare's wrangler, AWS CDK, and many others).
+
+  `colors` 1.4.0 is the last clean release. For `faker`, the
+  community fork at `@faker-js/faker` is the maintained successor —
+  there is no clean version of the original `faker` package.
+
+references:
+  - "https://www.bleepingcomputer.com/news/security/dev-corrupts-npm-libs-colors-and-faker-breaking-thousands-of-apps/"
+  - "https://github.com/advisories/GHSA-2qrg-x229-3v8q"
+  - "https://github.com/Marak/colors.js/issues/285"
+
+packages:
+  - ecosystem: npm
+    name: "colors"
+    versions:
+      - "1.4.1"
+      - "1.4.2"
+    safe_version: "1.4.0"
+  - ecosystem: npm
+    name: "faker"
+    versions:
+      - "6.6.6"
+    # No safe_version: faker is abandoned. Migrate to @faker-js/faker.
+
+post_compromise:
+  - "For `faker`: migrate the import to `@faker-js/faker` (the community-maintained fork)."
+  - "Regenerate any production lockfiles that pinned the broken versions to confirm CI doesn't reintroduce them via cache."

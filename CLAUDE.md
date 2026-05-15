@@ -6,7 +6,13 @@ pip, Go modules, six CI/CD systems, Docker images, and Chromium/VSCode-family
 extensions.
 
 Public repo: <https://github.com/alessandro-bitetto/chaindora> · License:
-Apache-2.0 · Latest release: v0.4.0.
+Apache-2.0 · Latest release: v0.5.0.
+
+**Project name vs. binary name.** The *project* is `chaindora` (repo
+name, Go module path, goreleaser archive prefix, `~/.chaindora/` data
+dir). The *CLI binary* is `chdora` (renamed from `chaindora` in v0.5
+for shorter invocation). When updating docs: use `chdora` for command
+invocations, `chaindora` for project / repo / module references.
 
 This file is the on-ramp for anyone (human or AI) walking into the repo cold.
 For deeper coverage see [docs/architecture.md](./docs/architecture.md),
@@ -15,25 +21,30 @@ For deeper coverage see [docs/architecture.md](./docs/architecture.md),
 
 ## Quick orientation
 
-Five top-level commands:
+Six top-level commands:
 
-- `chaindora scan [path]` — project-tree scan; runs OSV + incident pack +
+- `chdora scan [path]` — project-tree scan; runs OSV + incident pack +
   heuristics over inventory.
-- `chaindora forensics` — host-state hunt: tokens, shell rc, PowerShell
+- `chdora forensics` — host-state hunt: tokens, shell rc, PowerShell
   profile, ssh, persistence (`--persistence`), extensions
   (`--extensions`), `--deep` for globally-installed packages, and
   `--scan-projects <root>` to walk the filesystem for every project
   manifest under a root.
-- `chaindora ci [path]` — CI gate. Autodetects `$GITHUB_ACTIONS`,
+- `chdora ci [path]` — CI gate. Autodetects `$GITHUB_ACTIONS`,
   `$GITLAB_CI`, `$CIRCLECI`, `$BITBUCKET_BUILD_NUMBER`, `$TF_BUILD`,
   `$DRONE`, `$JENKINS_HOME`. Applies `--fail-on critical,high` by
   default and emits a SARIF sidecar with `--sarif <path>`.
-- `chaindora fix --from <findings.json>` — audit-then-apply remediation.
+- `chdora fix --from <findings.json>` — audit-then-apply remediation.
   Reads a previously-emitted findings JSON, runs the same fix pipeline
   `--fix` provides on the scan commands, without rescanning.
-- `chaindora update` — refresh the curated incident pack from
+- `chdora update` — refresh the curated incident pack from
   `github.com/alessandro-bitetto/chaindora` into
   `~/.chaindora/incidents/`.
+- `chdora upgrade` — self-upgrade the binary. Fetches the latest
+  GitHub release archive, verifies SHA-256 against the published
+  checksums file, and atomically replaces the running binary
+  (`.exe.old` parking dance on Windows). Refuses when the binary
+  looks Homebrew-/snap-managed unless `--force`.
 
 Four detection layers (each can be skipped via `--skip-X`):
 
@@ -50,12 +61,12 @@ Output formats (`--format <fmt>`): `text` (default), `json`, `jsonl`,
 ## Build / test / cross-compile
 
 ```sh
-go build -o chaindora ./cmd/chaindora
+go build -o chdora ./cmd/chdora
 go test ./...
 go vet ./...
 
-GOOS=windows GOARCH=amd64 go build -o /tmp/chaindora.exe ./cmd/chaindora
-GOOS=windows GOARCH=arm64 go build -o /tmp/chaindora-arm.exe ./cmd/chaindora
+GOOS=windows GOARCH=amd64 go build -o /tmp/chdora.exe ./cmd/chdora
+GOOS=windows GOARCH=arm64 go build -o /tmp/chdora-arm.exe ./cmd/chdora
 ```
 
 CI runs the same on `ubuntu-latest`, `macos-latest`, `windows-latest`
@@ -76,10 +87,10 @@ against the repo itself with `--exclude testdata --fail-on critical,high`.
 ## Repo layout
 
 ```
-cmd/chaindora/                 entry point (cobra root)
+cmd/chdora/                 entry point (cobra root)
 internal/
   cli/                         top-level commands + flag wiring + fix runner integration
-    {root,scan,ci,forensics,fix,update}.go
+    {root,scan,ci,forensics,fix,update,upgrade}.go
     {render,fixhelpers,scanprojects}.go
   inventory/                   per-ecosystem lockfile / manifest parsers
     {npm,pip,yarn,pnpm,uv,pipfile,poetry}.go   (npm + PyPI)
@@ -100,7 +111,7 @@ internal/
     heuristic/                 unpinned / cishell / installscripts
                                typosquat / depconfusion / freshpopular
                                poplist (top-N curated lists + Levenshtein)
-incidents/                     curated incident YAMLs (5 entries today)
+incidents/                     curated incident YAMLs (14 entries today)
 testdata/                      fixtures for parser tests + integration demos
 docs/                          contributor docs
 .github/workflows/             test.yml (matrix + dogfood) + release.yml (tag → goreleaser)
@@ -152,10 +163,29 @@ docs/                          contributor docs
   commands; everything else is treated as a project-lockfile path and
   routed through `projectLockfileFix`.
 
+### `internal/detectors/incident`
+
+- Incident YAMLs support `packages[].safe_version` (one string per
+  package). When set, the fix layer emits an upgrade command
+  (`npm install pkg@<safe>`, `python3 -m pip install --upgrade
+  pkg==<safe>`, `brew upgrade pkg`) instead of the bare uninstall
+  fallback. Mark new entries' safe_version conservatively — pick
+  the last clean release for sabotage incidents, the post-incident
+  clean release for credential-theft incidents.
+- The literal `"*"` in `versions:` matches any version. Use only for
+  pure-malware namespaces (typosquats, dependency-confusion
+  packages). The wildcard handling lives in the matcher in
+  `incident.go` — `matchAny` flag short-circuits the version-set
+  membership check.
+- Top-level `post_compromise:` is a list of additional ManualSteps
+  the fix layer surfaces when any match fires. Use only for
+  incident-specific guidance — the fix runner already appends
+  generic "audit credentials / verify dep tree" steps.
+
 ### `internal/detectors/hostforensics`
 
 - Every add-on is gated behind a flag (`--ssh-check`, `--persistence`,
-  `--extensions`, `--deep`). The default `chaindora forensics`
+  `--extensions`, `--deep`). The default `chdora forensics`
   invocation runs **only** host-state defaults (tokens / shell rc /
   PowerShell / wincreds) + the incident-pack file-artifact hunt.
 - `wincreds.scanWindowsCredentials` is `runtime.GOOS=="windows"`-gated;
@@ -181,19 +211,19 @@ docs/                          contributor docs
 
 ```sh
 # Integration smoke test (no network)
-./chaindora scan testdata --skip-osv
+./chdora scan testdata --skip-osv
 
 # Fix plan against pip globals (the headline --deep flow)
-./chaindora forensics --deep --skip-hunt --fix-plan
+./chdora forensics --deep --skip-hunt --fix-plan
 
 # Self-scan dogfood — matches the CI's self-scan job
-./chaindora ci . --exclude testdata --fail-on critical,high
+./chdora ci . --exclude testdata --fail-on critical,high
 
 # Refresh the local incident pack from upstream
-./chaindora update --verbose
+./chdora update --verbose
 
 # End-to-end CI/SARIF flow
-./chaindora ci testdata --exclude testdata --sarif /tmp/c.sarif --fail-on none
+./chdora ci testdata --exclude testdata --sarif /tmp/c.sarif --fail-on none
 python3 -c "import json; d=json.load(open('/tmp/c.sarif')); print(d['version'], len(d['runs'][0]['results']))"
 ```
 
@@ -207,7 +237,7 @@ python3 -c "import json; d=json.load(open('/tmp/c.sarif')); print(d['version'], 
 - Don't merge an incident-pack entry without at least one authoritative
   source URL in `references:`. See
   [docs/incident-pack.md](./docs/incident-pack.md) for the quality bar.
-- Don't commit the `/chaindora` binary (it's in `.gitignore`).
+- Don't commit the `/chdora` binary (it's in `.gitignore`).
 - Don't `git push --force` to `main`. Tags are immutable in published
   releases.
 - Don't skip git hooks (`--no-verify`) on commits.

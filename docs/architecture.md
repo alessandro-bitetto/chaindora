@@ -17,7 +17,7 @@ chain attack?* That framing drives every design choice:
   annotations) doesn't care which detector produced what.
 - **Fast and offline by default.** OSV queries hit a network; everything
   else (incidents, host scan, heuristics minus `--fresh-popular`) runs
-  with no external calls. `chaindora scan . --skip-osv` is a sane
+  with no external calls. `chdora scan . --skip-osv` is a sane
   fallback when offline.
 
 ## Data flow
@@ -57,7 +57,7 @@ consumes the same `Finding` struct.
 ## Module layout
 
 ```
-cmd/chaindora/                  -- entry point (cobra root)
+cmd/chdora/                  -- entry point (cobra root)
 internal/
   cli/                          -- top-level commands
     root.go     scan.go         forensics.go     ci.go     render.go
@@ -100,7 +100,7 @@ type Finding struct {
 ```
 
 The `Severity` value is meaningful: SARIF maps it to `error` / `warning`
-/ `note` levels, `chaindora ci --fail-on critical,high` filters on it,
+/ `note` levels, `chdora ci --fail-on critical,high` filters on it,
 GitHub code-scanning sorts by the corresponding `security-severity` CVSS
 proxy (9.8 / 8.0 / 5.5 / 3.0). Pick deliberately.
 

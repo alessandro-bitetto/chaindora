@@ -10,21 +10,23 @@ import (
 
 // Incident is the on-disk YAML descriptor for a single supply-chain incident.
 type Incident struct {
-	Schema        int               `yaml:"schema"`
-	ID            string            `yaml:"id"`
-	Name          string            `yaml:"name"`
-	Severity      string            `yaml:"severity"`
-	Date          string            `yaml:"date"`
-	Summary       string            `yaml:"summary"`
-	References    []string          `yaml:"references"`
-	Packages      []IncidentPackage `yaml:"packages"`
-	FileArtifacts []FileArtifact    `yaml:"file_artifacts"`
+	Schema         int               `yaml:"schema"`
+	ID             string            `yaml:"id"`
+	Name           string            `yaml:"name"`
+	Severity       string            `yaml:"severity"`
+	Date           string            `yaml:"date"`
+	Summary        string            `yaml:"summary"`
+	References     []string          `yaml:"references"`
+	Packages       []IncidentPackage `yaml:"packages"`
+	FileArtifacts  []FileArtifact    `yaml:"file_artifacts"`
+	PostCompromise []string          `yaml:"post_compromise,omitempty"`
 }
 
 type IncidentPackage struct {
-	Ecosystem string   `yaml:"ecosystem"`
-	Name      string   `yaml:"name"`
-	Versions  []string `yaml:"versions"`
+	Ecosystem   string   `yaml:"ecosystem"`
+	Name        string   `yaml:"name"`
+	Versions    []string `yaml:"versions"`
+	SafeVersion string   `yaml:"safe_version,omitempty"`
 }
 
 type FileArtifact struct {

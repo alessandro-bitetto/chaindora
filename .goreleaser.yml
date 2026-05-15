@@ -11,8 +11,8 @@ before:
 
 builds:
   - id: chaindora
-    main: ./cmd/chaindora
-    binary: chaindora
+    main: ./cmd/chdora
+    binary: chdora
     env:
       - CGO_ENABLED=0
     goos:

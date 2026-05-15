@@ -1,14 +1,14 @@
 # CI/CD integration recipes
 
-Drop-in workflow snippets for the major CI platforms. `chaindora ci`
+Drop-in workflow snippets for the major CI platforms. `chdora ci`
 autodetects most of these from environment variables, so you usually
 don't need to pass any flags beyond the path.
 
 ## GitHub Actions
 
 ```yaml
-# .github/workflows/chaindora.yml
-name: chaindora
+# .github/workflows/chdora.yml
+name: chdora
 on: [push, pull_request]
 
 jobs:
@@ -19,15 +19,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-      - run: go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest
-      - run: chaindora ci . --sarif chaindora.sarif
+      - run: go install github.com/alessandro-bitetto/chaindora/cmd/chdora@latest
+      - run: chdora ci . --sarif chaindora.sarif
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: chaindora.sarif
 ```
 
-- `chaindora ci` autodetects `$GITHUB_ACTIONS=true` and emits
+- `chdora ci` autodetects `$GITHUB_ACTIONS=true` and emits
   `::error file=…,line=…::` annotations on stdout *and* the SARIF
   sidecar.
 - `if: always()` ensures the SARIF upload happens even when `chaindora
@@ -44,8 +44,8 @@ chaindora:
   stage: test
   image: golang:1.22
   script:
-    - go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest
-    - chaindora ci . --format json > chaindora.json
+    - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@latest
+    - chdora ci . --format json > chaindora.json
   artifacts:
     when: always
     paths:
@@ -54,7 +54,7 @@ chaindora:
       sast: chaindora.json
 ```
 
-- `chaindora ci` autodetects `$GITLAB_CI=true`.
+- `chdora ci` autodetects `$GITLAB_CI=true`.
 - GitLab's SAST report format isn't SARIF-compatible; for now the JSON
   is uploaded as a build artifact. A native GitLab SAST mapping is on
   the roadmap.
@@ -70,8 +70,8 @@ jobs:
       - image: cimg/go:1.22
     steps:
       - checkout
-      - run: go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest
-      - run: chaindora ci .
+      - run: go install github.com/alessandro-bitetto/chaindora/cmd/chdora@latest
+      - run: chdora ci .
 workflows:
   test:
     jobs: [chaindora]
@@ -90,8 +90,8 @@ pipelines:
         name: chaindora
         image: golang:1.22
         script:
-          - go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest
-          - chaindora ci .
+          - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@latest
+          - chdora ci .
 ```
 
 Detected via `$BITBUCKET_BUILD_NUMBER`. Same text-default behavior.
@@ -108,8 +108,8 @@ steps:
     inputs:
       version: '1.22'
   - script: |
-      go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest
-      chaindora ci . --sarif $(Build.ArtifactStagingDirectory)/chaindora.sarif
+      go install github.com/alessandro-bitetto/chaindora/cmd/chdora@latest
+      chdora ci . --sarif $(Build.ArtifactStagingDirectory)/chaindora.sarif
   - task: PublishBuildArtifacts@1
     inputs:
       pathToPublish: '$(Build.ArtifactStagingDirectory)'
@@ -127,8 +127,8 @@ pipeline {
   stages {
     stage('chaindora') {
       steps {
-        sh 'go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest'
-        sh 'chaindora ci . --sarif chaindora.sarif'
+        sh 'go install github.com/alessandro-bitetto/chaindora/cmd/chdora@latest'
+        sh 'chdora ci . --sarif chaindora.sarif'
         archiveArtifacts artifacts: 'chaindora.sarif', allowEmptyArchive: true
       }
     }
@@ -151,8 +151,8 @@ steps:
   - name: chaindora
     image: golang:1.22
     commands:
-      - go install github.com/alessandro-bitetto/chaindora/cmd/chaindora@latest
-      - chaindora ci .
+      - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@latest
+      - chdora ci .
 ```
 
 Detected via `$DRONE=true`. Drone configs are mostly `image:`-based, and
@@ -179,7 +179,7 @@ A built-in suppressions / ignore-file mechanism is on the roadmap.
 ## Air-gapped / offline mode
 
 ```sh
-chaindora ci . --skip-osv --skip-heuristic
+chdora ci . --skip-osv --skip-heuristic
 ```
 
 Falls back to incident-pack matching + host forensics (when running

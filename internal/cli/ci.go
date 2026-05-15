@@ -37,8 +37,8 @@ var (
 
 var ciCmd = &cobra.Command{
 	Use:   "ci [path]",
-	Short: "Run chaindora as a CI gate (autodetects environment, exits non-zero on findings)",
-	Long: `chaindora ci is a thin wrapper over scan with semantics tuned for
+	Short: "Run chdora as a CI gate (autodetects environment, exits non-zero on findings)",
+	Long: `chdora ci is a thin wrapper over scan with semantics tuned for
 continuous-integration use:
 
   - Autodetects the running CI (GitHub Actions, GitLab CI, CircleCI, Bitbucket
@@ -64,7 +64,7 @@ continuous-integration use:
 			format = formatForCI(ci)
 		}
 		if ciVerbose {
-			fmt.Fprintf(os.Stderr, "chaindora ci: detected env=%q, format=%q\n", ci, format)
+			fmt.Fprintf(os.Stderr, "chdora ci: detected env=%q, format=%q\n", ci, format)
 		}
 
 		inv, err := inventory.Scan(root, inventory.WithExcludes(ciExcludes...))

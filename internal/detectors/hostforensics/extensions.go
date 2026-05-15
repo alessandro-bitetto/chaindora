@@ -16,7 +16,7 @@ import (
 // flows through the existing detector pipeline; incident-pack entries can
 // target specific extension IDs the same way they target npm packages today.
 //
-// No bad-extension list is shipped yet — `chaindora update`'s incident pack
+// No bad-extension list is shipped yet — `chdora update`'s incident pack
 // will grow extension-targeted entries in follow-ups.
 func ScanExtensions(home string) *inventory.Inventory {
 	inv := &inventory.Inventory{}

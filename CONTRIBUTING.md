@@ -27,7 +27,7 @@ For everything else, the high-impact areas are:
 ```sh
 git clone https://github.com/alessandro-bitetto/chaindora
 cd chaindora
-go build -o chaindora ./cmd/chaindora
+go build -o chdora ./cmd/chdora
 go test ./...
 ```
 
