@@ -82,13 +82,16 @@ continuous-integration use:
 
 		ctx := context.Background()
 		var all []findings.Finding
+		tally := newDetectorTally()
 
 		if !ciSkipOSV {
+			tally.Enable("osv-ioc")
 			det := osvioc.New(osv.NewClient())
 			results, err := det.Detect(ctx, inv)
 			if err != nil {
 				return fmt.Errorf("osv detector: %w", err)
 			}
+			tally.AbsorbFindings(results)
 			all = append(all, results...)
 		}
 
@@ -105,17 +108,20 @@ continuous-integration use:
 						fmt.Fprintln(os.Stderr, "warn: incident pack load failed:", err)
 					}
 				} else {
+					tally.Enable("incident-pack")
 					det := incident.New(incs, ciExcludes...)
 					results, err := det.Detect(ctx, inv, root)
 					if err != nil {
 						return fmt.Errorf("incident detector: %w", err)
 					}
+					tally.AbsorbFindings(results)
 					all = append(all, results...)
 				}
 			}
 		}
 
 		if !ciSkipHeuristic {
+			tally.Enable("heuristic")
 			npm, pypi := buildRegistryProbes(ciSkipRegistry)
 			det := heuristic.New(heuristic.Config{
 				FreshPopular: heuristic.FreshPopularConfig{Enabled: ciFreshPopular},
@@ -127,8 +133,11 @@ continuous-integration use:
 			if err != nil {
 				return fmt.Errorf("heuristic detector: %w", err)
 			}
+			tally.AbsorbFindings(results)
 			all = append(all, results...)
 		}
+
+		tally.Print(os.Stderr)
 
 		if err := renderFindings(os.Stdout, all, format); err != nil {
 			return err

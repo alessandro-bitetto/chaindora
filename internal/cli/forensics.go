@@ -66,13 +66,18 @@ func runForensicsFlow(ctx context.Context) error {
 		}
 
 		var all []findings.Finding
+		tally := newDetectorTally()
 
+		// Always-on host-state detector. Enable up front so the
+		// summary row shows even with 0 findings (which is the
+		// reassuring case — no leaked credentials).
+		tally.Enable("hostforensics")
 		det := hostforensics.New(home)
 		results, err := det.Detect(ctx)
 		if err != nil {
 			return fmt.Errorf("host forensics: %w", err)
 		}
-		fmt.Fprintf(os.Stderr, "host-state findings: %d (home=%s)\n", len(results), home)
+		tally.AbsorbFindings(results)
 		all = append(all, results...)
 
 		if !forensicsSkipHunt {
@@ -93,12 +98,14 @@ func runForensicsFlow(ctx context.Context) error {
 					fmt.Fprintln(os.Stderr, "warn: incident pack load failed:", err)
 				} else {
 					fmt.Fprintf(os.Stderr, "hunting %d incidents' file_artifacts under %s\n", len(incs), huntRoot)
+					tally.Enable("incident-pack")
 					iDet := incident.New(incs, forensicsExcludes...)
 					empty := &inventory.Inventory{}
 					ires, err := iDet.Detect(ctx, empty, huntRoot)
 					if err != nil {
 						return fmt.Errorf("incident-pack hunt: %w", err)
 					}
+					tally.AbsorbFindings(ires)
 					all = append(all, ires...)
 				}
 			}
@@ -126,12 +133,26 @@ func runForensicsFlow(ctx context.Context) error {
 				NPMProbe:      npmProbe,
 				PyPIProbe:     pypiProbe,
 			}
+			// Per-project scans run osv-ioc / incident-pack /
+			// heuristic depending on opts.Skip* flags. Mark every
+			// enabled detector so they show up in the summary
+			// even when 0 projects yield findings.
+			if !opts.SkipOSV {
+				tally.Enable("osv-ioc")
+			}
+			if !opts.SkipIncidents {
+				tally.Enable("incident-pack")
+			}
+			if !opts.SkipHeuristic {
+				tally.Enable("heuristic")
+			}
 			for _, r := range roots {
 				results, err := scanProject(ctx, r, opts)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "warn: %s: %v\n", r, err)
 					continue
 				}
+				tally.AbsorbFindings(results)
 				all = append(all, results...)
 			}
 		}
@@ -141,6 +162,7 @@ func runForensicsFlow(ctx context.Context) error {
 			if forensicsVerbose {
 				fmt.Fprintf(os.Stderr, "ssh-check: %d finding(s)\n", len(sshResults))
 			}
+			tally.AbsorbFindings(sshResults)
 			all = append(all, sshResults...)
 		}
 
@@ -149,6 +171,7 @@ func runForensicsFlow(ctx context.Context) error {
 			if forensicsVerbose {
 				fmt.Fprintf(os.Stderr, "persistence: %d finding(s)\n", len(persistenceResults))
 			}
+			tally.AbsorbFindings(persistenceResults)
 			all = append(all, persistenceResults...)
 		}
 
@@ -170,6 +193,7 @@ func runForensicsFlow(ctx context.Context) error {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warn: extensions scan: %v\n", err)
 			} else {
+				tally.AbsorbFindings(results)
 				all = append(all, results...)
 			}
 		}
@@ -198,9 +222,16 @@ func runForensicsFlow(ctx context.Context) error {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "warn: deep scan: %v\n", err)
 			} else {
+				tally.AbsorbFindings(results)
 				all = append(all, results...)
 			}
 		}
+
+		// Per-detector summary on stderr before the findings list
+		// goes to stdout. Replaces the v0.5.x inline "host-state
+		// findings: 0" pattern that looked like "0 findings overall"
+		// without context.
+		tally.Print(os.Stderr)
 
 		if err := renderFindings(os.Stdout, all, effectiveFormat(forensicsFormat, forensicsJSON)); err != nil {
 			return err

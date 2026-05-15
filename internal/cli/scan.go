@@ -55,14 +55,17 @@ var scanCmd = &cobra.Command{
 
 		ctx := context.Background()
 		var all []findings.Finding
+		tally := newDetectorTally()
 
 		if !skipOSV {
+			tally.Enable("osv-ioc")
 			client := osv.NewClient()
 			det := osvioc.New(client)
 			results, err := det.Detect(ctx, inv)
 			if err != nil {
 				return fmt.Errorf("osv detector: %w", err)
 			}
+			tally.AbsorbFindings(results)
 			all = append(all, results...)
 		}
 
@@ -80,17 +83,20 @@ var scanCmd = &cobra.Command{
 					fmt.Fprintln(os.Stderr, "warn: incident pack load failed:", err)
 				} else {
 					fmt.Fprintf(os.Stderr, "loaded %d incidents from %s\n", len(incs), dir)
+					tally.Enable("incident-pack")
 					det := incident.New(incs, scanExcludes...)
 					results, err := det.Detect(ctx, inv, root)
 					if err != nil {
 						return fmt.Errorf("incident detector: %w", err)
 					}
+					tally.AbsorbFindings(results)
 					all = append(all, results...)
 				}
 			}
 		}
 
 		if !skipHeuristic {
+			tally.Enable("heuristic")
 			npm, pypi := buildRegistryProbes(scanSkipRegistry)
 			det := heuristic.New(heuristic.Config{
 				FreshPopular: heuristic.FreshPopularConfig{Enabled: scanFreshPopular},
@@ -102,8 +108,11 @@ var scanCmd = &cobra.Command{
 			if err != nil {
 				return fmt.Errorf("heuristic detector: %w", err)
 			}
+			tally.AbsorbFindings(results)
 			all = append(all, results...)
 		}
+
+		tally.Print(os.Stderr)
 
 		if err := renderFindings(os.Stdout, all, effectiveFormat(scanFormat, jsonOut)); err != nil {
 			return err

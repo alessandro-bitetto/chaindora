@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.6.2] — 2026-05-15
+
+### Changed
+
+- **Per-detector summary table** before the findings list. The v0.5.x
+  pattern emitted per-detector "X findings: N" lines inline on
+  stderr — the first one a user saw was usually `host-state
+  findings: 0`, which read like "0 findings overall" until you
+  scrolled past it. Replaced with one consolidated table printed on
+  stderr before the renderer's findings list goes to stdout:
+
+  ```
+  detectors:
+    osv-ioc (OSV.dev CVE matches)                         153
+    heuristic (evidence-based behavioral detectors)        30
+    incident-pack (curated IOC matches)                     4
+    host-state (credentials, shell rc, persistence)         0
+    -----------------------------------------------------------
+    total                                                 187 findings
+  ```
+
+  Zero-count rows are dimmed (TTY) so they read as "this ran and
+  found nothing" (reassuring) rather than "this is missing"
+  (concerning). Order: non-zero rows first by count, zero rows at
+  the bottom.
+
+  The misleading inline `host-state findings: %d` line is removed.
+  Informational lines (`inventoried N packages from M sources`,
+  `loaded N incidents from X`, `hunting N incidents' file_artifacts
+  under X`, `found N project root(s) under X`) stay — they describe
+  *what's being scanned*, not detector totals.
+
+### Added
+
+- `internal/cli/tally.go` — `detectorTally` struct with `Enable(class)`
+  (register an empty row up front for detectors that ran), `AbsorbFindings(fs)`
+  (fold sub-detector tags like `heuristic:dep-confusion` into their
+  family root), and `Print(w)` (render the aligned table with optional
+  color). Wired into `scan`, `ci`, `forensics`/`audit` RunE.
+
 ## [0.6.1] — 2026-05-15
 
 ### Fixed
