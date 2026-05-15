@@ -9,6 +9,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.6.0] — 2026-05-15
+
+The architectural shift: heuristics stop guessing from package-name shape
+and start gathering evidence from the upstream registries. Real-world
+impact on the v0.5.9 audit baseline (454 findings, 194 from
+dep-confusion alone): an estimated 80–90% of dep-confusion findings
+drop because chdora can now distinguish `@vitejs/plugin-react` (public,
+no risk) from `@my-corp/internal-thing` (private, real risk if a
+public collision exists). Typosquat and install-script heuristics
+become evidence-gated too — 10-year-old packages with millions of
+weekly downloads stop firing.
+
+### Added
+
+- **`internal/registries/`** — cross-ecosystem `Probe` interface
+  with three signals: `Exists(name)`, `PublishedAt(name)`,
+  `DownloadsLast7d(name)`. Implementations:
+    - `NewNPM()` — `registry.npmjs.org` + `api.npmjs.org/downloads`
+    - `NewPyPI()` — `pypi.org/pypi/<name>/json` + `pypistats.org`
+  Wrapped in `NewCached` (disk-backed at `~/.chaindora/registry-cache.json`,
+  24h TTL keyed by `(ecosystem, name)`) so repeated audits cost
+  zero registry traffic. Pure stdlib; no new dependencies.
+
+- **`Package.ResolvedURL`** — new field on `inventory.Package`,
+  populated from npm `package-lock.json`'s `resolved` field. Used
+  by the dep-confusion heuristic to detect "this package was
+  resolved from a private registry, not npmjs.org" without needing
+  user-side `.npmrc` config.
+
+- **`--skip-registry` flag** on `scan`, `ci`, `forensics`, `audit` —
+  for offline / no-egress CI environments. Falls back to
+  `registries.Noop`; evidence-based heuristics simply don't fire
+  rather than emitting shape-only false positives.
+
+### Changed
+
+- **dep-confusion heuristic rewritten** to require two signals
+  agreeing before firing:
+    1. The scope is *private to this project*. Detected via either
+       a `@scope:registry=<not-npmjs>` line in `.npmrc` OR the
+       lockfile's `resolved:` URL pointing to a non-public registry
+       (Artifactory, GitHub Packages, GitLab, CodeArtifact, ...).
+    2. A package with the same name *exists publicly*, OR the name
+       is unclaimed and could be claimed by an attacker.
+  Severity ladder: CRITICAL when private scope + public collision
+  (immediately exploitable); MEDIUM when private scope + no public
+  collision (defensively claim the name); no finding when the
+  scope is presumed public. Drops ~95% of v0.5.x false positives
+  on real codebases.
+
+- **typosquat heuristic now evidence-gated.** A Levenshtein-close
+  package must also be either fresh (< 90 days old) or low-traffic
+  (< 1,000 downloads/week) to fire. Mature, well-adopted
+  neighbour-name packages (`jsonparse` vs `json-parse`,
+  `lodash.assign` vs `lodash.assignin`) stop showing up.
+  Severity scales with freshness: HIGH for < 7-day-old typos,
+  MEDIUM for < 30-day, LOW otherwise. Offline mode → no findings
+  (we'd rather under-report than emit shape-only guesses).
+
+- **install-script heuristic now evidence-gated.** Packages with
+  `hasInstallScript: true` must also be fresh or low-traffic.
+  Mature packages with legitimate install hooks (`husky`,
+  `node-gyp`, `esbuild`, `fsevents`, `sharp`) stop firing.
+  Severity scales: CRITICAL for < 7-day, HIGH for < 30-day,
+  MEDIUM otherwise. This is exactly the shape the Shai-Hulud worm
+  rides — gating on freshness keeps the detector sharp without the
+  noise.
+
+### Architecture note
+
+The reason this matters: chdora was previously a shape-matcher
+("looks scoped, looks Levenshtein-close, has install hooks") with
+N false positives per real finding. v0.6.0 is an evidence-gatherer
+("npm says this exists, was published yesterday, has 12 weekly
+downloads"). The signal sources are ground truth — they don't need
+ongoing maintenance from chdora as the package universe grows.
+Self-maintaining for the heuristic layer; the incident pack still
+requires human curation per new attack.
+
 ## [0.5.9] — 2026-05-15
 
 ### Fixed

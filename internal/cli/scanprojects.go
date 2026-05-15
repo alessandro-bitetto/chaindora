@@ -17,6 +17,7 @@ import (
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 	"github.com/alessandro-bitetto/chaindora/internal/osv"
 	"github.com/alessandro-bitetto/chaindora/internal/progress"
+	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
 
 // projectScanOpts configures scanProject's detector pipeline.
@@ -28,6 +29,14 @@ type projectScanOpts struct {
 	FreshPopular  bool
 	Verbose       bool
 	Excludes      []string
+	// NPMProbe / PyPIProbe — registry probes the evidence-based
+	// heuristics use to confirm package signals (existence, freshness,
+	// download count). nil → falls back to registries.Noop (no network,
+	// heuristics that need evidence simply don't fire). Built once per
+	// top-level command invocation so the cache layer amortizes across
+	// the per-project scans.
+	NPMProbe  registries.Probe
+	PyPIProbe registries.Probe
 	// PreInventory, if non-nil, bypasses inventory.Scan and runs the detector
 	// pipeline against the supplied Inventory directly. Used by deep-mode
 	// (`chdora forensics --deep`) where the inventory comes from
@@ -86,6 +95,8 @@ func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]find
 		det := heuristic.New(heuristic.Config{
 			FreshPopular: heuristic.FreshPopularConfig{Enabled: opts.FreshPopular},
 			Excludes:     opts.Excludes,
+			NPMProbe:     opts.NPMProbe,
+			PyPIProbe:    opts.PyPIProbe,
 		})
 		if results, err := det.Detect(ctx, inv, root); err == nil {
 			all = append(all, results...)

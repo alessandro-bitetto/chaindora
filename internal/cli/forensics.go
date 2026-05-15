@@ -36,6 +36,7 @@ var (
 	forensicsFix          bool
 	forensicsYes          bool
 	forensicsAggressive   bool
+	forensicsSkipRegistry bool
 )
 
 var forensicsCmd = &cobra.Command{
@@ -103,6 +104,10 @@ func runForensicsFlow(ctx context.Context) error {
 			}
 		}
 
+		// Shared registry probes for every per-project + per-source
+		// scan below. Built once so the disk cache amortizes.
+		npmProbe, pypiProbe := buildRegistryProbes(forensicsSkipRegistry)
+
 		if forensicsScanProjects != "" {
 			projRoot := forensicsScanProjects
 			if forensicsVerbose {
@@ -118,6 +123,8 @@ func runForensicsFlow(ctx context.Context) error {
 				FreshPopular:  false,
 				Verbose:       forensicsVerbose,
 				Excludes:      forensicsExcludes,
+				NPMProbe:      npmProbe,
+				PyPIProbe:     pypiProbe,
 			}
 			for _, r := range roots {
 				results, err := scanProject(ctx, r, opts)
@@ -183,6 +190,8 @@ func runForensicsFlow(ctx context.Context) error {
 				SkipHeuristic: forensicsSkipHeur,
 				FreshPopular:  false,
 				Verbose:       forensicsVerbose,
+				NPMProbe:      npmProbe,
+				PyPIProbe:     pypiProbe,
 				Excludes:      forensicsExcludes,
 				PreInventory:  globalInv,
 			})
@@ -242,5 +251,6 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
 	forensicsCmd.Flags().BoolVar(&forensicsYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
 	forensicsCmd.Flags().BoolVar(&forensicsAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes")
+	forensicsCmd.Flags().BoolVar(&forensicsSkipRegistry, "skip-registry", false, "do not query npm/PyPI for evidence (offline mode; dep-confusion / typosquat / install-script heuristics become silent)")
 	rootCmd.AddCommand(forensicsCmd)
 }

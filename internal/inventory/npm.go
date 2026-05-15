@@ -16,6 +16,7 @@ type npmLockfile struct {
 type npmPackageEntry struct {
 	Version          string `json:"version"`
 	HasInstallScript bool   `json:"hasInstallScript"`
+	Resolved         string `json:"resolved"`
 }
 
 type npmDependencyEntry struct {
@@ -60,6 +61,7 @@ func parseNPMPackageLock(path string) ([]Package, error) {
 			PURL:             PURL(EcosystemNPM, name, v.Version),
 			SourcePath:       path,
 			HasInstallScript: v.HasInstallScript,
+			ResolvedURL:      v.Resolved,
 		})
 	}
 

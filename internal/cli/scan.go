@@ -30,6 +30,7 @@ var (
 	scanFix          bool
 	scanYes          bool
 	scanAggressive   bool
+	scanSkipRegistry bool
 )
 
 var scanCmd = &cobra.Command{
@@ -90,9 +91,12 @@ var scanCmd = &cobra.Command{
 		}
 
 		if !skipHeuristic {
+			npm, pypi := buildRegistryProbes(scanSkipRegistry)
 			det := heuristic.New(heuristic.Config{
 				FreshPopular: heuristic.FreshPopularConfig{Enabled: scanFreshPopular},
 				Excludes:     scanExcludes,
+				NPMProbe:     npm,
+				PyPIProbe:    pypi,
 			})
 			results, err := det.Detect(ctx, inv, root)
 			if err != nil {
@@ -136,6 +140,7 @@ func init() {
 	scanCmd.Flags().BoolVar(&skipIncidents, "skip-incidents", false, "skip the curated incident pack")
 	scanCmd.Flags().BoolVar(&skipHeuristic, "skip-heuristic", false, "skip behavioral heuristics (unpinned refs, CI shell patterns, install scripts, typosquat, dep-confusion)")
 	scanCmd.Flags().BoolVar(&scanFreshPopular, "fresh-popular", false, "also check whether popular npm/PyPI deps were published in the last 14 days (requires network)")
+	scanCmd.Flags().BoolVar(&scanSkipRegistry, "skip-registry", false, "do not query npm/PyPI for dep-confusion / typosquat / install-script evidence (offline mode; those heuristics become silent)")
 	scanCmd.Flags().StringSliceVar(&scanExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated, e.g. --exclude testdata,vendor)")
 	scanCmd.Flags().BoolVar(&scanFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
 	scanCmd.Flags().BoolVar(&scanFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")

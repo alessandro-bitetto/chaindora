@@ -40,6 +40,13 @@ type Package struct {
 	// hook. Currently populated only for npm packages, from the lockfile's
 	// `hasInstallScript` metadata.
 	HasInstallScript bool `json:"has_install_script,omitempty"`
+	// ResolvedURL is the URL the package was actually fetched from, as
+	// recorded by the lockfile. For npm, this is the `resolved` field; for
+	// yarn/pnpm, the equivalent. Used by the dep-confusion heuristic to
+	// distinguish "resolved from npmjs.org" (public, no risk) from
+	// "resolved from artifactory.corp/..." (private scope, real risk if
+	// the same name exists publicly).
+	ResolvedURL string `json:"resolved_url,omitempty"`
 }
 
 // Source identifies a manifest file that was successfully parsed.

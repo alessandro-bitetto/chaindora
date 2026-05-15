@@ -33,6 +33,7 @@ var (
 	ciFix            bool
 	ciYes            bool
 	ciAggressive     bool
+	ciSkipRegistry   bool
 )
 
 var ciCmd = &cobra.Command{
@@ -115,9 +116,12 @@ continuous-integration use:
 		}
 
 		if !ciSkipHeuristic {
+			npm, pypi := buildRegistryProbes(ciSkipRegistry)
 			det := heuristic.New(heuristic.Config{
 				FreshPopular: heuristic.FreshPopularConfig{Enabled: ciFreshPopular},
 				Excludes:     ciExcludes,
+				NPMProbe:     npm,
+				PyPIProbe:    pypi,
 			})
 			results, err := det.Detect(ctx, inv, root)
 			if err != nil {
@@ -239,6 +243,7 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciSkipIncidents, "skip-incidents", false, "skip the curated incident pack")
 	ciCmd.Flags().BoolVar(&ciSkipHeuristic, "skip-heuristic", false, "skip behavioral heuristics")
 	ciCmd.Flags().BoolVar(&ciFreshPopular, "fresh-popular", false, "also check publish dates of top-N popular npm/PyPI deps (requires network)")
+	ciCmd.Flags().BoolVar(&ciSkipRegistry, "skip-registry", false, "do not query npm/PyPI for evidence (offline mode; evidence-based heuristics become silent)")
 	ciCmd.Flags().BoolVar(&ciVerbose, "verbose", false, "emit diagnostic logs to stderr")
 	ciCmd.Flags().StringSliceVar(&ciExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated)")
 	ciCmd.Flags().BoolVar(&ciFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
