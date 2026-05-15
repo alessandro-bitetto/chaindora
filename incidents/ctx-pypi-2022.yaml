@@ -1,0 +1,29 @@
+schema: 1
+id: PYPI-CTX-2022
+name: ctx PyPI hijack (expired-domain email takeover)
+severity: high
+date: "2022-05-15"
+summary: |
+  The PyPI package "ctx" was hijacked when an attacker re-registered the
+  maintainer's expired domain, used it to recover the PyPI account via
+  password reset, and published malicious versions that exfiltrated the
+  process environment (including AWS credentials) to a Heroku-hosted
+  webhook.
+
+  The same technique was used against the Packagist package "phpass" by
+  the same actor, demonstrating a class of attack any maintainer with a
+  custom email domain is exposed to.
+
+references:
+  - "https://www.bleepingcomputer.com/news/security/pypi-package-ctx-and-phpass-php-libraries-hijacked-to-steal-aws-keys"
+  - "https://medium.com/@somdevsangwan/the-ctx-malware-saga-bcccf61d57df"
+
+packages:
+  - ecosystem: PyPI
+    name: "ctx"
+    # All ctx versions uploaded between 2022-05-14 and 2022-05-24 were
+    # malicious. 0.2.2 was an attacker "test" upload; 0.2.6 was the first
+    # post-takeover release. Both were subsequently yanked.
+    versions:
+      - "0.2.2"
+      - "0.2.6"

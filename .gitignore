@@ -1,0 +1,20 @@
+# Built binaries
+/chaindora
+/dist/
+/bin/
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.claude/

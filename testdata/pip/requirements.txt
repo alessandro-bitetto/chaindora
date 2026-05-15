@@ -1,0 +1,4 @@
+# Test fixture: deliberately includes versions with known advisories so the
+# OSV detector has something to match on during integration tests.
+urllib3==1.26.4
+requests==2.25.0

@@ -1,0 +1,49 @@
+schema: 1
+id: SHAI-HULUD-2025
+name: Shai-Hulud npm worm
+severity: critical
+date: "2025-09-16"
+summary: |
+  Self-propagating npm worm targeting maintainer accounts. Steals npm
+  publish tokens and GitHub credentials, then injects malicious
+  postinstall scripts into the maintainer's other packages plus a
+  GitHub Actions workflow that exfiltrates secrets from compromised
+  repositories on push. Runs trufflehog locally to harvest secrets,
+  storing results in a data.json blob before exfiltrating.
+
+references:
+  - "https://socket.dev/blog/shai-hulud-npm-worm"
+  - "https://www.aikido.dev/blog/shai-hulud"
+  - "https://www.stepsecurity.io/blog/shai-hulud-npm-supply-chain-attack"
+
+# Partial first-wave list. The worm propagated across dozens of packages
+# over multiple waves — consult the references for the authoritative inventory
+# and contribute via PR.
+packages:
+  - ecosystem: npm
+    name: "@ctrl/tinycolor"
+    versions:
+      - "4.1.1"
+      - "4.1.2"
+  - ecosystem: npm
+    name: "ngx-bootstrap"
+    versions:
+      - "18.1.4"
+  - ecosystem: npm
+    name: "rxnt-authentication"
+    versions:
+      - "0.0.6"
+
+file_artifacts:
+  - glob: "**/.github/workflows/shai-hulud-workflow.yml"
+    severity: critical
+    description: |
+      Definitive Shai-Hulud signature: the worm publishes this workflow
+      file to compromised repos to exfiltrate secrets on every push.
+
+  - glob: "**/data.json"
+    severity: high
+    description: |
+      Possible exfiltrated credential blob. Many projects have a legitimate
+      data.json — the match is gated by trufflehog content to reduce noise.
+    content_substr: "trufflehog"

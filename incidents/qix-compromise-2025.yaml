@@ -1,0 +1,44 @@
+schema: 1
+id: NPM-QIX-COMPROMISE-2025-09
+name: qix npm maintainer compromise (chalk/debug crypto wallet stealer)
+severity: critical
+date: "2025-09-08"
+summary: |
+  The npm maintainer account "qix" was phished, allowing the attacker to
+  publish malicious versions of widely-depended-on utility libraries
+  (chalk, debug, ansi-styles, color-name, color-convert, supports-color,
+  …) collectively totaling billions of weekly downloads. Payload: an
+  in-page crypto wallet address swapper targeting MetaMask, Phantom, and
+  other browser wallets.
+
+  Compromised versions were yanked from npm within hours but may still
+  be present in lockfiles cut during the attack window
+  (~14:00 to ~17:00 UTC on 2025-09-08).
+
+references:
+  - "https://socket.dev/blog/npm-author-qix-compromised-in-major-supply-chain-attack"
+  - "https://www.aikido.dev/blog/npm-debug-and-chalk-packages-compromised"
+  - "https://blog.ladybird.org/2025-09-08-supply-chain-attack-on-debug-chalk-npm-packages"
+
+# v0 — package names are confirmed. Exact compromised patch versions should be
+# pinned against the references; the entries below reflect the most widely
+# reported versions. PRs with corrections welcome.
+packages:
+  - ecosystem: npm
+    name: "chalk"
+    versions: ["5.6.1"]
+  - ecosystem: npm
+    name: "debug"
+    versions: ["4.4.2"]
+  - ecosystem: npm
+    name: "ansi-styles"
+    versions: ["6.2.2"]
+  - ecosystem: npm
+    name: "color-name"
+    versions: ["2.0.1"]
+  - ecosystem: npm
+    name: "color-convert"
+    versions: ["3.1.1"]
+  - ecosystem: npm
+    name: "supports-color"
+    versions: ["10.2.1"]
