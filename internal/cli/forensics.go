@@ -30,6 +30,7 @@ var (
 	forensicsDeep         bool
 	forensicsSSHCheck     bool
 	forensicsSSHBaseline  string
+	forensicsPersistence  bool
 )
 
 var forensicsCmd = &cobra.Command{
@@ -121,6 +122,14 @@ var forensicsCmd = &cobra.Command{
 			all = append(all, sshResults...)
 		}
 
+		if forensicsPersistence {
+			persistenceResults := hostforensics.ScanPersistence(home)
+			if forensicsVerbose {
+				fmt.Fprintf(os.Stderr, "persistence: %d finding(s)\n", len(persistenceResults))
+			}
+			all = append(all, persistenceResults...)
+		}
+
 		if forensicsDeep {
 			if forensicsVerbose {
 				fmt.Fprintln(os.Stderr, "enumerating globally-installed packages")
@@ -173,5 +182,6 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsDeep, "deep", false, "also enumerate globally-installed packages (npm -g, pip) and run the detector pipeline against them")
 	forensicsCmd.Flags().BoolVar(&forensicsSSHCheck, "ssh-check", false, "snapshot/diff ~/.ssh/authorized_keys against ~/.chaindora/ssh-baseline.txt; first run creates the baseline, subsequent runs flag added (HIGH) or removed (MEDIUM) keys")
 	forensicsCmd.Flags().StringVar(&forensicsSSHBaseline, "ssh-baseline", "", "alternative path for the SSH baseline file (default ~/.chaindora/ssh-baseline.txt)")
+	forensicsCmd.Flags().BoolVar(&forensicsPersistence, "persistence", false, "enumerate user-level persistence (cron, launchd, systemd, Scheduled Tasks); flag entries whose command matches a malware pattern as HIGH")
 	rootCmd.AddCommand(forensicsCmd)
 }
