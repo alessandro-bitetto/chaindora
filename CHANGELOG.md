@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap).
 
+## [0.5.3] — 2026-05-15
+
+### Added
+
+- **No-op detection on pip fixes.** The fix runner now captures each
+  executed command's stdout/stderr alongside streaming it live, and
+  inspects pip-install output for the "Successfully installed
+  <pkg>-<ver>" marker. When that marker is absent on a pip-install
+  command, the runner prints a WARNING explaining that the requested
+  version is likely capped by the Python interpreter or PATH, and
+  increments a new `no-op` counter — surfaced in the final summary
+  line as `fixes: applied=X, no-op=Y, skipped=Z`. Previously these
+  showed up as `applied=N` even though nothing changed.
+
+- **Python EOL heads-up.** When a pip fix is detected as a no-op, the
+  runner probes the active `python3` interpreter version and (if the
+  version is past its python.org EOL date) appends a manual step
+  pointing at `brew install python@3.12` (or equivalent). The EOL
+  table is hardcoded in `internal/findings/fix_runner.go`; it should
+  be reviewed every 6 months as new Python minor releases ship. The
+  probe is skipped on Windows and when `python3` isn't on PATH.
+
+### Fixed
+
+- The headline case from the field: `chdora forensics --deep --fix`
+  upgrading pip from 21.2.4 → 26.0.1 on a Python 3.9 system reported
+  `applied=1, skipped=0` and then re-surfaced the same two pip CVEs
+  on the next scan, because pip 26.1+ requires Python ≥ 3.10. The
+  no-op detection now flags this as `no-op=1` and tells the user
+  *why* — instead of misreporting it as a success.
+
 ## [0.5.2] — 2026-05-15
 
 ### Changed

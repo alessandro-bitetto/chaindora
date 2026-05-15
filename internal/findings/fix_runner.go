@@ -2,13 +2,16 @@ package findings
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // RunOptions configures how RunFixes treats a slice of plans.
@@ -33,8 +36,13 @@ type RunOptions struct {
 	Output io.Writer
 }
 
-// RunFixes evaluates plans, optionally prompts, and executes Commands. Returns
-// the count of applied vs. skipped plus the first execution error encountered.
+// RunFixes evaluates plans, optionally prompts, and executes Commands.
+// Returns counts (applied / no-op / skipped) plus the first execution error.
+// "applied" counts commands that completed cleanly AND visibly changed state
+// (e.g. pip's "Successfully installed X-V" line). "no-op" counts commands
+// that completed cleanly but didn't change anything — typically a pip
+// upgrade hitting a Python-version cap or PATH issue. Those are surfaced
+// inline as warnings so the user knows a follow-up step is needed.
 func RunFixes(ctx context.Context, plans []FixPlan, opts RunOptions) (applied, skipped int, err error) {
 	out := opts.Output
 	if out == nil {
@@ -54,6 +62,12 @@ func RunFixes(ctx context.Context, plans []FixPlan, opts RunOptions) (applied, s
 	fmt.Fprintf(out, "\n=== %d fix plan(s) ===\n", len(plans))
 
 	autoApplyRest := false
+	noOp := 0
+	// Probe the active Python interpreter once per RunFixes call. If any
+	// pip plan hits a no-op, we'll append an EOL heads-up so the user
+	// knows whether their interpreter is the cause.
+	pythonNote := pythonEOLNote(ctx)
+
 	for i, p := range plans {
 		printPlan(out, i+1, len(plans), p)
 
@@ -93,7 +107,8 @@ func RunFixes(ctx context.Context, plans []FixPlan, opts RunOptions) (applied, s
 			continue
 		}
 		fmt.Fprintf(out, "  applying: %s\n", p.Command)
-		if execErr := executeCommand(ctx, p.Command, out); execErr != nil {
+		captured, execErr := executeCommand(ctx, p.Command, out)
+		if execErr != nil {
 			fmt.Fprintf(out, "  FAILED: %v\n", execErr)
 			skipped++
 			if err == nil {
@@ -101,11 +116,21 @@ func RunFixes(ctx context.Context, plans []FixPlan, opts RunOptions) (applied, s
 			}
 			continue
 		}
+		if isPipNoOp(p.Command, captured) {
+			noOp++
+			fmt.Fprintln(out, "  WARNING: command ran cleanly but did NOT change the installed version.")
+			fmt.Fprintln(out, "           Likely cause: the version that fixes this CVE requires a newer")
+			fmt.Fprintln(out, "           Python interpreter, or your $PATH is masking the upgraded binary.")
+			if pythonNote != "" {
+				fmt.Fprintf(out, "           %s\n", pythonNote)
+			}
+			continue
+		}
 		applied++
 		fmt.Fprintln(out, "  ok")
 	}
 
-	fmt.Fprintf(out, "\nfixes: applied=%d, skipped=%d\n", applied, skipped)
+	fmt.Fprintf(out, "\nfixes: applied=%d, no-op=%d, skipped=%d\n", applied, noOp, skipped)
 	return applied, skipped, err
 }
 
@@ -145,16 +170,84 @@ func promptFix(w io.Writer, r *bufio.Reader) string {
 
 // executeCommand runs the plan's shell command via `sh -c` on Unix. Windows
 // is currently a no-op: --fix prints the command and skips execution, with
-// guidance to run it manually in PowerShell or cmd.
-func executeCommand(ctx context.Context, cmd string, out io.Writer) error {
+// guidance to run it manually in PowerShell or cmd. Returns the captured
+// stdout+stderr alongside any execution error so the caller can post-check
+// for "command succeeded but didn't change anything" cases.
+func executeCommand(ctx context.Context, cmd string, out io.Writer) (string, error) {
 	if runtime.GOOS == "windows" {
 		fmt.Fprintln(out, "  (Windows: automated execution not yet supported — run the command manually)")
-		return nil
+		return "", nil
 	}
+	var buf bytes.Buffer
 	c := exec.CommandContext(ctx, "sh", "-c", cmd)
-	c.Stdout = out
-	c.Stderr = out
-	return c.Run()
+	c.Stdout = io.MultiWriter(out, &buf)
+	c.Stderr = io.MultiWriter(out, &buf)
+	err := c.Run()
+	return buf.String(), err
+}
+
+// isPipNoOp reports whether a pip-install command appears to have completed
+// without actually changing anything. pip's wire-protocol marker for a real
+// install is the "Successfully installed <pkg>-<version>" line; its absence
+// after a clean exit means either everything was already at the requested
+// version OR (the common case for these CVEs) the resolver couldn't find a
+// newer version that supports the active Python interpreter.
+func isPipNoOp(cmd, output string) bool {
+	if !looksLikePipInstall(cmd) {
+		return false
+	}
+	if strings.Contains(output, "Successfully installed") {
+		return false
+	}
+	// "Requirement already satisfied" appears even on successful upgrades
+	// (the system-site copy is reported as satisfied before the new copy
+	// lands in user-site), so it isn't a reliable noop signal on its own.
+	// The reliable signal is the absence of "Successfully installed".
+	return true
+}
+
+var pipInstallRe = regexp.MustCompile(`\b(pip\s+install|python\d*\s+-m\s+pip\s+install)\b`)
+
+func looksLikePipInstall(cmd string) bool {
+	return pipInstallRe.MatchString(cmd)
+}
+
+// pythonEOL holds Python end-of-life dates. Source:
+// https://devguide.python.org/versions/  (review every 6 months; new minor
+// releases push the table forward by one row).
+var pythonEOL = map[string]time.Time{
+	"3.7":  time.Date(2023, 6, 27, 0, 0, 0, 0, time.UTC),
+	"3.8":  time.Date(2024, 10, 7, 0, 0, 0, 0, time.UTC),
+	"3.9":  time.Date(2025, 10, 31, 0, 0, 0, 0, time.UTC),
+	"3.10": time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC),
+	"3.11": time.Date(2027, 10, 31, 0, 0, 0, 0, time.UTC),
+	"3.12": time.Date(2028, 10, 31, 0, 0, 0, 0, time.UTC),
+	"3.13": time.Date(2029, 10, 31, 0, 0, 0, 0, time.UTC),
+}
+
+// pythonEOLNote returns a one-line warning when the active `python3` is past
+// its EOL date, or "" if `python3` isn't on PATH / the version isn't known.
+func pythonEOLNote(ctx context.Context) string {
+	if runtime.GOOS == "windows" {
+		return ""
+	}
+	c := exec.CommandContext(ctx, "python3", "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+	out, err := c.Output()
+	if err != nil {
+		return ""
+	}
+	ver := strings.TrimSpace(string(out))
+	eol, ok := pythonEOL[ver]
+	if !ok {
+		return ""
+	}
+	if !time.Now().After(eol) {
+		return ""
+	}
+	return fmt.Sprintf("Your `python3` is %s — EOL since %s. The pip/setuptools/wheel maintainers "+
+		"have dropped support for it, so newer CVE-fixed versions won't install. "+
+		"Install a current Python (e.g. `brew install python@3.12`) and re-run.",
+		ver, eol.Format("2006-01-02"))
 }
 
 func stdinOr(r io.Reader) io.Reader {

@@ -121,3 +121,55 @@ func TestSeverityRank(t *testing.T) {
 		}
 	}
 }
+
+func TestLooksLikePipInstall(t *testing.T) {
+	cases := []struct {
+		cmd  string
+		want bool
+	}{
+		{"pip install foo", true},
+		{"pip install --upgrade --user foo", true},
+		{"python3 -m pip install foo", true},
+		{"python -m pip install --upgrade foo", true},
+		{"python3.12 -m pip install foo", true},
+		{"npm install foo", false},
+		{"pip uninstall foo", false},
+		{"pip show pip", false},
+		{"brew upgrade chdora", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := looksLikePipInstall(c.cmd); got != c.want {
+			t.Errorf("looksLikePipInstall(%q) = %v, want %v", c.cmd, got, c.want)
+		}
+	}
+}
+
+func TestIsPipNoOp(t *testing.T) {
+	// The headline case from the field: pip 26.0.1 is the latest installable
+	// on Python 3.9 because pip 26.1+ requires Python 3.10. The command runs
+	// cleanly but no "Successfully installed" line appears.
+	noOp := `Requirement already satisfied: pip in ./Library/Python/3.9/lib/python/site-packages (26.0.1)
+`
+	if !isPipNoOp("python3 -m pip install --upgrade --user pip", noOp) {
+		t.Error("expected noOp on absent 'Successfully installed' line")
+	}
+
+	// Real upgrade — "Requirement already satisfied" appears for the
+	// system-site copy first, then "Successfully installed" lands the new
+	// version in user-site. Must NOT be flagged.
+	upgraded := `Requirement already satisfied: pip in /Library/Developer/CommandLineTools/... (21.2.4)
+Collecting pip
+  Downloading pip-26.0.1-py3-none-any.whl (1.8 MB)
+Installing collected packages: pip
+Successfully installed pip-26.0.1
+`
+	if isPipNoOp("python3 -m pip install --upgrade --user pip", upgraded) {
+		t.Error("real upgrade flagged as noOp")
+	}
+
+	// Non-pip command: pass through.
+	if isPipNoOp("brew upgrade chdora", "") {
+		t.Error("non-pip command flagged as noOp")
+	}
+}
