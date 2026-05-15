@@ -2,13 +2,13 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/heuristic"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/osvioc"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
@@ -19,9 +19,11 @@ import (
 
 var (
 	jsonOut       bool
+	scanFormat    string
 	incidentsDir  string
 	skipOSV       bool
 	skipIncidents bool
+	skipHeuristic bool
 )
 
 var scanCmd = &cobra.Command{
@@ -81,16 +83,18 @@ var scanCmd = &cobra.Command{
 			}
 		}
 
-		if jsonOut {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			if err := enc.Encode(all); err != nil {
-				return err
+		if !skipHeuristic {
+			det := heuristic.New()
+			results, err := det.Detect(ctx, inv, root)
+			if err != nil {
+				return fmt.Errorf("heuristic detector: %w", err)
 			}
-		} else {
-			renderText(all)
+			all = append(all, results...)
 		}
 
+		if err := renderFindings(os.Stdout, all, effectiveFormat(scanFormat, jsonOut)); err != nil {
+			return err
+		}
 		if len(all) > 0 {
 			os.Exit(1)
 		}
@@ -98,33 +102,12 @@ var scanCmd = &cobra.Command{
 	},
 }
 
-func renderText(fs []findings.Finding) {
-	if len(fs) == 0 {
-		fmt.Println("no known supply chain compromises detected")
-		return
-	}
-	fmt.Printf("%d finding(s):\n\n", len(fs))
-	for _, f := range fs {
-		head := f.PURL
-		if head == "" {
-			head = f.SourcePath
-		}
-		fmt.Printf("  [%s] [%s] %s\n", f.Severity, f.Detector, head)
-		fmt.Printf("    %s — %s\n", f.VulnID, f.Summary)
-		if f.SourcePath != "" && f.SourcePath != head {
-			fmt.Printf("    source: %s\n", f.SourcePath)
-		}
-		for _, ref := range f.References {
-			fmt.Printf("    ref: %s\n", ref)
-		}
-		fmt.Println()
-	}
-}
-
 func init() {
-	scanCmd.Flags().BoolVar(&jsonOut, "json", false, "emit findings as JSON")
+	scanCmd.Flags().BoolVar(&jsonOut, "json", false, "deprecated; shortcut for --format=json")
+	scanCmd.Flags().StringVar(&scanFormat, "format", "text", "output format: text|json|jsonl|sarif|github")
 	scanCmd.Flags().StringVar(&incidentsDir, "incidents", "", "path to incident-pack YAML directory (default: ./incidents or ~/.chaindora/incidents)")
 	scanCmd.Flags().BoolVar(&skipOSV, "skip-osv", false, "skip OSV.dev queries")
 	scanCmd.Flags().BoolVar(&skipIncidents, "skip-incidents", false, "skip the curated incident pack")
+	scanCmd.Flags().BoolVar(&skipHeuristic, "skip-heuristic", false, "skip behavioral heuristics (unpinned refs, CI shell patterns, install scripts)")
 	rootCmd.AddCommand(scanCmd)
 }

@@ -10,9 +10,14 @@ import (
 type Ecosystem string
 
 const (
-	EcosystemNPM     Ecosystem = "npm"
-	EcosystemPyPI    Ecosystem = "PyPI"
-	EcosystemActions Ecosystem = "GitHub Actions"
+	EcosystemNPM            Ecosystem = "npm"
+	EcosystemPyPI           Ecosystem = "PyPI"
+	EcosystemActions        Ecosystem = "GitHub Actions"
+	EcosystemGitLabCI       Ecosystem = "GitLab CI"
+	EcosystemBitbucketPipes Ecosystem = "Bitbucket Pipes"
+	EcosystemCircleCIOrbs   Ecosystem = "CircleCI Orbs"
+	EcosystemAzurePipelines Ecosystem = "Azure Pipelines"
+	EcosystemDocker         Ecosystem = "Docker"
 )
 
 // Package represents one resolved dependency discovered in a manifest or lockfile.
@@ -22,9 +27,14 @@ type Package struct {
 	Version    string    `json:"version"`
 	PURL       string    `json:"purl"`
 	SourcePath string    `json:"source_path"`
-	// Pinned reports whether a GitHub Actions ref is pinned to a 40-char SHA.
-	// Zero value is meaningless for non-Actions ecosystems.
+	// Pinned reports whether a ref is pinned to a SHA / digest. For
+	// GitHub-style actions that's a 40-char commit SHA; for Docker images
+	// it's a sha256 digest.
 	Pinned bool `json:"pinned,omitempty"`
+	// HasInstallScript reports whether the package declares a pre/post-install
+	// hook. Currently populated only for npm packages, from the lockfile's
+	// `hasInstallScript` metadata.
+	HasInstallScript bool `json:"has_install_script,omitempty"`
 }
 
 // Source identifies a manifest file that was successfully parsed.
@@ -115,19 +125,107 @@ func Scan(root string) (*Inventory, error) {
 			}
 			inv.Packages = append(inv.Packages, pkgs...)
 			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemPyPI, Kind: "Pipfile.lock"})
+		case ".gitlab-ci.yml", ".gitlab-ci.yaml":
+			pkgs, perr := parseGitLabCI(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, ".gitlab-ci.yml "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemGitLabCI, Kind: ".gitlab-ci.yml"})
+			appendDockerRefs(inv, path)
+		case "bitbucket-pipelines.yml", "bitbucket-pipelines.yaml":
+			pkgs, perr := parseBitbucketPipelines(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "bitbucket-pipelines.yml "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemBitbucketPipes, Kind: "bitbucket-pipelines.yml"})
+			appendDockerRefs(inv, path)
+		case "azure-pipelines.yml", "azure-pipelines.yaml":
+			pkgs, perr := parseAzurePipelines(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "azure-pipelines.yml "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemAzurePipelines, Kind: "azure-pipelines.yml"})
+			appendDockerRefs(inv, path)
+		case "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml":
+			pkgs, perr := parseDockerImageRefs(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "compose "+path+": "+perr.Error())
+				return nil
+			}
+			if len(pkgs) > 0 {
+				inv.Packages = append(inv.Packages, pkgs...)
+				inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemDocker, Kind: "compose"})
+			}
 		}
 
-		// GitHub Actions workflows: any *.yml or *.yaml under .github/workflows/
 		slashed := filepath.ToSlash(path)
-		if strings.Contains(slashed, "/.github/workflows/") &&
+
+		// GitHub & Gitea Actions workflows
+		isGHWorkflow := strings.Contains(slashed, "/.github/workflows/") ||
+			strings.HasPrefix(slashed, ".github/workflows/")
+		isGiteaWorkflow := strings.Contains(slashed, "/.gitea/workflows/") ||
+			strings.HasPrefix(slashed, ".gitea/workflows/")
+		if (isGHWorkflow || isGiteaWorkflow) &&
 			(strings.HasSuffix(slashed, ".yml") || strings.HasSuffix(slashed, ".yaml")) {
 			pkgs, perr := parseGHActionsWorkflow(path)
 			if perr != nil {
 				inv.Errors = append(inv.Errors, "workflow "+path+": "+perr.Error())
 				return nil
 			}
+			kind := "workflow"
+			if isGiteaWorkflow {
+				kind = "gitea-workflow"
+			}
 			inv.Packages = append(inv.Packages, pkgs...)
-			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemActions, Kind: "workflow"})
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemActions, Kind: kind})
+			appendDockerRefs(inv, path)
+		}
+
+		// CircleCI config
+		if strings.HasSuffix(slashed, "/.circleci/config.yml") ||
+			strings.HasSuffix(slashed, "/.circleci/config.yaml") ||
+			slashed == ".circleci/config.yml" ||
+			slashed == ".circleci/config.yaml" {
+			pkgs, perr := parseCircleCIConfig(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "circleci config "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemCircleCIOrbs, Kind: ".circleci/config.yml"})
+			appendDockerRefs(inv, path)
+		}
+
+		// Azure Pipelines subdirectory layout
+		if (strings.Contains(slashed, "/.azure-pipelines/") || strings.HasPrefix(slashed, ".azure-pipelines/")) &&
+			(strings.HasSuffix(slashed, ".yml") || strings.HasSuffix(slashed, ".yaml")) {
+			pkgs, perr := parseAzurePipelines(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "azure-pipelines "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemAzurePipelines, Kind: "azure-pipelines"})
+			appendDockerRefs(inv, path)
+		}
+
+		// Dockerfile + variants (Dockerfile.dev, Dockerfile.prod, …)
+		if base == "Dockerfile" || base == "dockerfile" || strings.HasPrefix(base, "Dockerfile.") {
+			pkgs, perr := parseDockerfile(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "Dockerfile "+path+": "+perr.Error())
+				return nil
+			}
+			if len(pkgs) > 0 {
+				inv.Packages = append(inv.Packages, pkgs...)
+				inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemDocker, Kind: "Dockerfile"})
+			}
 		}
 		return nil
 	})
@@ -135,4 +233,20 @@ func Scan(root string) (*Inventory, error) {
 		return inv, err
 	}
 	return inv, nil
+}
+
+// appendDockerRefs scans a CI YAML for `image:` keys and appends every
+// discovered Docker image reference to the inventory. No-op if the file has
+// no image references; errors get captured in inv.Errors.
+func appendDockerRefs(inv *Inventory, path string) {
+	pkgs, err := parseDockerImageRefs(path)
+	if err != nil {
+		inv.Errors = append(inv.Errors, "docker image refs "+path+": "+err.Error())
+		return
+	}
+	if len(pkgs) == 0 {
+		return
+	}
+	inv.Packages = append(inv.Packages, pkgs...)
+	inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemDocker, Kind: "image-refs"})
 }

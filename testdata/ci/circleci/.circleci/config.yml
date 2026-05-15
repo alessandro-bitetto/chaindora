@@ -1,0 +1,13 @@
+version: 2.1
+
+orbs:
+  aws-s3: circleci/aws-s3@3.0.0
+  node: circleci/node@5.1.0
+
+jobs:
+  build:
+    docker:
+      - image: cimg/node:20.0
+    steps:
+      - checkout
+      - node/install-packages

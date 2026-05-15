@@ -115,8 +115,12 @@ func osvEcosystem(e inventory.Ecosystem) string {
 		return "npm"
 	case inventory.EcosystemPyPI:
 		return "PyPI"
+	case inventory.EcosystemDocker:
+		return "OCI"
 	}
-	// GitHub Actions is not yet an OSV ecosystem; handled by P3 heuristics.
+	// GitHub Actions / GitLab CI / Bitbucket / CircleCI / Azure are not yet
+	// OSV ecosystems; their findings flow through the incident pack and
+	// (eventually) P3e behavioral heuristics.
 	return ""
 }
 

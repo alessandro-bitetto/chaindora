@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +19,7 @@ var (
 	forensicsHome         string
 	forensicsHunt         string
 	forensicsJSON         bool
+	forensicsFormat       string
 	forensicsSkipHunt     bool
 	forensicsIncidentsDir string
 )
@@ -79,13 +79,9 @@ var forensicsCmd = &cobra.Command{
 			}
 		}
 
-		if forensicsJSON {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			return enc.Encode(all)
+		if err := renderFindings(os.Stdout, all, effectiveFormat(forensicsFormat, forensicsJSON)); err != nil {
+			return err
 		}
-		renderText(all)
-
 		if len(all) > 0 {
 			os.Exit(1)
 		}
@@ -97,7 +93,8 @@ func init() {
 	forensicsCmd.Flags().StringVar(&forensicsHome, "home", "", "user home directory to inspect (default: $HOME)")
 	forensicsCmd.Flags().StringVar(&forensicsHunt, "hunt-root", "", "filesystem root to hunt incident artifacts under (default: home)")
 	forensicsCmd.Flags().StringVar(&forensicsIncidentsDir, "incidents", "", "path to incident-pack YAML directory")
-	forensicsCmd.Flags().BoolVar(&forensicsJSON, "json", false, "emit findings as JSON")
+	forensicsCmd.Flags().BoolVar(&forensicsJSON, "json", false, "deprecated; shortcut for --format=json")
+	forensicsCmd.Flags().StringVar(&forensicsFormat, "format", "text", "output format: text|json|jsonl|sarif|github")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipHunt, "skip-hunt", false, "skip the incident-pack file_artifact hunt")
 	rootCmd.AddCommand(forensicsCmd)
 }

@@ -23,6 +23,16 @@ func PURL(eco Ecosystem, name, version string) string {
 		typ = "pypi"
 	case EcosystemActions:
 		typ = "githubactions"
+	case EcosystemGitLabCI:
+		typ = "gitlabci"
+	case EcosystemBitbucketPipes:
+		typ = "bitbucketpipes"
+	case EcosystemCircleCIOrbs:
+		typ = "circleciorbs"
+	case EcosystemAzurePipelines:
+		typ = "azurepipelines"
+	case EcosystemDocker:
+		typ = "docker"
 	default:
 		typ = strings.ToLower(string(eco))
 	}
@@ -35,13 +45,33 @@ func PURL(eco Ecosystem, name, version string) string {
 			return "pkg:" + typ + "/" + ns + "/" + n + "@" + version
 		}
 	}
-	// GitHub Actions: "owner/repo" → namespace "owner", name "repo"
-	if eco == EcosystemActions {
+	// owner/repo-style names: split on the first "/" into namespace + name.
+	// Skip when the name has a special prefix (e.g. GitLab CI's "template:" /
+	// "remote:") that contains a colon — those aren't owner/repo paths.
+	switch eco {
+	case EcosystemActions, EcosystemBitbucketPipes, EcosystemCircleCIOrbs:
 		if i := strings.Index(name, "/"); i > 0 {
 			ns := purlEscape(name[:i])
 			n := purlEscape(name[i+1:])
 			return "pkg:" + typ + "/" + ns + "/" + n + "@" + version
 		}
+	case EcosystemGitLabCI:
+		if !strings.Contains(name, ":") {
+			if i := strings.Index(name, "/"); i > 0 {
+				ns := purlEscape(name[:i])
+				n := purlEscape(name[i+1:])
+				return "pkg:" + typ + "/" + ns + "/" + n + "@" + version
+			}
+		}
+	}
+	// Docker image names commonly span path segments (registry/namespace/image).
+	// Preserve them as PURL path separators rather than URL-encoding the slashes.
+	if eco == EcosystemDocker {
+		parts := strings.Split(name, "/")
+		for i, p := range parts {
+			parts[i] = purlEscape(p)
+		}
+		return "pkg:" + typ + "/" + strings.Join(parts, "/") + "@" + version
 	}
 	return "pkg:" + typ + "/" + purlEscape(name) + "@" + version
 }

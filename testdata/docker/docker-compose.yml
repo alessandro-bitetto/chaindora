@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  web:
+    image: nginx:1.25
+    ports:
+      - "80:80"
+  db:
+    image: postgres:15.4
+  cache:
+    image: redis:7

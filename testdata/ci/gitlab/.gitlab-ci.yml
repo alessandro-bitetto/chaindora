@@ -1,0 +1,14 @@
+include:
+  - local: '/templates/local.yml'
+  - project: 'group/security-templates'
+    ref: 'v2.5.0'
+    file: '/templates/SAST.gitlab-ci.yml'
+  - template: 'Auto-DevOps.gitlab-ci.yml'
+
+stages:
+  - build
+
+build:
+  image: alpine:3.18
+  script:
+    - echo "build"

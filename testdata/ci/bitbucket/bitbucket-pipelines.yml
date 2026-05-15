@@ -1,0 +1,13 @@
+image: node:20
+
+pipelines:
+  default:
+    - step:
+        name: Build
+        script:
+          - npm ci
+    - step:
+        name: Deploy
+        script:
+          - pipe: atlassian/aws-s3-deploy:1.1.0
+          - pipe: atlassian/slack-notify:2.0.1
