@@ -95,61 +95,37 @@ Examples:
 		var resolve func(context.Context, string, []string) ([]gate.PackageRef, error)
 		switch pm {
 		case "npm":
-			if len(pmArgs) == 0 || !isNPMInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-				return execReal(realBin, pmArgs)
-			}
-			installArgs = pmArgs[1:]
 			resolve = gate.ResolveNPMTree
 		case "yarn":
-			if len(pmArgs) == 0 || !isYarnInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-				return execReal(realBin, pmArgs)
-			}
-			installArgs = pmArgs[1:]
 			resolve = gate.ResolveYarnTree
 		case "pnpm":
-			if len(pmArgs) == 0 || !isPnpmInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-				return execReal(realBin, pmArgs)
-			}
-			installArgs = pmArgs[1:]
 			resolve = gate.ResolvePnpmTree
 		case "pip", "pip3":
-			if len(pmArgs) == 0 || !isPipInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-				return execReal(realBin, pmArgs)
-			}
-			installArgs = pmArgs[1:]
 			resolve = gate.ResolvePipTree
 		case "cargo":
-			if len(pmArgs) == 0 || !isCargoInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-				return execReal(realBin, pmArgs)
-			}
-			installArgs = pmArgs[1:]
 			resolve = gate.ResolveCargoTree
-		case "bundle":
-			if len(pmArgs) == 0 || !isBundleInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-				return execReal(realBin, pmArgs)
-			}
-			installArgs = pmArgs[1:]
-			resolve = gate.ResolveBundlerTree
-		case "gem":
-			if len(pmArgs) == 0 || !isGemInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-				return execReal(realBin, pmArgs)
-			}
-			installArgs = pmArgs[1:]
+		case "bundle", "gem":
 			resolve = gate.ResolveBundlerTree
 		case "mvn":
-			if len(pmArgs) == 0 || !isMavenInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-				return execReal(realBin, pmArgs)
-			}
-			installArgs = pmArgs[1:]
 			resolve = gate.ResolveMavenTree
 		case "go":
-			if len(pmArgs) == 0 || !isGoInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
-				return execReal(realBin, pmArgs)
-			}
-			installArgs = pmArgs[1:]
 			resolve = gate.ResolveGoModTree
 		default:
 			return passThroughToReal(pm, pmArgs)
+		}
+		switch classifyGateArgs(pm, pmArgs) {
+		case gatePassthrough:
+			return execReal(realBin, pmArgs)
+		case gateRefuseUpdateAll:
+			return fmt.Errorf(
+				"`%s %s` with no explicit package names updates every dep in the manifest, "+
+					"but chdora gate doesn't yet resolve update-all without project context. "+
+					"Specify packages (e.g. `%s %s <pkg>`) or run with --chaindora-policy=lenient "+
+					"to bypass the gate for this invocation.",
+				pm, pmArgs[0], pm, pmArgs[0],
+			)
+		case gateProceed:
+			installArgs = pmArgs[1:]
 		}
 		// Skip the gate when EVERY install arg is a flag (no real
 		// packages to vet). `npm install --save-dev` with nothing
@@ -302,11 +278,32 @@ func isNPMInstallVerb(v string) bool {
 	return false
 }
 
+// isNPMUpdateVerb — `npm update` (alias `up`, `upgrade`) pulls newer
+// versions of existing deps. Same threat surface as install for
+// publisher-change / fresh-publish / new-CVE — gate it the same way.
+func isNPMUpdateVerb(v string) bool {
+	switch v {
+	case "update", "up", "upgrade", "udpate":
+		return true
+	}
+	return false
+}
+
 // isYarnInstallVerb — yarn classic uses `add`; Berry kept `add`.
 // `yarn install` (with no args) installs from existing lockfile
 // and isn't gated (vetted state already).
 func isYarnInstallVerb(v string) bool {
 	return v == "add"
+}
+
+// isYarnUpdateVerb — yarn classic: `yarn upgrade [pkg]` and
+// `yarn upgrade-interactive`. Yarn Berry: `yarn up [pkg]`.
+func isYarnUpdateVerb(v string) bool {
+	switch v {
+	case "upgrade", "upgrade-interactive", "up":
+		return true
+	}
+	return false
 }
 
 // isPnpmInstallVerb — pnpm uses `add` for new packages and
@@ -315,7 +312,19 @@ func isPnpmInstallVerb(v string) bool {
 	return v == "add"
 }
 
-// isPipInstallVerb covers pip / pip3.
+// isPnpmUpdateVerb — `pnpm update` (alias `up`, `upgrade`).
+func isPnpmUpdateVerb(v string) bool {
+	switch v {
+	case "update", "up", "upgrade":
+		return true
+	}
+	return false
+}
+
+// isPipInstallVerb covers pip / pip3. `pip install --upgrade` and
+// `pip install -U` reuse this verb — the gate already sees the
+// requested package(s) and resolves their latest version, so no
+// separate update verb is needed.
 func isPipInstallVerb(v string) bool {
 	return v == "install"
 }
@@ -327,6 +336,13 @@ func isCargoInstallVerb(v string) bool {
 	return v == "add" || v == "install"
 }
 
+// isCargoUpdateVerb — `cargo update [pkg]` re-resolves Cargo.lock
+// to newer compatible versions. Same threat surface as install for
+// what's about to land in `target/`.
+func isCargoUpdateVerb(v string) bool {
+	return v == "update"
+}
+
 // isBundleInstallVerb — `bundle add` adds to Gemfile;
 // `bundle install` restores from existing Gemfile.lock (not
 // gated — already-vetted state).
@@ -334,24 +350,104 @@ func isBundleInstallVerb(v string) bool {
 	return v == "add"
 }
 
+// isBundleUpdateVerb — `bundle update [gem]` re-resolves Gemfile.lock
+// against newer compatible versions.
+func isBundleUpdateVerb(v string) bool {
+	return v == "update"
+}
+
 // isGemInstallVerb — `gem install` installs a gem.
 func isGemInstallVerb(v string) bool {
 	return v == "install"
+}
+
+// isGemUpdateVerb — `gem update [gem]` updates an installed gem.
+func isGemUpdateVerb(v string) bool {
+	return v == "update"
 }
 
 // isMavenInstallVerb — Maven doesn't have a clean equivalent;
 // `mvn install` runs the full build cycle. We gate `mvn dependency:get`
 // and `mvn dependency:tree` is read-only. For now, gate on
 // `dependency:get` which is the explicit "fetch this dep" verb.
+// Maven has no standalone upgrade verb — version bumps happen by
+// editing pom.xml, then `dependency:get` runs through the gate.
 func isMavenInstallVerb(v string) bool {
 	return v == "dependency:get" || strings.HasPrefix(v, "dependency:") && strings.Contains(v, "get")
 }
 
 // isGoInstallVerb — `go get` adds modules to go.mod (or directly
 // installs binaries). `go install` builds + installs binaries.
-// `go run` doesn't pull new modules. We gate both.
+// `go run` doesn't pull new modules. We gate both. `go get -u`
+// upgrades; same verb, just a flag, so already covered.
 func isGoInstallVerb(v string) bool {
 	return v == "get" || v == "install"
+}
+
+// gateDecision describes what the dispatcher should do with a
+// (package-manager, args) pair.
+type gateDecision int
+
+const (
+	// gatePassthrough — not a gate-relevant verb, or install-with-no-args
+	// (lockfile restore from already-vetted state).
+	gatePassthrough gateDecision = iota
+	// gateProceed — gate this command. installArgs (= args after the verb)
+	// is forwarded to the resolver.
+	gateProceed
+	// gateRefuseUpdateAll — bare `npm update` / `pnpm update` / etc.
+	// without explicit package names. The resolver needs project
+	// context (user's actual package.json / Gemfile / Cargo.toml) to
+	// know what "everything" expands to; we don't carry that context
+	// into the temp-dir resolver yet, so we refuse with a clear error
+	// rather than silently passing through.
+	gateRefuseUpdateAll
+)
+
+// classifyGateArgs decides what the dispatcher should do for a
+// package manager invocation. Centralizes the install-vs-update,
+// lockfile-restore-vs-update-all, and gated-vs-passthrough logic
+// so the switch in gateExecCmd stays uniform per package manager.
+func classifyGateArgs(pm string, args []string) gateDecision {
+	if len(args) == 0 {
+		return gatePassthrough
+	}
+	verb := args[0]
+	isInstall, isUpdate := false, false
+	switch pm {
+	case "npm":
+		isInstall, isUpdate = isNPMInstallVerb(verb), isNPMUpdateVerb(verb)
+	case "yarn":
+		isInstall, isUpdate = isYarnInstallVerb(verb), isYarnUpdateVerb(verb)
+	case "pnpm":
+		isInstall, isUpdate = isPnpmInstallVerb(verb), isPnpmUpdateVerb(verb)
+	case "pip", "pip3":
+		isInstall = isPipInstallVerb(verb)
+	case "cargo":
+		isInstall, isUpdate = isCargoInstallVerb(verb), isCargoUpdateVerb(verb)
+	case "bundle":
+		isInstall, isUpdate = isBundleInstallVerb(verb), isBundleUpdateVerb(verb)
+	case "gem":
+		isInstall, isUpdate = isGemInstallVerb(verb), isGemUpdateVerb(verb)
+	case "mvn":
+		isInstall = isMavenInstallVerb(verb)
+	case "go":
+		isInstall = isGoInstallVerb(verb)
+	default:
+		return gatePassthrough
+	}
+	if !isInstall && !isUpdate {
+		return gatePassthrough
+	}
+	if isInstall && len(args) == 1 {
+		// `npm install` alone — lockfile restore.
+		return gatePassthrough
+	}
+	if isUpdate && len(args) == 1 {
+		// `npm update` alone — every dep at once, no manifest context.
+		return gateRefuseUpdateAll
+	}
+	return gateProceed
 }
 
 // findRealPackageManager looks up the binary on $PATH while skipping

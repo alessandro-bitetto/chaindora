@@ -10,6 +10,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md).
 
+## [0.13.4] — 2026-05-16
+
+Closes the update-verb coverage gap in the gate shim. Previously
+`npm install pkg` was gated but `npm update pkg` slipped through to
+the real package manager — defeating the gate exactly where it was
+most relevant for the publisher-change / fresh-publish / new-CVE
+threat classes.
+
+### Added — update verbs gated across every supported PM
+
+| PM | New verbs gated | Already covered |
+|---|---|---|
+| npm | `update`, `up`, `upgrade`, `udpate` (typo) | `install`, `i`, `add`, `in`, … |
+| yarn | `upgrade`, `upgrade-interactive`, `up` (Berry) | `add` |
+| pnpm | `update`, `up`, `upgrade` | `add` |
+| cargo | `update` | `add`, `install` |
+| bundle | `update` | `add` |
+| gem | `update` | `install` |
+| pip | (existing `install` verb covers `pip install --upgrade`) | `install` |
+| go | (existing `get` verb covers `go get -u`) | `get`, `install` |
+| mvn | (no standalone upgrade verb — version bumps via pom.xml) | `dependency:get` |
+
+So `npm update lodash`, `pnpm up react`, `cargo update serde`,
+`bundle update rspec`, `gem update rails` all now resolve their
+trees and run every check against every node, identical to the
+install path.
+
+### Added — clear refusal for bare update-all
+
+`npm update` / `pnpm update` / `yarn upgrade` / `cargo update` /
+`bundle update` / `gem update` invoked with **no package names**
+walk every dep in the local manifest. The gate doesn't yet carry
+the user's actual manifest into the resolver's temp directory, so
+the resolver can't reproduce that operation. Rather than silently
+passing through (the v0.13.3 behavior), the shim now refuses with:
+
+```
+`npm update` with no explicit package names updates every dep in the
+manifest, but chdora gate doesn't yet resolve update-all without
+project context. Specify packages (e.g. `npm update <pkg>`) or run
+with --chaindora-policy=lenient to bypass the gate for this
+invocation.
+```
+
+Resolving update-all from the local manifest is on the v0.14 roadmap.
+
+### Refactored — uniform per-PM dispatch
+
+The 9-case switch in `internal/cli/gate_exec.go` previously inlined
+the install-verb check per package manager. Replaced with a single
+`classifyGateArgs(pm, args)` returning `gatePassthrough` /
+`gateProceed` / `gateRefuseUpdateAll`. Each PM's resolver mapping
+stays in its own switch case, but the verb-classification logic is
+now in one place — adding new PMs or new verbs only touches one
+function.
+
+### Tests
+
+`internal/cli/gate_exec_test.go` covers all install + update verbs
+across every supported PM, the lockfile-restore passthrough cases,
+the bare-update refusal cases, and unknown / empty edge cases. 47
+test cases, all passing.
+
 ## [0.13.3] — 2026-05-16
 
 Patch release: unbreaks the self-scan CI job and fixes doc / code
