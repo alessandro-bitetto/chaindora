@@ -10,6 +10,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md).
 
+## [0.13.1] — 2026-05-16
+
+The "no asymmetry, take two" milestone — closes every remaining
+"⏭ passthrough" and "⚠ partial" cell in the gate matrix where
+the limit wasn't a real registry-API constraint.
+
+### Added — provenance across every ecosystem
+
+| Ecosystem | Provenance source |
+|---|---|
+| Go | sum.golang.org transparency log (Go-team-signed) |
+| Maven Central | `.jar.asc` GPG signature presence (Maven Central mandates GPG signing) |
+| RubyGems | Trusted Publishing `metadata.attribution` URL |
+| crates.io | per-version `published_by` (authenticated account) |
+
+Each ecosystem now satisfies `ProvenanceProbe` and is registered
+in `buildGateProbes`. The same regression-detection logic
+("publisher used to attest, then stopped") works uniformly.
+
+### Added — publisher-change for Maven and Go
+
+- **Go**: derive owner from the module path. `github.com/spf13/cobra`
+  → publisher `github.com/spf13`. Vanity-import paths
+  (`gopkg.in/`, `golang.org/x/`, `go.uber.org/`) fall back to
+  the host so cross-version comparison resolves cleanly. Closes
+  the "⚠API" cell with documented degradation for vanity paths.
+- **Maven**: download per-version `pom.xml` and join
+  `<developers>` `<name>` (or `<id>` fallback). Best-effort:
+  many pom.xml files don't include the block or inherit from
+  a parent pom (we don't follow parents). Empty result → graceful
+  Unknown.
+
+### Added — Go gate-exec resolver
+
+`internal/gate/resolve_gomod.go`: tmpdir with minimal `go.mod`
+→ `go mod download -x -json all` → parse the streaming JSON.
+Closes the asterisked cell in the gate-exec row. Resolution
+runs `go mod download` (fetches module bytes, no code
+execution) so the resolver itself can't be made to run
+attacker code.
+
+`chdora gate exec go get <mod>@<ver>` now goes through the
+full 7-checker stack. Shim mechanism extended to include `go`.
+
+### Added — git-URL GitHub-API enrichment
+
+`GitURLCheck` now optionally enriches its verdict with
+GitHub-API evidence for github.com URLs:
+
+- repo age < 30 days → flag
+- < 5 stargazers → flag
+- repo is a fork → flag
+- repo is archived / disabled → flag
+
+Reads `GITHUB_TOKEN` from the environment for higher rate
+limits (5000/hr authenticated vs 60/hr anonymous). Enrichment
+upgrades baseline-Approve to Warn when signals fire; never
+downgrades a Block. Failures (rate-limit / 404 / network) fall
+back silently to the baseline verdict.
+
+### Added — lockfile-integrity forensics (go.sum)
+
+`internal/detectors/integrity/`: new forensics detector. For
+every `go.sum` under a project root, cross-checks each entry
+against `sum.golang.org/lookup/<mod>@<ver>`. A mismatch
+indicates lockfile tampering between resolution and on-disk
+storage — `INTEGRITY-MISMATCH` finding, HIGH severity.
+
+Rate-limited to 100 lookups per `go.sum` (a giant monorepo
+won't DOS sumdb).
+
+Cargo.lock integrity verification is scaffolded but not yet
+wired — that requires hitting the crates.io index protocol
+which is a separate API (v0.13.x).
+
+Flag: `chdora forensics --skip-integrity`.
+
+### Matrix state after v0.13.1
+
+The ⏭ cells in v0.11.2's audit are now ✅ for every ecosystem
+that has SOME form of publisher / provenance signal. The
+remaining real-API limits are documented explicitly per
+ecosystem in each probe's source.
+
+### Tests
+
+All green under `go test ./... -race`. Live-verified end-to-end
+against npm, PyPI, RubyGems, crates, Maven, Go, and git-URL.
+
 ## [0.13.0] — 2026-05-16
 
 The "fleet mode" milestone. A single chdora-server process now

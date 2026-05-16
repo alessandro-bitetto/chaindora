@@ -173,6 +173,43 @@ func (c *Crates) TarballURL(ctx context.Context, name, version string) (string, 
 	return fmt.Sprintf("%s/crates/%s/%s/download", strings.TrimRight(c.BaseURL, "/"), url.PathEscape(name), url.PathEscape(version)), nil
 }
 
+// HasProvenance: crates.io exposes `published_by` per version
+// (already the publisher-change signal). When present + non-
+// nil, it means the publish was authenticated against a
+// crates.io account — the platform's attribution layer. Not
+// sigstore-grade (cargo trusted-publishing is in development),
+// but it's the strongest signal the API exposes today.
+func (c *Crates) HasProvenance(ctx context.Context, name, version string) (bool, error) {
+	doc, _, err := c.fetchCrate(ctx, name)
+	if err != nil || doc == nil {
+		return false, err
+	}
+	for _, v := range doc.Versions {
+		if v.Num == version && v.PublishedBy != nil && v.PublishedBy.Login != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// AnyVersionHasProvenance: at least one version must record a
+// publisher account. crates.io has had `published_by` since
+// 2018, so this is almost always true for actively maintained
+// crates — the regression case (some versions have it, this
+// one doesn't) is the real signal.
+func (c *Crates) AnyVersionHasProvenance(ctx context.Context, name string) (bool, error) {
+	doc, _, err := c.fetchCrate(ctx, name)
+	if err != nil || doc == nil {
+		return false, err
+	}
+	for _, v := range doc.Versions {
+		if v.PublishedBy != nil && v.PublishedBy.Login != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (c *Crates) FetchTarball(ctx context.Context, fetchURL string, dst io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
 	if err != nil {

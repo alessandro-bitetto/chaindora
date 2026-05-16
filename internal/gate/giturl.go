@@ -2,9 +2,14 @@ package gate
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"time"
 )
 
 // GitURLCheck evaluates "packages" sourced from a git URL rather
@@ -42,17 +47,51 @@ type GitURLCheck struct {
 	// Warn. Default false (strict). Useful in monorepos with
 	// internal git URLs where ref-by-branch is the norm.
 	AllowBranchRefs bool
+
+	// MinRepoAge is the minimum age of a github.com repo we'll
+	// approve without warning (zero = no check). 30 days
+	// matches the v0.10 cooldown logic for npm packages: a
+	// repo registered yesterday and immediately depended-on
+	// is sleeper-pattern shape.
+	MinRepoAge time.Duration
+
+	// MinStars is the minimum stargazer count to approve a
+	// github.com repo without warning (zero = no check). 5 is
+	// the conservative default — picks up "real" projects
+	// without false-positiving on personal-but-legitimate
+	// repos with no marketing.
+	MinStars int
+
+	// GitHubAPI is the base URL for the GitHub REST API. Set
+	// to "" to disable GitHub-specific enrichment (the
+	// host-tier + ref-pin logic still works).
+	GitHubAPI string
+
+	// GitHubToken is an optional bearer for authenticated
+	// requests (5000/hr rate limit instead of 60/hr).
+	GitHubToken string
+
+	// HTTPClient is the HTTP client used for GitHub API calls.
+	HTTPClient *http.Client
 }
 
 // NewGitURLCheck returns a GitURLCheck with the default
-// well-known hosts allowlist.
+// well-known hosts allowlist and reasonable thresholds. Reads
+// GITHUB_TOKEN from the environment if set — same convention
+// gh / hub / actions use.
 func NewGitURLCheck() *GitURLCheck {
-	return &GitURLCheck{}
+	return &GitURLCheck{
+		MinRepoAge:  30 * 24 * time.Hour,
+		MinStars:    5,
+		GitHubAPI:   "https://api.github.com",
+		GitHubToken: os.Getenv("GITHUB_TOKEN"),
+		HTTPClient:  &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 func (g *GitURLCheck) Name() string { return "git-url" }
 
-func (g *GitURLCheck) Check(_ context.Context, ref PackageRef) CheckResult {
+func (g *GitURLCheck) Check(ctx context.Context, ref PackageRef) CheckResult {
 	r := CheckResult{Checker: g.Name()}
 	if ref.Ecosystem != "git" {
 		// Passthrough for non-git packages — every other
@@ -83,40 +122,149 @@ func (g *GitURLCheck) Check(_ context.Context, ref PackageRef) CheckResult {
 	// Step 3: ref pinning.
 	refKind := classifyRef(spec.Ref)
 
-	// Step 4: combine into a verdict.
+	// Step 4: combine host-tier + ref-pin into a baseline
+	// verdict. Then enrich with GitHub-API evidence when
+	// possible to refine the call.
+	baseline := classifyVerdict(refKind, hostTier, g.AllowBranchRefs, spec)
+	r.Verdict = baseline.verdict
+	r.Reason = baseline.reason
+
+	// If we're approving a github.com repo, check whether the
+	// repo itself looks legit. If we're blocking, GitHub API
+	// won't rescue it. If we're warning, GitHub API can
+	// either confirm the warn or downgrade to approve.
+	if spec.Host == "github.com" && g.GitHubAPI != "" {
+		meta := g.fetchGitHubMeta(ctx, spec)
+		if meta != nil {
+			if signal := g.evaluateGitHubMeta(meta); signal != "" {
+				if r.Verdict == VerdictApprove {
+					r.Verdict = VerdictWarn
+				}
+				r.Detail = signal
+			}
+		}
+	}
+	return r
+}
+
+// classifyVerdict returns the baseline verdict for a given
+// (refKind, hostTier) combo. Split out so tests can target the
+// pure logic without HTTP plumbing.
+func classifyVerdict(refKind refKind, hostTier hostTier, allowBranch bool, spec gitURLSpec) struct {
+	verdict Verdict
+	reason  string
+} {
+	type result struct {
+		verdict Verdict
+		reason  string
+	}
 	switch {
 	case refKind == refSHA && hostTier == hostTierWellKnown:
-		r.Verdict = VerdictApprove
-		r.Reason = fmt.Sprintf("well-known host %s + pinned SHA %s", spec.Host, shortSHA(spec.Ref))
-		return r
+		return result{VerdictApprove, fmt.Sprintf("well-known host %s + pinned SHA %s", spec.Host, shortSHA(spec.Ref))}
 	case refKind == refSHA && hostTier == hostTierAllowed:
-		r.Verdict = VerdictApprove
-		r.Reason = fmt.Sprintf("allowlisted host %s + pinned SHA %s", spec.Host, shortSHA(spec.Ref))
-		return r
+		return result{VerdictApprove, fmt.Sprintf("allowlisted host %s + pinned SHA %s", spec.Host, shortSHA(spec.Ref))}
 	case refKind == refSHA && hostTier == hostTierUnknown:
-		r.Verdict = VerdictWarn
-		r.Reason = fmt.Sprintf("unknown host %s but ref is a pinned SHA — bytes are auditable, but community oversight is missing", spec.Host)
-		return r
+		return result{VerdictWarn, fmt.Sprintf("unknown host %s but ref is a pinned SHA — bytes are auditable, but community oversight is missing", spec.Host)}
 	case refKind == refTag && hostTier == hostTierWellKnown:
-		r.Verdict = VerdictWarn
-		r.Reason = fmt.Sprintf("well-known host %s + tag ref %q — tags are mutable in theory; prefer pinning to the underlying SHA", spec.Host, spec.Ref)
-		return r
+		return result{VerdictWarn, fmt.Sprintf("well-known host %s + tag ref %q — tags are mutable in theory; prefer pinning to the underlying SHA", spec.Host, spec.Ref)}
 	case refKind == refTag && hostTier != hostTierWellKnown:
-		r.Verdict = VerdictBlock
-		r.Reason = fmt.Sprintf("non-well-known host %s + tag ref %q — combination is too easy to spoof", spec.Host, spec.Ref)
-		return r
-	case refKind == refBranch && g.AllowBranchRefs:
-		r.Verdict = VerdictWarn
-		r.Reason = fmt.Sprintf("branch ref %q at %s — attacker controlling the branch owns every future install", spec.Ref, spec.Host)
-		return r
+		return result{VerdictBlock, fmt.Sprintf("non-well-known host %s + tag ref %q — combination is too easy to spoof", spec.Host, spec.Ref)}
+	case refKind == refBranch && allowBranch:
+		return result{VerdictWarn, fmt.Sprintf("branch ref %q at %s — attacker controlling the branch owns every future install", spec.Ref, spec.Host)}
 	case refKind == refBranch:
-		r.Verdict = VerdictBlock
-		r.Reason = fmt.Sprintf("branch ref %q is fully mutable — pin to a SHA or set allow.branch_refs: true in chaindora.yml if intentional", spec.Ref)
-		return r
+		return result{VerdictBlock, fmt.Sprintf("branch ref %q is fully mutable — pin to a SHA or set allow.branch_refs: true in chaindora.yml if intentional", spec.Ref)}
 	}
-	r.Verdict = VerdictBlock
-	r.Reason = "git-url: no rule matched (treat as Block under fail-closed default)"
-	return r
+	return result{VerdictBlock, "git-url: no rule matched (treat as Block under fail-closed default)"}
+}
+
+// githubRepoMeta is the subset of /repos/<owner>/<repo> we use.
+type githubRepoMeta struct {
+	CreatedAt       time.Time `json:"created_at"`
+	PushedAt        time.Time `json:"pushed_at"`
+	StargazersCount int       `json:"stargazers_count"`
+	Fork            bool      `json:"fork"`
+	Archived        bool      `json:"archived"`
+	Disabled        bool      `json:"disabled"`
+	Private         bool      `json:"private"`
+}
+
+// fetchGitHubMeta does a single API call to /repos/<owner>/<repo>.
+// Returns nil on network failure / 404 / 403 (rate-limited);
+// the caller falls back to baseline verdict.
+func (g *GitURLCheck) fetchGitHubMeta(ctx context.Context, spec gitURLSpec) *githubRepoMeta {
+	owner, repo := parseGitHubOwnerRepo(spec.Path)
+	if owner == "" || repo == "" {
+		return nil
+	}
+	url := fmt.Sprintf("%s/repos/%s/%s",
+		strings.TrimRight(g.GitHubAPI, "/"), owner, repo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if g.GitHubToken != "" {
+		req.Header.Set("Authorization", "Bearer "+g.GitHubToken)
+	}
+	resp, err := g.HTTPClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var meta githubRepoMeta
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&meta); err != nil {
+		return nil
+	}
+	return &meta
+}
+
+// parseGitHubOwnerRepo strips a github.com URL path of leading
+// "/" and trailing ".git", then splits "owner/repo".
+func parseGitHubOwnerRepo(path string) (string, string) {
+	p := strings.TrimPrefix(path, "/")
+	p = strings.TrimSuffix(p, ".git")
+	parts := strings.SplitN(p, "/", 3)
+	if len(parts) < 2 {
+		return "", ""
+	}
+	return parts[0], parts[1]
+}
+
+// evaluateGitHubMeta returns a non-empty trust-signal string
+// when the meta suggests something worth surfacing. Empty
+// means "clean — keep the baseline verdict."
+func (g *GitURLCheck) evaluateGitHubMeta(m *githubRepoMeta) string {
+	if m == nil {
+		return ""
+	}
+	var signals []string
+	if m.Archived {
+		signals = append(signals, "repo is ARCHIVED — pinning to an abandoned project is a maintenance risk")
+	}
+	if m.Disabled {
+		signals = append(signals, "repo is DISABLED on GitHub")
+	}
+	if g.MinRepoAge > 0 && !m.CreatedAt.IsZero() {
+		age := time.Since(m.CreatedAt)
+		if age < g.MinRepoAge {
+			signals = append(signals, fmt.Sprintf("repo created %s ago (< %s) — brand-new repo with no history",
+				humanDuration(age), humanDuration(g.MinRepoAge)))
+		}
+	}
+	if g.MinStars > 0 && m.StargazersCount < g.MinStars {
+		signals = append(signals, fmt.Sprintf("only %d stargazer(s) — limited community vetting", m.StargazersCount))
+	}
+	if m.Fork {
+		signals = append(signals, "repo is a fork — verify the fork hasn't been used to host malicious changes")
+	}
+	if len(signals) == 0 {
+		return ""
+	}
+	return "GitHub-API trust signals:\n  - " + strings.Join(signals, "\n  - ")
 }
 
 // gitURLSpec is the parsed representation of a "name@version"

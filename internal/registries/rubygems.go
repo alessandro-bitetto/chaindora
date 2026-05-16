@@ -205,3 +205,71 @@ func (r *RubyGems) PublishedAt(ctx context.Context, name string) (time.Time, err
 // has total downloads only). Return -1 (unknown) — heuristics
 // fall back to other evidence.
 func (r *RubyGems) DownloadsLast7d(context.Context, string) (int, error) { return -1, nil }
+
+// rubygemsGemVersionDoc is the per-version metadata fetched from
+// /api/v1/versions/<gem>/<version>.json — narrower than the
+// list endpoint and exposes Trusted Publishing attribution
+// when present.
+type rubygemsGemVersionDoc struct {
+	Number   string `json:"number"`
+	Metadata struct {
+		Attribution string `json:"attribution"`
+	} `json:"metadata"`
+}
+
+// fetchGemVersion returns the per-version metadata blob.
+func (r *RubyGems) fetchGemVersion(ctx context.Context, name, version string) (*rubygemsGemVersionDoc, error) {
+	url := fmt.Sprintf("%s/versions/%s/%s.json",
+		strings.TrimRight(r.APIBaseURL, "/"),
+		url.PathEscape(name), url.PathEscape(version))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if r.UserAgent != "" {
+		req.Header.Set("User-Agent", r.UserAgent)
+	}
+	resp, err := r.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("rubygems gem-version %s@%s: HTTP %d", name, version, resp.StatusCode)
+	}
+	var doc rubygemsGemVersionDoc
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&doc); err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+// HasProvenance: RubyGems Trusted Publishing records an
+// `attribution` URL in the version's metadata when the publish
+// went through OIDC-attested CI (currently GitHub Actions).
+// Presence is the provenance signal here.
+func (r *RubyGems) HasProvenance(ctx context.Context, name, version string) (bool, error) {
+	doc, err := r.fetchGemVersion(ctx, name, version)
+	if err != nil || doc == nil {
+		return false, err
+	}
+	return doc.Metadata.Attribution != "", nil
+}
+
+// AnyVersionHasProvenance: check the most recent version for an
+// attribution URL. RubyGems Trusted Publishing rolled out in
+// 2023, so most older versions of even adopting gems will lack
+// it — the value of the check is detecting regression
+// (adopted, then dropped).
+func (r *RubyGems) AnyVersionHasProvenance(ctx context.Context, name string) (bool, error) {
+	docs, _, err := r.fetchVersions(ctx, name)
+	if err != nil || len(docs) == 0 {
+		return false, err
+	}
+	// docs is oldest-first → check the newest.
+	latest := docs[len(docs)-1]
+	return r.HasProvenance(ctx, name, latest.Number)
+}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/hostforensics"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/integrity"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/trustdrift"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/incidents"
@@ -41,6 +42,8 @@ var (
 	// v0.11 trust-anchor drift
 	forensicsSkipTrustDrift          bool
 	forensicsTrustDriftUpdateBaseline bool
+	// v0.13.1 integrity verification
+	forensicsSkipIntegrity bool
 	forensicsSkipRegistry bool
 	forensicsExcludeCVEs   bool
 	forensicsExcludeSupply bool
@@ -108,6 +111,21 @@ func runForensicsFlow(ctx context.Context) error {
 			} else {
 				tally.AbsorbFindings(tdResults)
 				all = append(all, tdResults...)
+			}
+		}
+
+		// Integrity verification (v0.13.1): cross-check
+		// go.sum / Cargo.lock entries against upstream
+		// registries. Catches lockfile tampering between
+		// resolution and on-disk storage.
+		if !forensicsSkipIntegrity && forensicsScanProjects != "" {
+			intDet := integrity.New([]string{forensicsScanProjects})
+			intResults, ierr := intDet.Detect(ctx)
+			if ierr != nil {
+				fmt.Fprintf(os.Stderr, "warn: integrity: %v\n", ierr)
+			} else {
+				tally.AbsorbFindings(intResults)
+				all = append(all, intResults...)
 			}
 		}
 
@@ -345,6 +363,7 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsSavePlan, "save-plan", false, "save the generated fix-plan to ~/.chaindora/fix-plans/ and print its ID")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipTrustDrift, "skip-trust-drift", false, "skip the trust-anchor drift check (.npmrc registry, .gitconfig insteadOf, CA store, etc.)")
 	forensicsCmd.Flags().BoolVar(&forensicsTrustDriftUpdateBaseline, "trust-drift-update-baseline", false, "rewrite the trust-drift baseline to current state — use after intentional registry/config changes")
+	forensicsCmd.Flags().BoolVar(&forensicsSkipIntegrity, "skip-integrity", false, "skip the lockfile-integrity check (cross-references go.sum vs sumdb)")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipRegistry, "skip-registry", false, "do not query npm/PyPI for evidence (offline mode; dep-confusion / typosquat / install-script heuristics become silent)")
 	forensicsCmd.Flags().BoolVar(&forensicsExcludeCVEs, "exclude-cves", false, "hide the dependency-CVE section")
 	forensicsCmd.Flags().BoolVar(&forensicsExcludeSupply, "exclude-supply-chain", false, "hide the supply-chain attack section")

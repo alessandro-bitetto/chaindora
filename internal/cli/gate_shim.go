@@ -24,7 +24,7 @@ import (
 // Package managers we know how to shim. Even ecosystems chdora
 // doesn't gate yet get a shim — the shim falls through to
 // passThroughToReal so it's safe to enable everywhere.
-var shimManagers = []string{"npm", "yarn", "pnpm", "pip", "pip3", "cargo", "bundle", "gem", "mvn"}
+var shimManagers = []string{"npm", "yarn", "pnpm", "pip", "pip3", "cargo", "bundle", "gem", "mvn", "go"}
 
 var gateInstallCmd = &cobra.Command{
 	Use:   "install",

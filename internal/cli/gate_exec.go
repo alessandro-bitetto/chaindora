@@ -142,6 +142,12 @@ Examples:
 			}
 			installArgs = pmArgs[1:]
 			resolve = gate.ResolveMavenTree
+		case "go":
+			if len(pmArgs) == 0 || !isGoInstallVerb(pmArgs[0]) || len(pmArgs) == 1 {
+				return execReal(realBin, pmArgs)
+			}
+			installArgs = pmArgs[1:]
+			resolve = gate.ResolveGoModTree
 		default:
 			return passThroughToReal(pm, pmArgs)
 		}
@@ -339,6 +345,13 @@ func isGemInstallVerb(v string) bool {
 // `dependency:get` which is the explicit "fetch this dep" verb.
 func isMavenInstallVerb(v string) bool {
 	return v == "dependency:get" || strings.HasPrefix(v, "dependency:") && strings.Contains(v, "get")
+}
+
+// isGoInstallVerb — `go get` adds modules to go.mod (or directly
+// installs binaries). `go install` builds + installs binaries.
+// `go run` doesn't pull new modules. We gate both.
+func isGoInstallVerb(v string) bool {
+	return v == "get" || v == "install"
 }
 
 // findRealPackageManager looks up the binary on $PATH while skipping

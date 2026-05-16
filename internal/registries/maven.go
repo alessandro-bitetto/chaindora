@@ -107,13 +107,8 @@ func (m *MavenCentral) PublishedAtVersion(ctx context.Context, name, version str
 	return time.UnixMilli(ts).UTC(), nil
 }
 
-// PublisherOfVersion: Maven Central's public search API doesn't
-// surface a per-version publisher identity. Sonatype's portal
-// has the deploying user but it's not in the public API. Return
-// empty + nil → checker degrades to Unknown.
-func (m *MavenCentral) PublisherOfVersion(context.Context, string, string) (string, error) {
-	return "", nil
-}
+// (PublisherOfVersion implemented below — pom.xml <developers>
+// parsing).
 
 func (m *MavenCentral) AllVersions(ctx context.Context, name string) ([]VersionInfo, error) {
 	group, artifact, ok := splitMavenName(name)
@@ -157,6 +152,164 @@ func (m *MavenCentral) TarballURL(_ context.Context, name, version string) (stri
 		groupPath, artifact, version,
 		artifact, version,
 	), nil
+}
+
+// HasProvenance probes for the `.jar.asc` GPG signature file
+// that Maven Central requires for every publish. Presence is
+// the provenance signal here; full crypto verification against
+// a keyring is heavier (lands in a v0.13.x follow-up). When
+// the registry rejects the publish without an .asc, .asc
+// presence is effectively a publishing-policy attestation —
+// not as strong as sigstore but real.
+func (m *MavenCentral) HasProvenance(ctx context.Context, name, version string) (bool, error) {
+	jarURL, err := m.TarballURL(ctx, name, version)
+	if err != nil {
+		return false, err
+	}
+	ascURL := jarURL + ".asc"
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, ascURL, nil)
+	if err != nil {
+		return false, err
+	}
+	if m.UserAgent != "" {
+		req.Header.Set("User-Agent", m.UserAgent)
+	}
+	resp, err := m.Client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound, http.StatusGone:
+		return false, nil
+	}
+	return false, fmt.Errorf("asc lookup %s: HTTP %d", ascURL, resp.StatusCode)
+}
+
+// AnyVersionHasProvenance checks the most recent version. Since
+// Maven Central mandates GPG signing, this is almost always
+// true — the value is in the regression-detection path: a
+// historically-signed package that suddenly publishes without
+// .asc is anomalous.
+func (m *MavenCentral) AnyVersionHasProvenance(ctx context.Context, name string) (bool, error) {
+	versions, err := m.AllVersions(ctx, name)
+	if err != nil || len(versions) == 0 {
+		return false, err
+	}
+	return m.HasProvenance(ctx, name, versions[len(versions)-1].Version)
+}
+
+// PublisherOfVersion returns the joined contributor list from
+// the per-version pom.xml. Maven Central's public API doesn't
+// surface deployer identity, but every published JAR has a
+// pom.xml beside it whose <developers> block is documentation
+// of who contributed. Treating that as the version's
+// "publisher" enables publisher-change detection: when the
+// developers list on version N+1 differs from N, that's a
+// signal worth surfacing.
+//
+// This is best-effort: <developers> is project-wide, not
+// per-deployer, and projects often omit it entirely. Empty
+// result means "could not determine" → publisher-change
+// degrades to Unknown.
+func (m *MavenCentral) PublisherOfVersion(ctx context.Context, name, version string) (string, error) {
+	group, artifact, ok := splitMavenName(name)
+	if !ok {
+		return "", nil
+	}
+	groupPath := strings.ReplaceAll(group, ".", "/")
+	pomURL := fmt.Sprintf("%s/%s/%s/%s/%s-%s.pom",
+		strings.TrimRight(m.Repo1URL, "/"),
+		groupPath, artifact, version, artifact, version,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pomURL, nil)
+	if err != nil {
+		return "", err
+	}
+	if m.UserAgent != "" {
+		req.Header.Set("User-Agent", m.UserAgent)
+	}
+	resp, err := m.Client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	return parseMavenPOMDevelopers(data), nil
+}
+
+// parseMavenPOMDevelopers extracts a stable identity string
+// from the <developers> block. We use a simple regex rather
+// than full XML parsing — pom.xml's developers shape is
+// well-known and we only need a flat-string roll-up for the
+// publisher-change check.
+func parseMavenPOMDevelopers(data []byte) string {
+	devsBlock := extractXMLBlock(string(data), "developers")
+	if devsBlock == "" {
+		return ""
+	}
+	names := extractXMLValues(devsBlock, "name")
+	ids := extractXMLValues(devsBlock, "id")
+	// Prefer name (human-readable); fall back to id (account).
+	if len(names) > 0 {
+		sort.Strings(names)
+		return strings.Join(names, ", ")
+	}
+	if len(ids) > 0 {
+		sort.Strings(ids)
+		return strings.Join(ids, ", ")
+	}
+	return ""
+}
+
+// extractXMLBlock returns the inner content of the first
+// <tag>...</tag> in s. Returns "" if not found.
+func extractXMLBlock(s, tag string) string {
+	open := "<" + tag + ">"
+	close := "</" + tag + ">"
+	start := strings.Index(s, open)
+	if start < 0 {
+		return ""
+	}
+	end := strings.Index(s[start+len(open):], close)
+	if end < 0 {
+		return ""
+	}
+	return s[start+len(open) : start+len(open)+end]
+}
+
+// extractXMLValues returns every <tag>VALUE</tag> instance's
+// VALUE in s. Trims whitespace.
+func extractXMLValues(s, tag string) []string {
+	open := "<" + tag + ">"
+	close := "</" + tag + ">"
+	var out []string
+	rem := s
+	for {
+		i := strings.Index(rem, open)
+		if i < 0 {
+			break
+		}
+		rem = rem[i+len(open):]
+		j := strings.Index(rem, close)
+		if j < 0 {
+			break
+		}
+		v := strings.TrimSpace(rem[:j])
+		if v != "" {
+			out = append(out, v)
+		}
+		rem = rem[j+len(close):]
+	}
+	return out
 }
 
 func (m *MavenCentral) FetchTarball(ctx context.Context, fetchURL string, dst io.Writer) error {
