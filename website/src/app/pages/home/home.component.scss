@@ -132,6 +132,9 @@
 
 .catches-col {
   position: relative;
+  // Allow grid track to shrink below content's intrinsic min-width so long
+  // unbreakable strings (URLs, code) don't blow out the viewport on mobile.
+  min-width: 0;
   background: #ffffff;
   border: 1px solid #000000;
   border-left: 4px solid #000000;
@@ -238,6 +241,7 @@
 
 .mode-card {
   position: relative;
+  min-width: 0;
   background: #ffffff;
   border: 1px solid #000000;
   border-radius: var(--cd-radius-lg);
@@ -487,6 +491,10 @@
   grid-template-columns: 1fr 1fr;
   gap: 24px;
   align-items: start;
+
+  // Allow grid items containing pre/code blocks to shrink below their
+  // intrinsic content width so the pre's own overflow-x:auto can scroll.
+  > * { min-width: 0; }
 }
 
 .fleet-features {
@@ -687,26 +695,42 @@
 @media (max-width: 720px) {
   .hero { padding: 48px 0 40px; }
   .hero .hero-logo { width: 160px; }
-  .hero h1 { font-size: 38px; }
+  .hero h1 { font-size: 34px; }
   .hero .lede { font-size: 16px; }
-  .modes-title, .fleet-h { font-size: 30px; }
+  .hero .cta { flex-wrap: wrap; }
+  .modes-title, .fleet-h { font-size: 28px; }
   .modes { grid-template-columns: 1fr; }
+  .mode-card { padding: 28px 20px 20px; }
   .catches-grid { grid-template-columns: 1fr; }
   .catches-shared {
     flex-direction: column;
     align-items: flex-start;
     gap: 12px;
+    padding: 16px 18px;
     ul { flex-direction: column; gap: 6px; }
   }
+  .catches-col { padding: 20px 18px; }
   .step {
     grid-template-columns: 1fr;
     gap: 12px;
     padding: 20px;
     .step-num { width: 44px; height: 44px; line-height: 44px; font-size: 24px; }
   }
-  .fleet-band { padding: 24px; }
+  .fleet-band { padding: 24px 20px; }
   .fleet-grid { grid-template-columns: 1fr; }
+  .coverage-tier { padding: 18px 18px; }
   .coverage-eco-grid { grid-template-columns: 1fr; }
   .closing-card { padding: 36px 20px; }
   .closing-card .closing-h { font-size: 28px; }
+  .closing-card .cta { flex-wrap: wrap; justify-content: center; }
+}
+
+@media (max-width: 380px) {
+  .hero h1 { font-size: 28px; }
+  .hero .hero-logo { width: 130px; }
+  .modes-title, .fleet-h { font-size: 24px; }
+  .mode-card { padding: 24px 16px 18px; }
+  .fleet-band { padding: 20px 16px; }
+  .closing-card { padding: 28px 16px; }
+  .closing-card .closing-h { font-size: 24px; }
 }

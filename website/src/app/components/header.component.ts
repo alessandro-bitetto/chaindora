@@ -37,12 +37,14 @@ import { RouterLink } from '@angular/router';
         display: flex;
         align-items: center;
         justify-content: space-between;
+        gap: 12px;
         height: 72px;
       }
       .brand {
         display: flex;
         align-items: center;
         gap: 12px;
+        min-width: 0;
         color: #000000 !important;
         &:hover { text-decoration: none; }
 
@@ -51,6 +53,7 @@ import { RouterLink } from '@angular/router';
           height: 44px;
           width: 44px;
           object-fit: contain;
+          flex-shrink: 0;
         }
         .brand-text {
           font-family: var(--cd-display);
@@ -65,6 +68,7 @@ import { RouterLink } from '@angular/router';
         align-items: center;
         gap: 28px;
         font-size: 14px;
+        flex-shrink: 0;
 
         a {
           color: #000000;
@@ -88,9 +92,13 @@ import { RouterLink } from '@angular/router';
         }
       }
       @media (max-width: 720px) {
+        .nav { height: 60px; }
+        .brand .brand-mark { height: 36px; width: 36px; }
+        .brand .brand-text { font-size: 20px; }
         .links a:not(.github) {
           display: none;
         }
+        .links .github { padding: 6px 12px; font-size: 13px; }
       }
     `,
   ],
