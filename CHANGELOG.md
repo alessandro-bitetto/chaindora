@@ -13,6 +13,72 @@ v0.16 — AI/ML supply chain (HuggingFace pickle scanner, PyTorch /
 TF / Keras model file scanner, MCP server / agent-framework
 auditor).
 
+## [0.15.1] — 2026-05-16
+
+UX fix: `chdora gate install` now actually persists. v0.15.0 (and
+every prior release) required the user to manually add `export
+PATH="$HOME/.chaindora/bin:$PATH"` to their shell rc — and most
+users skipped that step, leaving the gate effectively off.
+
+### Fixed — `chdora gate install` persists across shells + reboots
+
+`gate install` now appends a clearly-marked block to the user's
+shell rc (zsh / bash / fish on macOS+Linux; PowerShell `$PROFILE`
+on Windows). Detected from `$SHELL`. The block carries fence-
+comment markers:
+
+```
+# >>> chdora gate (managed) >>>
+# Added by `chdora gate install`. Remove with `chdora gate disable`.
+# ...
+export PATH="$HOME/.chaindora/bin:$PATH"
+# <<< chdora gate (managed) <<<
+```
+
+`chdora gate disable` finds the markers and removes the block
+cleanly without touching anything else in the rc. `chdora gate
+status` now distinguishes three states: (1) ACTIVE + persistent
+(rc + current shell), (2) ACTIVE but shell-only (PATH set but no
+rc block — will not survive a new terminal), (3) PERSISTENT but
+not active in this shell (`source` the rc to pick it up), (4)
+INACTIVE.
+
+The original v0.9 design deliberately printed the export line and
+asked the user to add it by hand, because chdora's own scanners
+flag rc tampering as a finding. The fix: chdora's `hostforensics:
+shellrc` scanner only matches specific malware patterns
+(`curl|bash`, eval base64, netcat listeners) — a comment-bracketed
+PATH prepend doesn't match any of them, so the auto-edit doesn't
+self-flag. The markers also let any future scanner explicitly
+skip the block if it ever adopts broader rc-edit detection.
+
+### Added — `--no-persist` opt-out
+
+Both `gate install` and `gate disable` take `--no-persist` for the
+edge cases:
+
+- Users with managed dotfiles (chezmoi, stow, GNU stow) who don't
+  want chaindora editing their rc directly.
+- Temporary disable that intends to re-enable shortly without
+  re-editing.
+
+With `--no-persist` on `install`, chdora just writes the shim
+files and prints the export line for the user to add manually
+(the pre-v0.15.1 behavior).
+
+### Notes
+
+- Idempotent. Re-running `chdora gate install` doesn't double-
+  append. Re-running `chdora gate disable` when no block exists
+  is a no-op.
+- macOS bash special case: prefers `~/.bash_profile` if present
+  (login-shell convention) and falls back to `~/.bashrc`.
+- Fish gets `set -gx PATH ~/.chaindora/bin $PATH`; PowerShell
+  gets `$env:PATH = $shimDir + ';' + $env:PATH`.
+- If the block exists with the begin marker but no matching end
+  marker, `gate disable` refuses to edit and surfaces the
+  malformed state rather than guessing where the block ends.
+
 ## [0.15.0] — 2026-05-16
 
 Predictive detection across **32 inventory ecosystems** (full

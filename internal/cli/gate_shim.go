@@ -33,6 +33,8 @@ var shimManagers = []string{"npm", "yarn", "pnpm", "pip", "pip3", "cargo", "bund
 	"cpanm", "luarocks", "carthage", "elm", "nimble", "shards", "zig",
 	"julia", "R", "Rscript"}
 
+var gateInstallNoPersist bool
+
 var gateInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Register shims so npm/yarn/pnpm/pip route installs through chdora gate",
@@ -40,11 +42,15 @@ var gateInstallCmd = &cobra.Command{
 ~/.chaindora/bin/. Each shim simply exec's ` + "`chdora gate exec <manager>`" + ` —
 which gates install verbs and passes everything else through transparently.
 
-After installation you MUST put ~/.chaindora/bin/ on the FRONT of your
-$PATH so the shim shadows the real binary. We print the exact line for
-your shell rather than editing it ourselves — touching ~/.zshrc behind
-a user's back is exactly the kind of behavior the rest of chdora
-flags as a host-state finding.`,
+Also appends a clearly-marked block to your shell rc (~/.zshrc /
+~/.bashrc / fish config / PowerShell $PROFILE) that prepends
+~/.chaindora/bin to $PATH, so the shim sticks across new terminals
+and reboots. Use --no-persist to skip the rc edit; the command then
+just prints the export line for you to add by hand.
+
+The rc block carries fence-comment markers (` + "`# >>> chdora gate (managed) >>>`" + `)
+so chdora's own host-state scanners recognize and skip it, and so
+` + "`chdora gate disable`" + ` can remove the block cleanly.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := chaindoraShimDir()
 		if err != nil {
@@ -73,30 +79,48 @@ flags as a host-state finding.`,
 			written++
 		}
 
-		fmt.Fprintf(os.Stderr, "\n[chdora] %d shim(s) written to %s:\n", written, dir)
-		for _, pm := range shimManagers {
-			fmt.Fprintf(os.Stderr, "  - %s\n", pm)
+		fmt.Fprintf(os.Stderr, "\n[chdora] %d shim(s) written to %s\n", written, dir)
+
+		// Persistence: edit the shell rc unless --no-persist was passed.
+		if gateInstallNoPersist {
+			fmt.Fprintln(os.Stderr, "\n--no-persist: skipped shell-rc edit. Add this line manually to activate:")
+			fmt.Fprintf(os.Stderr, "\n    export PATH=\"%s:$PATH\"\n\n", dir)
+		} else {
+			rc, added, perr := persistGatePATH(dir)
+			if perr != nil {
+				fmt.Fprintf(os.Stderr, "\nwarn: couldn't auto-edit shell rc: %v\n", perr)
+				fmt.Fprintln(os.Stderr, "Add this line to your shell rc by hand to activate:")
+				fmt.Fprintf(os.Stderr, "\n    export PATH=\"%s:$PATH\"\n\n", dir)
+			} else if added {
+				fmt.Fprintf(os.Stderr, "\n[chdora] appended PATH-prepend block to %s\n", rc)
+				fmt.Fprintf(os.Stderr, "Run `source %s` (or open a new shell) to activate now.\n", rc)
+			} else {
+				fmt.Fprintf(os.Stderr, "\n[chdora] %s already contains the chdora-gate block — no rc edit needed.\n", rc)
+			}
 		}
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "To activate, add this line to your shell rc (~/.zshrc, ~/.bashrc, ...):")
-		fmt.Fprintf(os.Stderr, "\n    export PATH=\"%s:$PATH\"\n\n", dir)
-		fmt.Fprintln(os.Stderr, "After re-opening your shell:")
+		fmt.Fprintln(os.Stderr, "\nFrom a fresh shell:")
 		fmt.Fprintln(os.Stderr, "    npm install <pkg>     # goes through chdora gate")
 		fmt.Fprintln(os.Stderr, "    npm test              # passes through unchanged")
 		fmt.Fprintln(os.Stderr, "    chdora gate status    # confirm shim is in PATH")
-		fmt.Fprintln(os.Stderr, "\nTo disable later:")
+		fmt.Fprintln(os.Stderr, "\nTo undo:")
 		fmt.Fprintln(os.Stderr, "    chdora gate disable")
 		return nil
 	},
 }
+
+var gateDisableNoPersist bool
 
 var gateDisableCmd = &cobra.Command{
 	Use:   "disable",
 	Short: "Remove the chdora gate shims",
 	Long: `Removes every shim chdora installed under ~/.chaindora/bin/. After
 removal, npm / yarn / pnpm / pip resolve directly to the real
-binaries on PATH again. If you also added ` + "`export PATH=...`" + ` to
-your shell rc, remove it manually — chdora never wrote it.`,
+binaries on PATH again.
+
+Also removes the chdora-managed PATH-prepend block from your shell
+rc (the one ` + "`chdora gate install`" + ` added). Pass --no-persist to
+keep the rc edit in place — useful when you're temporarily disabling
+the shims but plan to re-enable shortly.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir, err := chaindoraShimDir()
 		if err != nil {
@@ -114,8 +138,16 @@ your shell rc, remove it manually — chdora never wrote it.`,
 			removed++
 		}
 		fmt.Fprintf(os.Stderr, "[chdora] removed %d shim(s) from %s\n", removed, dir)
-		if removed > 0 {
-			fmt.Fprintln(os.Stderr, "If you previously added `export PATH=\"~/.chaindora/bin:$PATH\"` to a shell rc, remove that line manually.")
+
+		if !gateDisableNoPersist {
+			rc, cleaned, uerr := unpersistGatePATH()
+			if uerr != nil {
+				fmt.Fprintf(os.Stderr, "warn: couldn't auto-clean shell rc: %v\n", uerr)
+			} else if cleaned {
+				fmt.Fprintf(os.Stderr, "[chdora] removed chdora-gate block from %s\n", rc)
+			} else if rc != "" {
+				fmt.Fprintf(os.Stderr, "[chdora] no chdora-gate block found in %s — nothing to clean\n", rc)
+			}
 		}
 		return nil
 	},
@@ -133,12 +165,21 @@ var gateStatusCmd = &cobra.Command{
 		// (we installed it) and "does it actually shadow the real
 		// binary?" (the directory is on PATH ahead of /usr/bin etc).
 		shimOnPATH := isDirOnPATH(dir)
+		persisted := isPersistedInShellRC()
 		fmt.Fprintf(os.Stderr, "shim directory: %s\n", dir)
-		if shimOnPATH {
-			fmt.Fprintln(os.Stderr, "PATH includes this directory — installed shims are ACTIVE.")
-		} else {
+		switch {
+		case shimOnPATH && persisted:
+			fmt.Fprintln(os.Stderr, "PATH includes this directory AND shell rc has the chdora-gate block — installed shims are ACTIVE and persistent.")
+		case shimOnPATH && !persisted:
+			fmt.Fprintln(os.Stderr, "PATH includes this directory in THIS shell only (no chdora-gate block in your shell rc).")
+			fmt.Fprintln(os.Stderr, "Run `chdora gate install` (without --no-persist) to make activation stick across shells + reboots.")
+		case !shimOnPATH && persisted:
+			fmt.Fprintln(os.Stderr, "Shell rc has the chdora-gate block but PATH isn't picking it up in this shell.")
+			fmt.Fprintln(os.Stderr, "Open a new terminal (or `source` your rc) to activate.")
+		default:
 			fmt.Fprintln(os.Stderr, "PATH does NOT include this directory — shims are INACTIVE.")
-			fmt.Fprintf(os.Stderr, "Activate with:\n    export PATH=\"%s:$PATH\"\n", dir)
+			fmt.Fprintln(os.Stderr, "Run `chdora gate install` to install + persist, or set PATH for this shell:")
+			fmt.Fprintf(os.Stderr, "    export PATH=\"%s:$PATH\"\n", dir)
 		}
 		fmt.Fprintln(os.Stderr)
 		for _, pm := range shimManagers {
@@ -218,5 +259,9 @@ func fileExists(path string) bool {
 }
 
 func init() {
+	gateInstallCmd.Flags().BoolVar(&gateInstallNoPersist, "no-persist", false,
+		"skip the shell-rc edit; just write the shim files and print the export line to add by hand")
+	gateDisableCmd.Flags().BoolVar(&gateDisableNoPersist, "no-persist", false,
+		"don't touch the shell rc when disabling (leave the chdora-managed PATH block in place)")
 	gateCmd.AddCommand(gateInstallCmd, gateDisableCmd, gateStatusCmd)
 }

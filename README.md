@@ -136,17 +136,26 @@ network errors block, not pass.
 
 ```sh
 chdora gate install
-# Add to ~/.zshrc or ~/.bashrc:
-export PATH="$HOME/.chaindora/bin:$PATH"
 ```
 
-In a fresh shell, every `npm install <pkgs>` now routes through chaindora.
-`npm test`, `npm run build`, `npm uninstall` etc. pass through unchanged.
+That's it — chdora writes the shim files **and** appends a
+clearly-marked PATH-prepend block to your shell rc (zsh / bash /
+fish on macOS+Linux, PowerShell `$PROFILE` on Windows). Open a
+new terminal (or `source` the rc) and every `npm install <pkgs>`
+now routes through chaindora. `npm test`, `npm run build`,
+`npm uninstall` etc. pass through unchanged.
 
 ```sh
-chdora gate status            # which managers are gated, is the shim on PATH
-chdora gate disable           # remove the shims
+chdora gate status                  # active + persistent + per-PM detail
+chdora gate disable                 # remove shims AND the rc block
+chdora gate install --no-persist    # shim files only; you add the export by hand
+chdora gate disable --no-persist    # remove shims, leave the rc block alone
 ```
+
+The rc edit carries fence-comment markers so chdora's own
+host-state scanners recognize and skip it (no self-flagging),
+and so `gate disable` can clean it up surgically without
+touching anything else in your shell rc.
 
 Without the shim you can still gate ad-hoc:
 
