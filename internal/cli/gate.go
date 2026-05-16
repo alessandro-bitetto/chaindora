@@ -219,7 +219,7 @@ func renderGateCheck(w *os.File, pc gate.PackageCheck, explain bool) {
 }
 
 func init() {
-	gateCheckCmd.Flags().StringVar(&gateCheckEcosystem, "ecosystem", "npm", "ecosystem of the package: npm|pypi|go|rubygems|crates|maven|nuget|packagist")
+	gateCheckCmd.Flags().StringVar(&gateCheckEcosystem, "ecosystem", "npm", "ecosystem of the package: npm|pypi|go|rubygems|crates|maven")
 	gateCheckCmd.Flags().DurationVar(&gateCheckCooldown, "cooldown", 0, "minimum age a version must have before install is allowed (default: 72h, overridable in chaindora.yml)")
 	gateCheckCmd.Flags().BoolVar(&gateCheckLenient, "lenient", false, "treat Warn verdicts as approve (still block Block)")
 	gateCheckCmd.Flags().BoolVar(&gateCheckOffline, "allow-offline", false, "treat Unknown verdicts (registry unreachable) as approve — disables fail-closed posture")

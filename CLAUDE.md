@@ -52,6 +52,8 @@ Each detector emits `findings.Finding`. Each detector can be skipped via
 | `incident-pack` | `internal/detectors/incident/` | Matches inventory against YAMLs in `incidents/` (package versions + file artifacts) |
 | `hostforensics` | `internal/detectors/hostforensics/` | Tokens, shell rc, PowerShell, ssh-diff, persistence, extensions, global packages |
 | `heuristic` | `internal/detectors/heuristic/` | Unpinned CI refs, curl-pipe in CI scripts, install hooks, typosquat, dep-confusion, fresh-popular |
+| `trustdrift` | `internal/detectors/trustdrift/` | `.npmrc` / `pip.conf` / `git insteadOf` / `/etc/hosts` / CA store baseline + drift |
+| `integrity` | `internal/detectors/integrity/` | `go.sum` ↔ sum.golang.org, `Cargo.lock` checksum verification |
 
 Findings get tagged with one `Category`:
 `supply-chain-attack` / `dependency-cve` / `host-state` / `configuration`.
@@ -60,12 +62,12 @@ time — JSON output still contains every category.
 
 ---
 
-## Gate checkers (v0.9)
+## Gate checkers
 
 Each implements `gate.Checker` and runs against every node in the
 resolved install tree. Per-package decision = worst Verdict across
 checkers. Fail-closed: errors return `Unknown`, treated as Block by
-default policy.
+default policy. Registered in `internal/cli/gate_stack.go`.
 
 | Checker | Package | Verdict rule |
 |---|---|---|
@@ -74,11 +76,17 @@ default policy.
 | `cooldown` | `internal/gate/cooldown.go` | Block if version published less than threshold ago (default 72h) |
 | `publisher-change` | `internal/gate/publisher.go` | Warn on different `_npmUser` since prior version |
 | `maintainer-trust` | `internal/gate/maintainer.go` | Warn on brand-new / low-version / dormancy-gap signals |
+| `provenance` | `internal/gate/provenance.go` | Per-ecosystem sigstore / sumdb / GPG / Trusted-Publishing attestation. Warn on regression; `--require-provenance` → Block on missing |
 | `static-pattern` | `internal/gate/static.go` | Score-based: curl-pipe-shell, eval-of-dynamic, base64-encoded URLs, obfuscated blobs. Per-pattern dedup so a library using eval in multiple files counts once |
 | `version-diff` | `internal/gate/versiondiff.go` | Scores the *delta* of static-pattern hits between requested and prior version |
+| `git-url` | `internal/gate/giturl.go` | Evaluates `user/repo`, `git+...`, `FetchContent` style deps on host-tier + ref-pin + transport scheme. 40-hex SHA on well-known host = Approve; branch refs / unknown hosts / `http://` = Block |
 
-`internal/gate/resolve_npm.go` is the `npm install --package-lock-only
---ignore-scripts` resolver that produces the tree.
+Per-ecosystem resolvers produce the install tree: `resolve_npm.go`,
+`resolve_yarn.go`, `resolve_pnpm.go`, `resolve_pip.go`, `resolve_cargo.go`,
+`resolve_bundler.go`, `resolve_mvn.go`, `resolve_gomod.go`. Each shells
+out to the real package manager with `--ignore-scripts` (or the
+equivalent) for safe transitive resolution. Probe registration lives
+in `probes.go`.
 
 ---
 
@@ -95,7 +103,11 @@ GOOS=windows GOARCH=arm64 go build -o /tmp/chdora-arm.exe ./cmd/chdora
 
 CI matrix: `ubuntu-latest`, `macos-latest`, `windows-latest` — see
 `.github/workflows/test.yml`. A second CI job dogfoods the binary
-against the repo itself with `--exclude testdata --fail-on critical,high`.
+against the repo itself with `--exclude testdata --exclude website
+--fail-on critical,high`. `website/` is excluded because the Angular
+CLI build-time deps have their own CVE surface that doesn't ship with
+the `chdora` binary; `testdata/` is excluded because it contains
+intentional malicious fixtures (Shai-Hulud workflow, etc.).
 
 Useful smoke tests during development:
 
@@ -133,22 +145,25 @@ internal/
   cli/                          top-level commands + flag wiring + rendering
     {root,scan,ci,forensics,audit}.go             detection commands
     {fix,fixhelpers,plans,saveplan,preflight}.go  remediation commands
-    {gate,gate_exec,gate_shim}.go                 prevention commands (v0.9)
+    {gate,gate_exec,gate_shim,gate_stack}.go      prevention commands (v0.9+)
+    {server,agent,watch}.go                       server / fleet (v0.13+)
     {update,upgrade}.go                           maintenance commands
     {render,scanprojects,registries_helper}.go    shared helpers
-  gate/                         install-time prevention (v0.9)
+  gate/                         install-time prevention (v0.9+)
     gate.go                     Verdict / Checker / Policy / Run
     {cooldown,osv,allowlist,publisher,maintainer,static,versiondiff}.go
-    resolve_npm.go              npm install --package-lock-only resolver
+    {provenance,giturl}.go                        v0.10 / v0.11 additions
+    probes.go                                     per-ecosystem probe registration
+    resolve_{npm,yarn,pnpm,pip,cargo,bundler,mvn,gomod}.go   resolvers
   fixplan/                      persistent fix plans (v0.8+)
     {fixplan,diskstore,sudo}.go DiskStore at ~/.chaindora/fix-plans/
   inventory/                    per-ecosystem lockfile / manifest parsers
     {npm,yarn,pnpm}.go                            npm family
-    {pip,uv,pipfile,poetry}.go                    PyPI family
+    {pip,uv,pipfile}.go                           PyPI family
+    {rubygems,cargo,maven,gomod}.go               Ruby / Rust / Java / Go
     {ghactions,gitlabci,bitbucket,circleci,azure}.go CI systems
-    {docker,gomod}.go                             Docker + Go modules
-    inventory.go                Scan dispatcher + Source/Package types
-    purl.go                     PURL builder per ecosystem
+    docker.go                                     Docker / OCI
+    {inventory,skip,purl}.go                      dispatcher + skip rules + PURL builder
   osv/                          {client,cvss,semver}.go
   incidents/                    YAML loader + ResolveDir
   findings/                     Finding type + emitters + fix runner
@@ -162,11 +177,19 @@ internal/
     heuristic/                  unpinned / cishell / installscripts /
                                 typosquat / depconfusion / freshpopular /
                                 poplist (top-N curated lists + Levenshtein)
-  registries/                   npm + PyPI HTTP probes (with disk cache)
+    trustdrift/                 v0.11+ — .npmrc / pip.conf / git insteadOf /
+                                /etc/hosts / CA store baseline + drift detection
+    integrity/                  v0.13.1+ — go.sum ↔ sumdb and Cargo.lock
+                                checksum verification
+  server/                       v0.13+ — JSON-backed fleet store + HTTP API
+    {server,store,dashboard}.go HTTP routes + persistence + HTML dashboard
+  registries/                   npm + PyPI + RubyGems + crates + Maven + Go
+                                HTTP probes with disk cache
   progress/                     stderr status-line for slow walks
 incidents/                      curated incident YAMLs (community-maintained)
 testdata/                       fixtures for parser tests + integration demos
 docs/                           contributor docs
+website/                        chaindora.dev — Angular 18 static site (v0.13.2+)
 .github/workflows/              test.yml (matrix + dogfood) + release.yml
 ```
 

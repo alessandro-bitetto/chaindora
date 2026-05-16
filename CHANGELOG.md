@@ -10,6 +10,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md).
 
+## [0.13.3] — 2026-05-16
+
+Patch release: unbreaks the self-scan CI job and fixes doc / code
+drift surfaced by a v0.13.2 alignment audit. No behavior changes.
+
+### Fixed — CI dogfood job
+
+`.github/workflows/test.yml` excludes `website/` in addition to
+`testdata/`. The v0.13.2 commit added the Angular static site without
+updating the exclude list, so the dogfood `chdora ci . --exclude
+testdata --fail-on critical,high` step started flagging 26 OSV-IOC
+findings in the Angular CLI's transitive build-time tooling (tar
+path-traversal, picomatch ReDoS, esbuild dev-server, etc.). Those
+CVEs are real, but they're in a separately-built static site's dev
+toolchain and don't ship with the `chdora` binary.
+
+### Fixed — README ↔ code drift
+
+- Install one-liners (`curl -L .../chaindora_0.9.2_*`) and the
+  `chdora upgrade --version v0.9.0` example bumped to the current
+  release. The README had been four minor versions stale.
+- "Mode 1: Prevention" copy said "**seven** independent checkers";
+  actual checker count is **nine** (added `provenance` and `git-url`
+  in v0.10 / v0.11). Updated the prose and added the two missing
+  rows to the gate-checker table.
+- "Supported ecosystems" table marked PyPI gate as "planned" and
+  omitted RubyGems / crates / Maven / Go gate columns — all five
+  shipped in v0.11 / v0.13. Now reflects the actual coverage.
+- The v0.13 roadmap line claiming "*Scheduled scans + webhook ingest
+  + TLS land in v0.13.x*" rewritten to truthful "not yet implemented"
+  wording — none of those routes exist in `internal/server/server.go`.
+
+### Fixed — CLAUDE.md ↔ code drift
+
+- "Detection layers" table now lists all six detectors
+  (`trustdrift` and `integrity` were missing).
+- "Gate checkers" table lists all nine checkers (`provenance` and
+  `git-url` were missing).
+- Repo-layout block refreshed: gate adds `provenance`, `giturl`,
+  `probes`, and all eight per-ecosystem resolvers; CLI adds
+  `server` / `agent` / `watch` / `gate_stack`; inventory adds
+  `rubygems` / `cargo` / `maven`; detectors adds `trustdrift` and
+  `integrity`; new `server/` and `website/` top-level entries.
+
+### Fixed — website ↔ code drift
+
+- "Detection only" tier removed Jenkins / Drone from the inventory
+  list (no parser exists for either). Added a small note that
+  `chdora ci` autodetects those CIs from environment variables and
+  emits SARIF / annotations there even without a dedicated
+  pipeline-file parser.
+
+### Fixed — phantom flag value
+
+`chdora gate check --ecosystem` flag help advertised
+`npm|pypi|go|rubygems|crates|maven|nuget|packagist`. Removed `nuget`
+and `packagist` — neither has a probe, resolver, or gate
+registration anywhere in the codebase. Both are still on the v0.14
+roadmap.
+
+### Fixed — CHANGELOG self-reference
+
+v0.13.2 entry described "the 7-checker gate stack"; the actual count
+is 9. Corrected.
+
 ## [0.13.2] — 2026-05-16
 
 Documentation pass + project website. No CLI behavior changes; binary
@@ -46,7 +111,7 @@ settings documented in `website/README.md`.
 
 - **`docs/architecture.md`** rewritten to document the two-mode model
   (prevention via `chdora gate`, detection via `scan` / `audit` /
-  `forensics` / `ci`), the 7-checker gate stack, the 9 ecosystems,
+  `forensics` / `ci`), the 9-checker gate stack, the 9 ecosystems,
   the universal `findings.Finding` carrier, fail-closed design
   invariants, and the 7-step procedure for adding a new ecosystem.
 - **`docs/incident-pack.md`** rewritten around the

@@ -21,7 +21,7 @@ matches what you need — or run both side by side.
 
 | Mode | When it runs | What it does | Command |
 |---|---|---|---|
-| **Prevention** | Before `npm install` writes bytes | Resolves the full transitive install tree, runs 7 independent checks against every node, refuses the install if any node fails | `chdora gate ...` |
+| **Prevention** | Before `npm install` writes bytes | Resolves the full transitive install tree, runs 9 independent checks against every node, refuses the install if any node fails | `chdora gate ...` |
 | **Detection** | After packages are already on disk | Scans lockfiles, host state, and CI manifests for indicators of a compromise that already happened | `chdora scan` / `audit` / `forensics` / `ci` |
 
 Both modes share the same incident pack, the same OSV.dev integration, and
@@ -61,39 +61,39 @@ auto-rollback applies retroactively.
 ### Pre-built binary (recommended)
 
 Pick the matching archive from the [Releases page](https://github.com/alessandro-bitetto/chaindora/releases/latest),
-extract, place `chdora` on `$PATH`. Replace `0.9.2` with the version you
+extract, place `chdora` on `$PATH`. Replace `0.13.2` with the version you
 want; `latest` works as a redirect for the most recent tag.
 
 ```sh
 # macOS, Apple Silicon
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_darwin_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # macOS, Intel
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_darwin_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_darwin_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, x86_64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_linux_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_linux_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, ARM64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_linux_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_linux_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Windows, x86_64 (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_windows_amd64.zip" -OutFile chdora.zip
+Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_windows_amd64.zip" -OutFile chdora.zip
 Expand-Archive chdora.zip -DestinationPath .
 Move-Item chdora.exe "$env:USERPROFILE\bin\chdora.exe"   # ensure this dir is on PATH
 
 chdora --version
 ```
 
-Each release publishes a `chaindora_0.9.2_checksums.txt`. Verify before running:
+Each release publishes a `chaindora_0.13.2_checksums.txt`. Verify before running:
 
 ```sh
-curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.9.2_checksums.txt
-shasum -a 256 -c chaindora_0.9.2_checksums.txt
+curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_checksums.txt
+shasum -a 256 -c chaindora_0.13.2_checksums.txt
 ```
 
 ### From source
@@ -110,7 +110,7 @@ Requires Go 1.22+.
 ```sh
 chdora upgrade               # latest tagged release
 chdora upgrade --check       # report only, don't download
-chdora upgrade --version v0.9.0
+chdora upgrade --version v0.13.2
 ```
 
 `upgrade` refuses on Homebrew-managed binaries — use `brew upgrade` there.
@@ -121,7 +121,7 @@ chdora upgrade --version v0.9.0
 
 The gate sits between you and the package registry. Every `npm install`
 resolves the full transitive tree, runs every node through a stack of
-seven independent checkers, and refuses the install if any node fails the
+nine independent checkers, and refuses the install if any node fails the
 configured policy. Fail-closed by design: network errors block, not pass.
 
 ### Activating the gate
@@ -158,8 +158,10 @@ For every `(ecosystem, name, version)` in the resolved tree:
 | `cooldown` | Block if version published less than 72h ago (configurable) |
 | `publisher-change` | Warn if `_npmUser` differs from the prior version's; first-publish-ever also warns |
 | `maintainer-trust` | Warn on soft signals: <30d since first publish, <3 total versions, >6mo dormancy gap |
+| `provenance` | Warn on regression — a package that previously had sigstore / sumdb / GPG attestation and stopped. `--require-provenance` upgrades to Block |
 | `static-pattern` | Downloads the tarball, scans for curl-pipe-shell in scripts, `eval(<dynamic>)`, base64-encoded URLs, 256+ char high-entropy blobs. Score ≥3 → Block, ≥1 → Warn |
 | `version-diff` | Scores the *delta* in static-pattern hits between requested and prior version. Catches "previously clean, now malicious" without false-positiving on libraries that always used eval |
+| `git-url` | For `npm install user/repo`, `pip install git+...`, CMake `FetchContent` etc.: host-tier + ref-pin + transport-scheme evaluation. 40-hex SHA on a well-known host = Approve; branch refs / unknown hosts / `http://` = Block under Strict |
 
 Per-package decision = worst Verdict across all checkers. Whole-install
 decision = worst per-package decision.
@@ -397,7 +399,7 @@ A daily cron (`0 9 * * * chdora update`) is the recommended setup.
 ```sh
 chdora upgrade                 # latest tagged release
 chdora upgrade --check         # what's available
-chdora upgrade --version v0.9.0
+chdora upgrade --version v0.13.2
 ```
 
 Verifies the SHA-256 against the published checksums file before swap.
@@ -411,8 +413,11 @@ overwrite running executables).
 | Ecosystem | Manifests recognized | OSV.dev | Gate |
 |---|---|:---:|:---:|
 | npm | `package-lock.json` (v1/v2/v3), `yarn.lock`, `pnpm-lock.yaml` | yes | **yes** |
-| PyPI | `requirements.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock` | yes | — (planned) |
-| Go modules | `go.sum` | yes | — |
+| PyPI | `requirements.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock` | yes | **yes** |
+| RubyGems | `Gemfile.lock` | yes | **yes** |
+| crates.io | `Cargo.lock` | yes | **yes** |
+| Maven Central | `pom.xml` (incl. `<dependencyManagement>`) | yes | **yes** |
+| Go modules | `go.sum` | yes | **yes** |
 | Docker | `Dockerfile`, `docker-compose.yml`, CI YAML `image:` | yes (OCI) | — |
 | GitHub Actions | `.github/workflows/*.yml` | — | — |
 | Gitea Actions | `.gitea/workflows/*.yml` | — | — |
@@ -420,7 +425,6 @@ overwrite running executables).
 | Bitbucket Pipelines | `bitbucket-pipelines.yml` (`pipe:`) | — | — |
 | CircleCI Orbs | `.circleci/config.yml` (`orbs:`) | — | — |
 | Azure Pipelines | `azure-pipelines.yml` (`task:`) | — | — |
-| Drone / Woodpecker | `.drone.yml` / `.woodpecker.yml` | via image | — |
 
 Findings normalize to [Package URLs (PURLs)](https://github.com/package-url/purl-spec).
 
@@ -467,7 +471,9 @@ surface gap identified there.
   single-file JSON store, serves a fleet dashboard at `/` and a
   JSON API at `/api/v1/*`. Per-agent bearer tokens; optional
   enrollment secret. `chdora watch` auto-pushes when enrolled.
-  Scheduled scans + webhook ingest + TLS land in v0.13.x.
+  TLS termination is bring-your-own (caddy / nginx / Cloudflare Tunnel).
+  Webhook ingest, scheduled fleet scans, SAML/OIDC dashboard auth and a
+  SQL backend remain on the v0.13.x backlog — not yet implemented.
 - **v0.14** — IaC supply chain: Terraform / OpenTofu modules +
   providers, Helm charts (deps + hooks), Ansible Galaxy,
   Composer/Packagist (PHP), NuGet (.NET).

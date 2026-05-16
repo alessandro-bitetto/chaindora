@@ -218,9 +218,14 @@ chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
     </div>
     <div class="coverage-eco-grid">
       <div class="eco">GitHub / Gitea Actions</div>
-      <div class="eco">GitLab CI · Bitbucket · CircleCI · Azure · Drone · Jenkins</div>
+      <div class="eco">GitLab CI · Bitbucket · CircleCI · Azure</div>
       <div class="eco">Browser / VS Code extensions</div>
     </div>
+    <p class="coverage-note">
+      <code>chdora ci</code> also auto-detects Jenkins, Drone and Woodpecker
+      from environment variables — pipelines run there benefit from the same
+      gating and SARIF output, even without a dedicated pipeline-file parser.
+    </p>
   </div>
 
   <div class="coverage-tier">
