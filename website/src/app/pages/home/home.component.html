@@ -1,0 +1,319 @@
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-inner">
+      <img src="assets/logo.svg" alt="chaindora" class="hero-logo" />
+      <h1 class="brand-display">
+        Supply-chain attacks. <br />
+        <span class="accent">Prevented and detected.</span>
+      </h1>
+      <p class="lede">
+        chaindora is an open-source CLI and HTTP server that sits between you and
+        the package registry, blocks compromised installs at the gate, and continuously
+        watches what's already on disk. One static Go binary. Apache-2.0. No telemetry.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href="#install">Install</a>
+        <a class="btn btn-secondary" href="https://github.com/alessandro-bitetto/chaindora" target="_blank" rel="noopener">View on GitHub →</a>
+      </div>
+      <div class="hero-stats muted">
+        <span><strong>{{ version }}</strong> latest</span>
+        <span>·</span>
+        <span><strong>Apache-2.0</strong></span>
+        <span>·</span>
+        <span><strong>Single static binary</strong></span>
+        <span>·</span>
+        <span><strong>No telemetry</strong></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Two modes -->
+<section class="container modes-section">
+  <h2 class="brand-display modes-title">
+    Before install. <span class="accent">After install.</span>
+  </h2>
+  <p class="muted section-lede">
+    chaindora is a single binary that operates at two moments in the supply chain.
+    The two modes share findings, fix plans, and the incident pack — use either
+    on its own, or both together.
+  </p>
+
+  <div class="modes">
+    <article class="mode-card" id="prevention">
+      <div class="mode-stamp">Before install</div>
+      <h3>chdora gate</h3>
+      <p>
+        Sits between the package manager and the registry. Resolves the full
+        transitive install tree, runs every node through independent checkers
+        for malicious flags, cooldown, publisher / maintainer churn, provenance,
+        and obfuscation patterns — and refuses the install if any node fails.
+      </p>
+<pre><code>$ npm install some-package
+chaindora gate: <span class="cd-blocked">BLOCKED</span>
+  └─ cooldown:    published 4h ago (threshold 72h)
+  └─ static:      obfuscated payload in postinstall
+  └─ publisher:   different _npmUser since prior version</code></pre>
+      <p class="muted small">
+        Fail-closed: any check that can't run treats the install as suspect.
+      </p>
+    </article>
+
+    <article class="mode-card mode-card-detection" id="detection">
+      <div class="mode-stamp">After install</div>
+      <h3>chdora scan · audit · forensics · ci</h3>
+      <p>
+        Finds compromise already on disk. Four entry points that differ only in
+        what populates the inventory: one project tree, the whole host, every
+        project under <code>$HOME</code>, or a CI gate tuned for sticky PR
+        comments and baseline-aware fail-on.
+      </p>
+<pre><code>$ chdora scan .
+<span class="cd-critical">[CRITICAL]</span> [osv-ioc] request&#64;2.88.2
+  └─ GHSA-p8p7-x288-28g6  prototype pollution
+<span class="cd-critical">[CRITICAL]</span> [incident-pack] shai-hulud worm artifact
+  └─ .github/workflows/shai-hulud-workflow.yml</code></pre>
+      <p class="muted small">
+        Same finding format, same fix-plan runner, same outputs everywhere
+        (text · JSON · SARIF · PR-comment).
+      </p>
+    </article>
+  </div>
+</section>
+
+<!-- What it catches -->
+<section class="container catches-section">
+  <h2 class="brand-display">What chaindora catches</h2>
+  <p class="muted section-lede">
+    Prevention and detection cover overlapping but distinct attack surfaces.
+    Some classes can only be stopped at install time. Others only become
+    visible afterwards. A few — the most dangerous — get caught by either.
+  </p>
+
+  <div class="catches-shared">
+    <div class="catches-shared-label">Both modes</div>
+    <ul>
+      <li>Packages in the OpenSSF Malicious Packages feed (<code>MAL-*</code>)</li>
+      <li>Known CVEs on dependencies (<code>GHSA-*</code> / <code>CVE-*</code> via OSV.dev)</li>
+    </ul>
+  </div>
+
+  <div class="catches-grid">
+    <article class="catches-col">
+      <header class="catches-head">
+        <div class="catches-stamp">Before install only</div>
+        <div class="catches-sub"><code>chdora gate</code></div>
+      </header>
+      <ul>
+        <li>Versions published less than 72 h ago — <strong>cooldown</strong></li>
+        <li>Account takeover — publisher changed since the last release</li>
+        <li>Sleeper patterns — obfuscation, install-script payloads, <code>eval</code>-of-dynamic, base64-encoded URLs</li>
+        <li>Suspicious change between version bumps — new <code>postinstall</code>, new <code>child_process</code> import</li>
+        <li>Brand-new packages, single-version maintainers, dormancy-gap accounts</li>
+        <li>Unsigned packages — missing sigstore / sumdb / GPG attestation</li>
+        <li>Git-URL deps with mutable refs (no registry, no signing)</li>
+      </ul>
+    </article>
+
+    <article class="catches-col catches-col-detection">
+      <header class="catches-head">
+        <div class="catches-stamp">After install only</div>
+        <div class="catches-sub"><code>chdora scan / audit / forensics / ci</code></div>
+      </header>
+      <ul>
+        <li>Compromised CI components — unpinned actions, curl-pipe-shell in scripts</li>
+        <li>Host-state compromise — leaked tokens, shell rc tampering, worm artifacts on disk</li>
+        <li>Trust-anchor drift — <code>.npmrc</code> / <code>pip.conf</code> / <code>git insteadOf</code> / <code>/etc/hosts</code> / CA store</li>
+        <li>Post-compromise persistence — cron, launchd, systemd, Scheduled Tasks</li>
+        <li>Browser / VS Code / IDE extension takeovers</li>
+        <li>Lockfile MITM — <code>go.sum</code> vs sumdb mismatch</li>
+      </ul>
+    </article>
+  </div>
+
+  <p class="muted small catches-foot">
+    Sleeper attacks that masquerade as legitimate code for years (xz-utils class)
+    only become visible after community detection lands — the
+    <a href="#fleet">continuous-detection layer</a> catches them retroactively, on
+    the machines and projects that already have them on disk.
+  </p>
+</section>
+
+<!-- Install -->
+<section class="container install-section" id="install">
+  <h2 class="brand-display">Install in 60 seconds</h2>
+  <p class="muted section-lede">
+    Three steps. No daemons, no background agents, no telemetry to opt out of.
+  </p>
+
+  <div class="install-steps">
+    <article class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h3>Get the binary</h3>
+        <p>Pre-built archives for macOS / Linux / Windows on every release.</p>
+<pre><code>curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_{{ version }}_$(uname -s | tr A-Z a-z)_amd64.tar.gz | tar xz
+sudo mv chdora /usr/local/bin/</code></pre>
+        <p class="muted small">
+          From source instead: <code>go install github.com/alessandro-bitetto/chaindora/cmd/chdora&#64;latest</code>
+        </p>
+      </div>
+    </article>
+
+    <article class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h3>Activate prevention</h3>
+        <p>Drops a shim ahead of npm, pnpm, yarn, pip, cargo, go, mvn, gem, bundle on your PATH.</p>
+<pre><code>chdora gate install
+export PATH="$HOME/.chaindora/bin:$PATH"  # add to your shell rc</code></pre>
+        <p class="muted small">
+          Every package-manager install resolves through chaindora's checkers from here on.
+        </p>
+      </div>
+    </article>
+
+    <article class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h3>Run detection</h3>
+        <p>One project, the whole host, or a CI gate — pick the surface you care about.</p>
+<pre><code>chdora scan .                                  # one project
+chdora audit --whole-machine                   # everything under $HOME + host state
+chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- Ecosystems -->
+<section class="container coverage-section">
+  <h2 class="brand-display">Ecosystem coverage</h2>
+  <p class="muted section-lede">
+    Coverage depth depends on what each registry's public API actually exposes.
+    chaindora doesn't fake signals it can't verify.
+  </p>
+
+  <div class="coverage-tier coverage-tier-full">
+    <div class="coverage-tier-head">
+      <div class="coverage-stamp">Full coverage</div>
+      <div class="coverage-sub">detection · install-time gate · package-manager wrapper</div>
+    </div>
+    <div class="coverage-eco-grid">
+      <div class="eco">npm</div>
+      <div class="eco">yarn / pnpm</div>
+      <div class="eco">PyPI</div>
+      <div class="eco">RubyGems</div>
+      <div class="eco">crates.io</div>
+      <div class="eco">Maven Central <span class="eco-note">publisher via POM</span></div>
+      <div class="eco">Go modules <span class="eco-note">sumdb provenance</span></div>
+    </div>
+  </div>
+
+  <div class="coverage-tier">
+    <div class="coverage-tier-head">
+      <div class="coverage-stamp coverage-stamp-dark">Detection only</div>
+      <div class="coverage-sub">no registry boundary to gate at</div>
+    </div>
+    <div class="coverage-eco-grid">
+      <div class="eco">GitHub / Gitea Actions</div>
+      <div class="eco">GitLab CI · Bitbucket · CircleCI · Azure · Drone · Jenkins</div>
+      <div class="eco">Browser / VS Code extensions</div>
+    </div>
+  </div>
+
+  <div class="coverage-tier">
+    <div class="coverage-tier-head">
+      <div class="coverage-stamp coverage-stamp-muted">Partial</div>
+      <div class="coverage-sub">registry API limits what's checkable</div>
+    </div>
+    <div class="coverage-eco-grid">
+      <div class="eco">Docker / OCI</div>
+      <div class="eco">OS packages <span class="eco-note">brew / apt / dnf via <code>--deep</code></span></div>
+    </div>
+  </div>
+
+  <p class="muted small">
+    chaindora's
+    <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/docs/threat-model.md" target="_blank" rel="noopener">threat model</a>
+    documents every coverage gap and the registry-API reason behind it.
+  </p>
+</section>
+
+<!-- Fleet mode -->
+<section class="container fleet-section" id="fleet">
+  <div class="fleet-band">
+    <div class="fleet-stamp">Fleet mode · v0.13+</div>
+    <h2 class="brand-display fleet-h">One dashboard. <span class="accent">Every machine.</span></h2>
+    <p class="fleet-lede">
+      When chaindora runs across multiple developer machines and CI nodes,
+      <code>chdora server</code> aggregates their findings into a single
+      JSON-backed store with a built-in dashboard.
+    </p>
+
+    <div class="fleet-grid">
+      <ul class="fleet-features">
+        <li><strong>One binary</strong> serves both the API (<code>/api/v1/*</code>) and the dashboard at <code>/</code></li>
+        <li><strong>No external DB</strong> — JSON-backed state on a single file</li>
+        <li><strong>Per-agent bearer tokens</strong> stored as SHA-256 at rest; raw shown once on enrollment</li>
+        <li><strong>Bring-your-own TLS</strong> — caddy / nginx / Cloudflare Tunnel</li>
+      </ul>
+<pre class="fleet-code"><code><span class="cd-comment"># Server box</span>
+chdora server start --addr :8080 \
+  --enrollment-secret RANDOM
+
+<span class="cd-comment"># Each agent</span>
+chdora agent enroll \
+  --server https://chaindora.corp:8080 \
+  --enrollment-secret RANDOM
+chdora watch --interval 1h</code></pre>
+    </div>
+  </div>
+  <p class="muted small">
+    Suitable for tens-to-hundreds of agents on the JSON-backed store;
+    a SQL backend is on the roadmap for larger setups.
+  </p>
+</section>
+
+<!-- Roadmap -->
+<section class="container roadmap-section">
+  <h2 class="brand-display">Roadmap</h2>
+  <p class="muted section-lede">
+    Driven by the
+    <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/docs/threat-model.md" target="_blank" rel="noopener">threat model</a>,
+    not by an ecosystem checklist. Each milestone targets a specific attack-surface gap.
+  </p>
+
+  <ol class="roadmap-timeline">
+    @for (m of roadmap; track m.tag) {
+      <li class="rm-item" [class.rm-shipped]="m.state === 'shipped'" [class.rm-planned]="m.state === 'planned'">
+        <div class="rm-marker">
+          <div class="rm-dot"></div>
+        </div>
+        <div class="rm-content">
+          <div class="rm-meta">
+            <span class="rm-version">{{ m.tag }}</span>
+            <span class="rm-state" [class.rm-state-shipped]="m.state === 'shipped'" [class.rm-state-planned]="m.state === 'planned'">{{ m.state }}</span>
+          </div>
+          <p class="rm-what">{{ m.what }}</p>
+        </div>
+      </li>
+    }
+  </ol>
+</section>
+
+<!-- Closing CTA -->
+<section class="container closing">
+  <div class="closing-card">
+    <h2 class="closing-h brand-display">Ready when you are.</h2>
+    <p>
+      One binary. Drop it on a developer machine, into a CI pipeline, or onto a
+      shared server box. Same code path everywhere.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/alessandro-bitetto/chaindora/releases/latest" target="_blank" rel="noopener">Download {{ version }}</a>
+      <a class="btn btn-secondary" href="https://github.com/alessandro-bitetto/chaindora" target="_blank" rel="noopener">Star on GitHub</a>
+    </div>
+  </div>
+</section>

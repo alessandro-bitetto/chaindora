@@ -16,8 +16,8 @@ This README is the on-ramp.
 
 ## What it does
 
-chaindora has **two modes**. Pick the one that matches what you actually
-need — most users want both.
+chaindora has **two modes** that are complementary. Pick the one that
+matches what you need — or run both side by side.
 
 | Mode | When it runs | What it does | Command |
 |---|---|---|---|
@@ -47,11 +47,12 @@ malware, and the inventory you already installed before chaindora existed.
 | Post-compromise persistence (cron, launchd, systemd, Scheduled Tasks) | yes | — |
 | Compromised browser / VS Code extensions | yes | — |
 
-Honest scope: chaindora prevents roughly 95% of real-world npm supply-chain
-attacks at install time. The 5% it misses are sophisticated sleepers like
-xz-utils that masquerade as legitimate code for years — for those the
-detection-mode + auto-rollback story applies retroactively when community
-detection lands.
+Scope: prevention targets what is detectable at install time — known-malicious
+packages, suspicious publisher/maintainer changes, freshly published versions,
+install-script payloads, obfuscated or eval-heavy bundles. Sleeper attacks
+that masquerade as legitimate code for years (xz-utils class) only become
+visible after community detection lands; for those the detection mode plus
+auto-rollback applies retroactively.
 
 ---
 
@@ -461,23 +462,23 @@ surface gap identified there.
   transport scheme. Well-known host + 40-hex SHA = Approve;
   branch refs / unknown hosts / http:// = Block under strict
   policy.
-- **v0.12** — IaC supply chain: Terraform / OpenTofu modules +
-  providers, Helm charts (deps + hooks), Ansible Galaxy,
-  Composer/Packagist (PHP), NuGet (.NET).
 - **v0.13** ✅ shipped — Server mode: `chdora server start` accepts
   findings from many `chdora agent` clients, persists them to a
   single-file JSON store, serves a fleet dashboard at `/` and a
   JSON API at `/api/v1/*`. Per-agent bearer tokens; optional
   enrollment secret. `chdora watch` auto-pushes when enrolled.
   Scheduled scans + webhook ingest + TLS land in v0.13.x.
-- **v0.14** — AI / ML supply chain: HuggingFace pickle scanner,
+- **v0.14** — IaC supply chain: Terraform / OpenTofu modules +
+  providers, Helm charts (deps + hooks), Ansible Galaxy,
+  Composer/Packagist (PHP), NuGet (.NET).
+- **v0.15** — AI / ML supply chain: HuggingFace pickle scanner,
   PyTorch / TF / Keras model file scanner, MCP server / Claude
   Code skill auditor, Gradle (separate parser from Maven).
-- **v0.15** — Emerging surfaces: `bun.lockb` binary lockfile, Deno
+- **v0.16** — Emerging surfaces: `bun.lockb` binary lockfile, Deno
   URL-import map evaluation, devcontainer feature scanner,
   slopsquatting heuristic (LLM-hallucinated typosquats), Vim /
   Neovim / JetBrains plugin-manager inventory.
-- **v0.16+** — Long tail (CRAN, opam, Hackage, LuaRocks, Julia,
+- **v0.17+** — Long tail (CRAN, opam, Hackage, LuaRocks, Julia,
   PlatformIO, game-engine asset stores) — community-driven.
 - **v1.0** — Reproducible-build verification: for sigstore-attested
   packages, byte-compare the published tarball against what builds

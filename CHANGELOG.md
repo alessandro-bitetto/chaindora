@@ -10,6 +10,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md).
 
+## [0.13.2] — 2026-05-16
+
+Documentation pass + project website. No CLI behavior changes; binary
+identical to v0.13.1 minus the version stamp.
+
+### Added — `website/`
+
+Angular 18 standalone-component landing page for `chaindora.dev`. Built
+to spec from the official brand guide (`logo/PDF Guideline.pdf`):
+- Three-color palette only — `#000000` / `#DA2F2F` / `#FFFFFF`
+- Permanent Marker 400 (Google Fonts) for the wordmark and display
+  headings; system sans for body copy
+- Logo asset (ninja + CHAINDORA wordmark) used directly from
+  `logo/SVG Vector Files/Transparent Logo.svg`
+
+Sections, top-to-bottom:
+- Hero — wordmark logo, Permanent Marker headline, install / GitHub CTAs
+- "Before install. After install." mode cards with sample terminal
+  output (replaces the old bullet-list inventory)
+- "What chaindora catches" — grouped by Both modes / Before only /
+  After only (replaces the 15-row yes/no matrix)
+- "Install in 60 seconds" — three numbered step cards (replaces the
+  flat h3+code dump)
+- Ecosystem coverage — three tier cards (Full / Detection only /
+  Partial) replacing the 4-column table
+- Fleet mode band — feature list + dark code block
+- Roadmap timeline — vertical timeline with shipped / planned states
+- Closing CTA — black card with red and outline buttons
+
+Builds to a static bundle. Deploy command and per-host SPA-fallback
+settings documented in `website/README.md`.
+
+### Changed — documentation rewrites
+
+- **`docs/architecture.md`** rewritten to document the two-mode model
+  (prevention via `chdora gate`, detection via `scan` / `audit` /
+  `forensics` / `ci`), the 7-checker gate stack, the 9 ecosystems,
+  the universal `findings.Finding` carrier, fail-closed design
+  invariants, and the 7-step procedure for adding a new ecosystem.
+- **`docs/incident-pack.md`** rewritten around the
+  post-OSV-federation contract — what the curated YAML pack covers
+  that the OpenSSF Malicious Packages feed cannot (OS-level attacks,
+  worm file artifacts, maintainer sabotage, typosquat name lists,
+  extension takeovers), the entry anatomy, the quality bar, and the
+  testing flow for new entries.
+- **`docs/ci-integration.md`** expanded with per-platform recipes
+  (GitHub Actions, GitLab, CircleCI, Bitbucket, Azure Pipelines,
+  Drone/Woodpecker, Jenkins) plus the baseline + suppression +
+  sticky-PR-comment workflow and the server/fleet integration.
+
+### Changed — README copy
+
+- Roadmap section: the previously planned v0.12 (IaC supply chain)
+  moves to v0.14; AI/ML moves to v0.15; Bun/Deno to v0.16 — so the
+  shipped releases (v0.10, v0.11, v0.13) no longer sit above an
+  unshipped v0.12.
+- Scope paragraph rewritten to describe what each mode covers
+  structurally rather than quoting a percentage.
+
 ## [0.13.1] — 2026-05-16
 
 The "no asymmetry, take two" milestone — closes every remaining

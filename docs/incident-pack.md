@@ -1,217 +1,164 @@
 # Contributing to the incident pack
 
-The **incident pack** is the curated list of YAML files under
-[`incidents/`](../incidents/) describing real supply-chain attacks. It's
-the single most valuable thing in this repository — every entry catches
-attacks that OSV.dev hasn't (or can't) catalog, and it's the only thing
-that scales by community contribution rather than developer time.
+The incident pack is the curated set of YAML files under
+[`incidents/`](../incidents/) describing known supply-chain attacks.
+It's a small high-value resource — every entry catches attacks that
+chaindora's other layers (OSV, heuristics, gate checks) can't or won't
+flag on their own.
 
-This document is the contributor walkthrough. The formal schema reference
-lives at [incidents/SCHEMA.md](../incidents/SCHEMA.md).
+This document is the contributor walkthrough. The formal schema lives
+at [incidents/SCHEMA.md](../incidents/SCHEMA.md).
 
-## What's an incident-pack entry?
+## Relationship to OSV / MAL-*
 
-A YAML file describing one supply-chain incident, with three kinds of
-detection hooks:
+chaindora's OSV-IOC detector federates the
+[OpenSSF Malicious Packages feed](https://github.com/ossf/malicious-packages)
+automatically. Every `MAL-*` entry in OSV.dev is already covered —
+chaindora flags it as `[CRITICAL] [osv-ioc]` with
+`Category=supply-chain-attack`. **You don't need to add an incident
+YAML for a package that's already in OSV's malicious feed.**
 
-1. **`packages`** — specific `(ecosystem, name, version)` tuples that
-   were compromised. Match in any project's inventory triggers a
-   `[CRITICAL] [incident-pack]` finding.
-2. **`file_artifacts`** — filesystem globs whose presence anywhere in
-   a scan tree (or the `$HOME` directory under `chdora forensics`)
-   indicates compromise. Optional `content_substr` gating prevents false
-   positives on generic filenames.
-3. **`references`** — authoritative sources, displayed alongside every
-   finding so reviewers have somewhere to click.
+The incident pack exists for the categories OSV doesn't index:
 
-The shipped entries cover Shai-Hulud (Sep 2025), the qix chalk/debug
-compromise (Sep 2025), the ctx PyPI takeover (May 2022), and
-ua-parser-js (Oct 2021). They're all under 50 lines each — incidents
-benefit from focus, not exhaustive detail.
+| What OSV covers | What the incident pack covers |
+|---|---|
+| Per-package CVEs (npm/PyPI/Maven/RubyGems/crates/Go) | OS-level supply-chain attacks (xz-utils, distro-level backdoors) |
+| OpenSSF Malicious Packages (`MAL-*`) | Worms with file-artifact signatures (`shai-hulud-workflow.yml`) |
+| Per-version-pinned vulnerability data | Maintainer sabotage / protest-ware (colors, faker) |
+| | Browser / IDE extension takeovers (Great Suspender) |
+| | Typosquat name lists where the malicious code is gone but the pattern is documented |
+
+v0.7 trimmed the pack from 14 to 6 entries when chaindora gained OSV
+federation. The current 6 entries are the ones that **wouldn't be caught
+otherwise**.
+
+## Current pack (6 entries)
+
+```
+incidents/
+├── colors-faker-sabotage-2022.yaml    npm — author-sabotage protest-ware
+├── great-suspender-2021.yaml          Chrome extension — takeover by new owner
+├── pypi-typosquats-2019.yaml          PyPI — typosquat name list
+├── qix-compromise-2025.yaml           npm — chalk/debug maintainer compromise
+├── shai-hulud-2025.yaml               npm — worm with file-artifact signature
+└── xz-utils-cve-2024-3094.yaml        OS — backdoor in build-time tool
+```
+
+## Entry anatomy
+
+Every YAML carries three kinds of detection hooks:
+
+1. **`packages`** — specific `(ecosystem, name, versions)` tuples.
+   Inventory match fires `[CRITICAL] [incident-pack]`.
+2. **`file_artifacts`** — filesystem globs. Optional `content_substr`
+   gates against false positives on generic filenames. Used by
+   `chdora forensics` and `chdora audit`'s file-artifact hunt.
+3. **`references`** — authoritative source URLs. Displayed alongside
+   every finding.
+
+Optional:
+- **`safe_version`** per package — the post-incident clean release.
+  Drives the fix-plan layer to emit `npm install pkg@<safe>` /
+  `pip install --upgrade pkg==<safe>` instead of a bare uninstall.
+- **`post_compromise`** at top level — additional ManualSteps the fix
+  runner surfaces when any match fires (credential rotation, log
+  audit, etc.).
+
+The wildcard `"*"` in `versions:` matches any version — use ONLY for
+pure-malware namespaces (typosquats, dependency-confusion packages
+named to impersonate a private scope).
 
 ## When to add an entry
 
 Good candidates:
 
-- A maintainer-account compromise of an established package.
-- A typosquat / dependency-confusion campaign targeting a specific
-  organization.
-- A worm with a deterministic filesystem signature (the Shai-Hulud
-  `shai-hulud-workflow.yml` file is the prototype case).
-- An IDE / build-tool plugin compromise (Cursor, JetBrains, VS Code
-  extensions).
-- A registry-side attack (npm, PyPI, RubyGems, crates.io takedowns).
+- **A maintainer-account compromise** of an established package where
+  the malicious code has been yanked but the incident itself is worth
+  preserving. The community knowledge — "this happened to ctx because
+  X" — is the value.
+- **A file-artifact signature** of a worm or post-compromise tool
+  (`shai-hulud-workflow.yml`, `.aws/credentials.bak`, etc.).
+- **A maintainer-sabotage event** (`colors` corrupting its own
+  output, `faker` removing functionality). OSV doesn't catalog
+  these because they're not CVEs in the traditional sense.
+- **An OS-level supply-chain attack** like xz-utils — backdoor in a
+  build-time tool that ended up in OpenSSH. Doesn't fit npm/PyPI/
+  etc. OSV mappings.
+- **A typosquat campaign** documented enough to enumerate the names.
 
-Less suitable:
+Skip:
 
-- Generic vulnerabilities already in OSV.dev. The OSV-IOC detector
-  catches those automatically; no curation needed.
-- Reports without at least one authoritative source. We err on the side
-  of *not* shipping false positives, which means we need a citation.
-
-## Sourcing data
-
-Reliable sources, ranked roughly by signal:
-
-1. **The compromised project's own security advisory** (`SECURITY.md`,
-   GitHub Security Advisory, project blog).
-2. **First-party vendor research**: Socket, Aikido, StepSecurity, Phylum,
-   Snyk, JFrog, Wiz, Datadog. Each publishes detailed write-ups for
-   incidents they investigate.
-3. **CISA / national CERT alerts** when applicable.
-4. **NVD / GitHub Advisory Database** for CVE-tracked items.
-
-For version pinning specifically, the authoritative source is the
-registry's own yank/deprecation record. `npm view <pkg> versions` and
-`pip index versions <pkg>` show what's currently published; missing
-versions vs. an attacker write-up tell you what got yanked.
-
-When you only have package names but no exact versions, **list the
-package names and leave the `versions:` array empty**, with a YAML
-comment pointing to the source. Under-matching is better than
-false-positive amplification.
-
-## Adding a new entry: step by step
-
-1. **Pick an ID.** Format: `<ECOSYSTEM>-<NAME>-<DATE>` in uppercase
-   kebab-case. Example: `NPM-LEFTPAD-2024-08`. Keep it short and
-   googleable.
-
-2. **Pick a filename.** Lowercase the ID and add `.yaml`. Example:
-   `incidents/npm-leftpad-2024-08.yaml`. (Filename matching the ID makes
-   PR diffs easier to grep.)
-
-3. **Write the descriptor.**
-
-   ```yaml
-   schema: 1
-   id: NPM-LEFTPAD-2024-08
-   name: leftpad supply-chain compromise
-   severity: critical
-   date: "2024-08-19"
-   summary: |
-     One-paragraph plain-English description. What was compromised, what
-     the attacker did, what's at stake for someone who installed an
-     affected version.
-   references:
-     - "https://socket.dev/blog/leftpad-incident"
-     - "https://example.com/cisa-alert"
-
-   packages:
-     - ecosystem: npm
-       name: "left-pad"
-       versions:
-         - "1.4.1"
-         - "1.4.2"
-       safe_version: "1.4.3"   # optional; drives upgrade-command fixes
-
-   file_artifacts:
-     - glob: "**/.lefthood-data.json"
-       severity: high
-       description: Attacker-deployed exfiltration blob.
-       content_substr: "trufflehog"
-
-   post_compromise:            # optional; surfaced as ManualSteps at fix time
-     - "Rotate any npm tokens published from machines that installed 1.4.1 / 1.4.2."
-   ```
-
-   Use `versions: ["*"]` only for pure-malware namespaces (typosquats,
-   dependency-confusion packages where the entire name is
-   attacker-controlled — never for legitimate packages where only a
-   subset of versions are compromised).
-
-4. **Run the tests.** From the repo root:
-
-   ```sh
-   go test ./internal/incidents/         # YAML loader
-   go test ./internal/detectors/incident/ # matcher
-   ```
-
-   If you added a fixture demonstrating the match, also run:
-
-   ```sh
-   go build -o chdora ./cmd/chdora
-   ./chdora scan testdata/<your-fixture> --skip-osv
-   ```
-
-5. **Open a PR.** One incident per PR. In the description:
-   - Link the source(s) you used.
-   - Note any uncertainty (versions you couldn't verify, packages you
-     suspect but didn't include).
-   - Note whether the affected versions have been yanked from the
-     upstream registry.
+- Anything already covered by OSV's `MAL-*` feed (run
+  `chdora update` to refresh first, then check).
+- One-off CVEs in legitimate packages — those belong in OSV, not the
+  incident pack.
+- Speculative or unverified incidents — at least one authoritative
+  source URL is required.
 
 ## Quality bar
 
-A reviewer will check:
+A merge-ready entry must have:
 
-- **ID format** matches the convention.
-- **At least one authoritative reference** is present.
-- **Severity** is appropriate (CRITICAL for active RCE / credential
-  stealer; HIGH for confirmed-malicious but lower-impact; MEDIUM
-  rarely — most incident-pack entries are CRITICAL or HIGH).
-- **`file_artifacts`** gates with `content_substr` for filenames that
-  have legitimate uses elsewhere (e.g. `data.json`).
-- **No regex injection** via untrusted strings in `content_substr`
-  (the matcher uses substring matching, not regex, but be aware).
-- **Versions** are conservatively pinned to confirmed-malicious
-  releases — not a broad range "just in case".
+- [ ] **At least one authoritative source URL.** Vendor advisory,
+      research firm post-mortem, security blog by a recognized
+      organization. Not Twitter alone.
+- [ ] **Precise version ranges** (where applicable). `versions: ["*"]`
+      is reserved for pure-malware namespaces.
+- [ ] **A clear severity tier.** CRITICAL only for confirmed RCE /
+      credential exfil / persistence. HIGH for sabotage. MEDIUM for
+      typosquat patterns where the malicious version is gone.
+- [ ] **`safe_version` where it applies.** The post-incident clean
+      release. Drives the auto-fix path.
+- [ ] **Conservative file_artifact globs.** Use `content_substr` to
+      narrow matches on generic filenames.
 
-## Updating an existing entry
+## PR flow
 
-Same flow, but:
+1. Fork the repo, create a branch named `incident/<short-slug>`.
+2. Copy [`incidents/SCHEMA.md`](../incidents/SCHEMA.md)'s template
+   into a new YAML file in `incidents/`.
+3. Fill in every required field. Add at least one reference URL.
+4. Run `chdora scan testdata --incidents ./incidents --skip-osv` to
+   exercise the matcher locally.
+5. Add a `testdata/incidents/<slug>/` fixture if your entry has
+   file-artifact globs — a single file matching each glob is enough.
+6. Open the PR. Reviewers check: schema validity, source quality,
+   severity calibration, false-positive risk.
 
-- Bump `date:` to the latest material change.
-- Don't change the `id:` — downstream users may have already
-  acknowledged that ID in their issue trackers.
-- Document the diff (what's new, what was wrong) in the PR description.
+Once merged, the entry ships with the next chdora release and is
+fetched by `chdora update` from
+[github.com/alessandro-bitetto/chaindora](https://github.com/alessandro-bitetto/chaindora)
+into `~/.chaindora/incidents/` on any user machine that runs the
+update command.
 
-## Keeping your local copy fresh
+## Testing your entry
 
-Each `chdora` binary ships with whatever was in `incidents/` at build time.
-To pick up entries added upstream after that, run:
+The incident-pack matcher has its own tests in
+`internal/detectors/incident/`. A new entry deserves a fixture:
 
-```sh
-chdora update
+```yaml
+# testdata/incidents/my-incident/package-lock.json
+{
+  "packages": {
+    "": { "name": "test", "version": "1.0.0" },
+    "node_modules/MALICIOUS_PKG": { "version": "1.2.3" }
+  }
+}
 ```
 
-This fetches the latest `incidents/*.yaml` files via the GitHub Contents
-API and writes them atomically into `~/.chaindora/incidents/`. `chaindora
-scan` and `chdora ci` check that directory first, so the refresh takes
-effect on the next run without rebuilding.
-
-Recommended cadence:
-
-- **Daily**: schedule `chdora update` in a cron / launchd / Task Scheduler
-  job. Five seconds, ~10 KB.
-- **Manually** after every notable supply-chain incident (Socket / Aikido /
-  StepSecurity blog post). Don't wait for the next scheduled run.
-- **In CI**: run `chdora update` *before* `chdora ci .` if the runner
-  has network access. For air-gapped runners, bake the latest `incidents/`
-  into the runner image at build time.
-
-### Forks and private packs
-
-If your organization maintains a private incident pack on top of the
-upstream one, point `--source` at the same Contents API shape on your fork
-or internal mirror:
+Then:
 
 ```sh
-chdora update --source https://api.github.com/repos/myorg/chaindora-incidents/contents?ref=main
+chdora scan testdata/incidents/my-incident --incidents ./incidents --skip-osv
 ```
 
-The endpoint just needs to return the same JSON shape (an array of objects
-with `name`, `type`, and `download_url` fields).
+You should see a `[CRITICAL] [incident-pack]` line referencing your
+entry's ID.
 
-## Governance
+## Pointers
 
-The incident pack is maintained in-tree. Anyone can open a PR; merges
-require review by at least one maintainer. As the pack grows we may
-introduce additional reviewers per ecosystem (a "JavaScript area
-maintainer", etc.) — for now the bar is "the maintainer has reviewed
-the sources and they check out".
-
-If you want to track an incident that touches a private organization
-(e.g. a confidential vendor write-up you can't link publicly), open an
-issue rather than a PR — we'll work out how to land the entry without
-losing the citation trail.
+- Schema reference: [incidents/SCHEMA.md](../incidents/SCHEMA.md)
+- The matcher: `internal/detectors/incident/incident.go`
+- Auto-fix integration: `internal/detectors/incident/fix.go`
+- Update mechanism: `internal/cli/update.go` (fetches the pack from
+  the upstream GitHub repo into `~/.chaindora/incidents/`)
