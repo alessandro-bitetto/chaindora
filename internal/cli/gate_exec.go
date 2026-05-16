@@ -91,20 +91,30 @@ Examples:
 		if err != nil {
 			return err
 		}
-		var installArgs []string
 		var resolve func(context.Context, string, []string) ([]gate.PackageRef, error)
+		var resolveUpdateAll func(context.Context, string, string) ([]gate.PackageRef, error)
 		switch pm {
 		case "npm":
 			resolve = gate.ResolveNPMTree
+			resolveUpdateAll = gate.ResolveNPMUpdateAll
 		case "yarn":
 			resolve = gate.ResolveYarnTree
+			resolveUpdateAll = gate.ResolveYarnUpdateAll
 		case "pnpm":
 			resolve = gate.ResolvePnpmTree
+			resolveUpdateAll = gate.ResolvePnpmUpdateAll
 		case "pip", "pip3":
 			resolve = gate.ResolvePipTree
 		case "cargo":
 			resolve = gate.ResolveCargoTree
-		case "bundle", "gem":
+			resolveUpdateAll = gate.ResolveCargoUpdateAll
+		case "bundle":
+			resolve = gate.ResolveBundlerTree
+			resolveUpdateAll = gate.ResolveBundlerUpdateAll
+		case "gem":
+			// `gem update` (no args) updates every system-installed
+			// gem — no manifest to resolve from. Stays refused for
+			// now; v0.14 may enumerate via `gem list --local`.
 			resolve = gate.ResolveBundlerTree
 		case "mvn":
 			resolve = gate.ResolveMavenTree
@@ -112,32 +122,6 @@ Examples:
 			resolve = gate.ResolveGoModTree
 		default:
 			return passThroughToReal(pm, pmArgs)
-		}
-		switch classifyGateArgs(pm, pmArgs) {
-		case gatePassthrough:
-			return execReal(realBin, pmArgs)
-		case gateRefuseUpdateAll:
-			return fmt.Errorf(
-				"`%s %s` with no explicit package names updates every dep in the manifest, "+
-					"but chdora gate doesn't yet resolve update-all without project context. "+
-					"Specify packages (e.g. `%s %s <pkg>`) or run with --chaindora-policy=lenient "+
-					"to bypass the gate for this invocation.",
-				pm, pmArgs[0], pm, pmArgs[0],
-			)
-		case gateProceed:
-			installArgs = pmArgs[1:]
-		}
-		// Skip the gate when EVERY install arg is a flag (no real
-		// packages to vet). `npm install --save-dev` with nothing
-		// after it is effectively the no-args case.
-		realPkgs := 0
-		for _, a := range installArgs {
-			if !strings.HasPrefix(a, "-") {
-				realPkgs++
-			}
-		}
-		if realPkgs == 0 {
-			return execReal(realBin, pmArgs)
 		}
 
 		cwd, _ := os.Getwd()
@@ -163,12 +147,47 @@ Examples:
 			policy.AllowOnUnknown = true
 		}
 
-		fmt.Fprintf(os.Stderr, "[chdora] resolving install tree (%s) for: %s\n", pm, strings.Join(pmArgs, " "))
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
-		refs, err := resolve(ctx, realBin, installArgs)
-		if err != nil {
-			return fmt.Errorf("resolve tree: %w", err)
+
+		var refs []gate.PackageRef
+		switch classifyGateArgs(pm, pmArgs) {
+		case gatePassthrough:
+			return execReal(realBin, pmArgs)
+		case gateRefuseUpdateAll:
+			if resolveUpdateAll == nil {
+				return fmt.Errorf(
+					"`%s %s` with no explicit package names updates every dep in the manifest, "+
+						"but chdora gate doesn't yet have an update-all resolver for %s. "+
+						"Specify packages (e.g. `%s %s <pkg>`) or run with --chaindora-policy=lenient "+
+						"to bypass the gate for this invocation.",
+					pm, pmArgs[0], pm, pm, pmArgs[0],
+				)
+			}
+			fmt.Fprintf(os.Stderr, "[chdora] resolving update-all tree (%s) from %s\n", pm, cwd)
+			refs, err = resolveUpdateAll(ctx, realBin, cwd)
+			if err != nil {
+				return fmt.Errorf("resolve update-all tree: %w", err)
+			}
+		case gateProceed:
+			installArgs := pmArgs[1:]
+			// Skip the gate when EVERY install arg is a flag (no real
+			// packages to vet). `npm install --save-dev` with nothing
+			// after it is effectively the no-args case.
+			realPkgs := 0
+			for _, a := range installArgs {
+				if !strings.HasPrefix(a, "-") {
+					realPkgs++
+				}
+			}
+			if realPkgs == 0 {
+				return execReal(realBin, pmArgs)
+			}
+			fmt.Fprintf(os.Stderr, "[chdora] resolving install tree (%s) for: %s\n", pm, strings.Join(pmArgs, " "))
+			refs, err = resolve(ctx, realBin, installArgs)
+			if err != nil {
+				return fmt.Errorf("resolve tree: %w", err)
+			}
 		}
 		fmt.Fprintf(os.Stderr, "[chdora] tree resolved: %d unique (name, version) tuple(s)\n", len(refs))
 

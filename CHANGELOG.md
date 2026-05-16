@@ -10,6 +10,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md).
 
+## [0.13.5] — 2026-05-16
+
+Update-all (bare `npm update`, `pnpm update`, etc. with no package
+names) is the most common usage of update verbs. v0.13.4 detected
+the verb but refused the operation with a "specify packages" error.
+This release implements actual update-all resolution: chaindora reads
+the user's manifest from CWD, copies it into a temp dir alongside
+the existing lockfile, runs the PM's update verb in lockfile-only
+mode there, and gates every node in the resulting tree.
+
+### Added — update-all resolvers (5 PMs)
+
+| PM | New function | Manifest seeded | Update command |
+|---|---|---|---|
+| npm | `ResolveNPMUpdateAll` | `package.json` + `package-lock.json` | `npm update --package-lock-only --ignore-scripts` |
+| pnpm | `ResolvePnpmUpdateAll` | `package.json` + `pnpm-lock.yaml` | `pnpm update --lockfile-only --ignore-scripts` |
+| yarn | `ResolveYarnUpdateAll` | `package.json` + `yarn.lock` | `yarn up * --mode=update-lockfile` (Berry) → `yarn upgrade --silent --ignore-scripts` (classic fallback) |
+| cargo | `ResolveCargoUpdateAll` | `Cargo.toml` + `Cargo.lock` + synthetic `src/lib.rs` | `cargo update` |
+| bundle | `ResolveBundlerUpdateAll` | `Gemfile` + `Gemfile.lock` | `bundle lock --update` |
+
+All five use the same safety posture as the existing install-args
+resolvers: temp dir isolation, scripts disabled where the PM
+supports a flag, lockfile-only mode so no real install touches disk.
+
+### Changed — dispatcher routes update-all to the resolver
+
+`internal/cli/gate_exec.go`'s `gateRefuseUpdateAll` branch now
+dispatches to the per-PM update-all resolver when one is registered.
+If no resolver is available for a PM (gem, mvn — neither has a
+clean manifest-based update model), it still refuses with a clear
+message that includes the PM name.
+
+### Not yet implemented
+
+- **`gem update`** — `gem update` (no args) updates every gem
+  installed system-wide; there's no manifest. Resolving requires
+  enumerating installed gems via `gem list --local` and querying
+  rubygems.org for newer versions. Stays refused for v0.13.5;
+  on the v0.14 backlog.
+- **`pip install --upgrade -r requirements.txt`** — pip's
+  update-all is shaped differently (a flag on install, not a
+  separate verb). The existing install-verb dispatcher already
+  routes it, but precise lockfile-style resolution against the
+  requirements file is a separate question. Today, pip's update
+  through chaindora resolves exactly the same way as install.
+- **`mvn versions:use-latest-versions`** — Maven's update is a
+  plugin goal, not a built-in. Not on the roadmap; Maven version
+  bumps go through `pom.xml` edits which then route through
+  `dependency:get` (already gated).
+
+### Notes
+
+- The resolver copies your project's actual manifest into `$TMPDIR`
+  for the duration of the gate check. Nothing leaves the local
+  machine. The temp dir is removed via `defer`.
+- For yarn, Berry's `yarn up * --mode=update-lockfile` is tried
+  first; on rejection (yarn classic refuses Berry's flag combo)
+  we fall back to `yarn upgrade --silent --ignore-scripts`. Same
+  detection pattern as the existing install-args yarn resolver.
+- The gate checks every node in the resolved tree, not just nodes
+  whose version changed. Reason: OSV state may have advanced since
+  the prior install was vetted (a CVE published yesterday against
+  a package that was clean last week).
+
 ## [0.13.4] — 2026-05-16
 
 Closes the update-verb coverage gap in the gate shim. Previously

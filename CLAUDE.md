@@ -240,12 +240,25 @@ website/                        chaindora.dev — Angular 18 static site (v0.13.
   invocations are gated. It returns `gatePassthrough` (non-install /
   non-update verbs, lockfile-restore like `npm install` alone),
   `gateProceed` (install/update with explicit packages — run the
-  resolver), or `gateRefuseUpdateAll` (`npm update` / `pnpm update`
-  etc. with no package names — refused because we don't yet carry
-  the user's manifest into the resolver). Adding a new verb or new
-  PM means touching this one function plus the corresponding
-  `isXxxInstallVerb` / `isXxxUpdateVerb` predicates. Tests for every
-  combination live in `gate_exec_test.go`.
+  install-args resolver), or `gateRefuseUpdateAll` (`npm update` /
+  `pnpm update` etc. with no package names — route to the update-all
+  resolver if one exists, otherwise refuse).
+- Two resolver families per PM in `internal/gate/`:
+  - `ResolveXxxTree(ctx, pmPath, installArgs)` — install-args path.
+    Spins up a temp dir with a synthetic empty manifest, runs the PM
+    with the user's args in lockfile-only mode, parses the lockfile.
+    Used for `npm install foo`, `npm update foo`, `cargo add serde`,
+    etc.
+  - `ResolveXxxUpdateAll(ctx, pmPath, cwd)` — update-all path
+    (v0.13.5+). Copies the user's actual manifest + lockfile into
+    a temp dir, runs the PM's update verb in lockfile-only mode,
+    parses the resulting lockfile. Available for npm / pnpm /
+    yarn / cargo / bundle. gem doesn't have one (no manifest;
+    `gem update` walks system-wide installed gems).
+- Adding a new PM means touching `classifyGateArgs` plus the per-PM
+  `isXxxInstallVerb` / `isXxxUpdateVerb` predicates plus the two
+  resolvers. Tests for verb classification live in
+  `gate_exec_test.go`.
 - `static-pattern` scores per UNIQUE pattern, not per occurrence — a
   library that legitimately uses `new Function()` in multiple files
   counts once. Without this, lodash blocks itself on its templating

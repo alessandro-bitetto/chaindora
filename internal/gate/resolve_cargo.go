@@ -147,6 +147,58 @@ func parseCargoLockTree(data []byte, directs []cargoDepArg) []PackageRef {
 	return refs
 }
 
+// ResolveCargoUpdateAll resolves what `cargo update` (no args) would
+// land in Cargo.lock. Copies the user's Cargo.toml + Cargo.lock into
+// a temp dir and runs `cargo update` there. cargo update re-resolves
+// against the registry and rewrites Cargo.lock without touching
+// target/ or running build scripts, so this is safe.
+func ResolveCargoUpdateAll(ctx context.Context, cargoPath, cwd string) ([]PackageRef, error) {
+	tomlBytes, err := os.ReadFile(filepath.Join(cwd, "Cargo.toml"))
+	if err != nil {
+		return nil, fmt.Errorf("read Cargo.toml in %s: %w", cwd, err)
+	}
+	tmp, err := os.MkdirTemp("", "chdora-gate-cargo-update-*")
+	if err != nil {
+		return nil, fmt.Errorf("create resolve temp: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	// cargo needs an actual crate layout — src/lib.rs is enough.
+	if err := os.MkdirAll(filepath.Join(tmp, "src"), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "src", "lib.rs"), nil, 0o644); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "Cargo.toml"), tomlBytes, 0o644); err != nil {
+		return nil, fmt.Errorf("seed Cargo.toml: %w", err)
+	}
+	if lockBytes, err := os.ReadFile(filepath.Join(cwd, "Cargo.lock")); err == nil {
+		if err := os.WriteFile(filepath.Join(tmp, "Cargo.lock"), lockBytes, 0o644); err != nil {
+			return nil, fmt.Errorf("seed Cargo.lock: %w", err)
+		}
+	}
+
+	cargo := cargoPath
+	if cargo == "" {
+		cargo = "cargo"
+	}
+	cmd := exec.CommandContext(ctx, cargo, "update")
+	cmd.Dir = tmp
+	if out, err := cmd.CombinedOutput(); err != nil {
+		snippet := strings.TrimSpace(string(out))
+		if len(snippet) > 400 {
+			snippet = snippet[:400] + "..."
+		}
+		return nil, fmt.Errorf("cargo update failed: %w\n%s", err, snippet)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, "Cargo.lock"))
+	if err != nil {
+		return nil, fmt.Errorf("read updated Cargo.lock: %w", err)
+	}
+	return parseCargoLockTree(data, nil), nil
+}
+
 func cargoLockField(block, key string) string {
 	for _, line := range strings.Split(block, "\n") {
 		trimmed := strings.TrimSpace(line)

@@ -144,6 +144,54 @@ func parsePnpmKey(key string) (name, version string) {
 	return "", ""
 }
 
+// ResolvePnpmUpdateAll resolves what `pnpm update` (no args) would
+// land on disk. Same pattern as ResolveNPMUpdateAll: copy the user's
+// package.json + pnpm-lock.yaml into a temp dir and run pnpm in
+// lockfile-only mode there.
+func ResolvePnpmUpdateAll(ctx context.Context, pnpmPath, cwd string) ([]PackageRef, error) {
+	pjPath := filepath.Join(cwd, "package.json")
+	pjBytes, err := os.ReadFile(pjPath)
+	if err != nil {
+		return nil, fmt.Errorf("read package.json in %s: %w", cwd, err)
+	}
+	tmp, err := os.MkdirTemp("", "chdora-gate-pnpm-update-*")
+	if err != nil {
+		return nil, fmt.Errorf("create resolve temp: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	if err := os.WriteFile(filepath.Join(tmp, "package.json"), pjBytes, 0o644); err != nil {
+		return nil, fmt.Errorf("seed package.json: %w", err)
+	}
+	if lockBytes, err := os.ReadFile(filepath.Join(cwd, "pnpm-lock.yaml")); err == nil {
+		if err := os.WriteFile(filepath.Join(tmp, "pnpm-lock.yaml"), lockBytes, 0o644); err != nil {
+			return nil, fmt.Errorf("seed pnpm-lock.yaml: %w", err)
+		}
+	}
+
+	pnpm := pnpmPath
+	if pnpm == "" {
+		pnpm = "pnpm"
+	}
+	cmd := exec.CommandContext(ctx, pnpm,
+		"update",
+		"--lockfile-only",
+		"--ignore-scripts",
+		"--reporter=silent",
+	)
+	cmd.Dir = tmp
+	if out, err := cmd.CombinedOutput(); err != nil {
+		snippet := strings.TrimSpace(string(out))
+		if len(snippet) > 400 {
+			snippet = snippet[:400] + "..."
+		}
+		return nil, fmt.Errorf("pnpm update --lockfile-only failed: %w\n%s", err, snippet)
+	}
+	// Reuse the standard parser; pass no addArgs so directs comes
+	// from the pnpm lockfile structure itself (top-level importers).
+	return parsePnpmLock(tmp, nil)
+}
+
 func stripPnpmNetFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	for _, a := range args {

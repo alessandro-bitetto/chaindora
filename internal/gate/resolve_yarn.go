@@ -224,6 +224,62 @@ func yarnBerryName(spec string) string {
 	return spec[:atIdx]
 }
 
+// ResolveYarnUpdateAll resolves what `yarn upgrade` (classic, no args)
+// or `yarn up` (Berry) would land on disk. Copies the user's
+// package.json and yarn.lock into a temp dir and runs yarn in a
+// lockfile-only mode there.
+//
+// Same Berry-vs-classic two-step as ResolveYarnTree: try Berry's
+// `yarn up --mode=update-lockfile` first, fall back to classic
+// `yarn upgrade --silent --ignore-scripts` on rejection.
+func ResolveYarnUpdateAll(ctx context.Context, yarnPath, cwd string) ([]PackageRef, error) {
+	pjPath := filepath.Join(cwd, "package.json")
+	pjBytes, err := os.ReadFile(pjPath)
+	if err != nil {
+		return nil, fmt.Errorf("read package.json in %s: %w", cwd, err)
+	}
+	tmp, err := os.MkdirTemp("", "chdora-gate-yarn-update-*")
+	if err != nil {
+		return nil, fmt.Errorf("create resolve temp: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	if err := os.WriteFile(filepath.Join(tmp, "package.json"), pjBytes, 0o644); err != nil {
+		return nil, fmt.Errorf("seed package.json: %w", err)
+	}
+	if lockBytes, err := os.ReadFile(filepath.Join(cwd, "yarn.lock")); err == nil {
+		if err := os.WriteFile(filepath.Join(tmp, "yarn.lock"), lockBytes, 0o644); err != nil {
+			return nil, fmt.Errorf("seed yarn.lock: %w", err)
+		}
+	}
+
+	yarn := yarnPath
+	if yarn == "" {
+		yarn = "yarn"
+	}
+
+	// Berry: `yarn up '*' --mode=update-lockfile` bumps everything
+	// without writing node_modules.
+	berryCmd := exec.CommandContext(ctx, yarn, "up", "*", "--mode=update-lockfile")
+	berryCmd.Dir = tmp
+	if _, err := berryCmd.CombinedOutput(); err == nil {
+		return parseYarnLock(tmp, nil)
+	}
+
+	// Classic: `yarn upgrade --silent --ignore-scripts` upgrades every
+	// dep to the newest in-range version and rewrites yarn.lock.
+	classicCmd := exec.CommandContext(ctx, yarn, "upgrade", "--silent", "--ignore-scripts", "--no-progress")
+	classicCmd.Dir = tmp
+	if out, err := classicCmd.CombinedOutput(); err != nil {
+		snippet := strings.TrimSpace(string(out))
+		if len(snippet) > 400 {
+			snippet = snippet[:400] + "..."
+		}
+		return nil, fmt.Errorf("yarn upgrade failed (Berry and classic both refused): %w\n%s", err, snippet)
+	}
+	return parseYarnLock(tmp, nil)
+}
+
 // stripYarnNetFlags removes args that would prevent us from
 // getting the lockfile. yarn classic's `--dry-run` skips the
 // lockfile write; Berry doesn't have it but accepts other

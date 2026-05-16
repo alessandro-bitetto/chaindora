@@ -71,6 +71,51 @@ func ResolveBundlerTree(ctx context.Context, bundlerPath string, addArgs []strin
 	return parseGemfileLockTree(data, gems), nil
 }
 
+// ResolveBundlerUpdateAll resolves what `bundle update` (no args)
+// would land in Gemfile.lock. Copies the user's Gemfile + Gemfile.lock
+// into a temp dir and runs `bundle lock --update` there. `bundle
+// lock` re-resolves and rewrites Gemfile.lock without running any
+// gem extensions — safe.
+func ResolveBundlerUpdateAll(ctx context.Context, bundlerPath, cwd string) ([]PackageRef, error) {
+	gemfileBytes, err := os.ReadFile(filepath.Join(cwd, "Gemfile"))
+	if err != nil {
+		return nil, fmt.Errorf("read Gemfile in %s: %w", cwd, err)
+	}
+	tmp, err := os.MkdirTemp("", "chdora-gate-bundle-update-*")
+	if err != nil {
+		return nil, fmt.Errorf("create resolve temp: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	if err := os.WriteFile(filepath.Join(tmp, "Gemfile"), gemfileBytes, 0o644); err != nil {
+		return nil, fmt.Errorf("seed Gemfile: %w", err)
+	}
+	if lockBytes, err := os.ReadFile(filepath.Join(cwd, "Gemfile.lock")); err == nil {
+		if err := os.WriteFile(filepath.Join(tmp, "Gemfile.lock"), lockBytes, 0o644); err != nil {
+			return nil, fmt.Errorf("seed Gemfile.lock: %w", err)
+		}
+	}
+
+	bundler := bundlerPath
+	if bundler == "" {
+		bundler = "bundle"
+	}
+	cmd := exec.CommandContext(ctx, bundler, "lock", "--update")
+	cmd.Dir = tmp
+	if out, err := cmd.CombinedOutput(); err != nil {
+		snippet := strings.TrimSpace(string(out))
+		if len(snippet) > 400 {
+			snippet = snippet[:400] + "..."
+		}
+		return nil, fmt.Errorf("bundle lock --update failed: %w\n%s", err, snippet)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, "Gemfile.lock"))
+	if err != nil {
+		return nil, fmt.Errorf("read updated Gemfile.lock: %w", err)
+	}
+	return parseGemfileLockTree(data, nil), nil
+}
+
 type bundleAddArg struct {
 	name    string
 	version string

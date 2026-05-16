@@ -95,11 +95,106 @@ func ResolveNPMTree(ctx context.Context, npmPath string, installArgs []string) (
 	return parseNPMLockTree(data, installArgs)
 }
 
+// ResolveNPMUpdateAll resolves what `npm update` (no args) would land
+// on disk in the user's CWD. It copies the user's package.json +
+// package-lock.json into a throwaway temp dir, runs `npm update
+// --package-lock-only --ignore-scripts` there, and parses the
+// resulting lockfile. Returns the FULL post-update tree — the gate
+// re-checks every node, since OSV state may have advanced since the
+// prior install was vetted.
+//
+// Without a package.json in cwd we error cleanly: `npm update` itself
+// would refuse, so chaindora matches that behavior with a useful
+// message.
+func ResolveNPMUpdateAll(ctx context.Context, npmPath, cwd string) ([]PackageRef, error) {
+	pjPath := filepath.Join(cwd, "package.json")
+	pjBytes, err := os.ReadFile(pjPath)
+	if err != nil {
+		return nil, fmt.Errorf("read package.json in %s: %w", cwd, err)
+	}
+	tmp, err := os.MkdirTemp("", "chdora-gate-update-*")
+	if err != nil {
+		return nil, fmt.Errorf("create resolve temp: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	if err := os.WriteFile(filepath.Join(tmp, "package.json"), pjBytes, 0o644); err != nil {
+		return nil, fmt.Errorf("seed package.json: %w", err)
+	}
+	if lockBytes, err := os.ReadFile(filepath.Join(cwd, "package-lock.json")); err == nil {
+		if err := os.WriteFile(filepath.Join(tmp, "package-lock.json"), lockBytes, 0o644); err != nil {
+			return nil, fmt.Errorf("seed package-lock.json: %w", err)
+		}
+	}
+
+	npm := npmPath
+	if npm == "" {
+		npm = "npm"
+	}
+	cmd := exec.CommandContext(ctx, npm,
+		"update",
+		"--package-lock-only",
+		"--no-audit",
+		"--no-fund",
+		"--ignore-scripts",
+		"--prefer-online", // re-resolve against current registry state, not stale cache
+	)
+	cmd.Dir = tmp
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		snippet := strings.TrimSpace(string(out))
+		if len(snippet) > 400 {
+			snippet = snippet[:400] + "..."
+		}
+		return nil, fmt.Errorf("npm update --package-lock-only failed: %w\n%s", err, snippet)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, "package-lock.json"))
+	if err != nil {
+		return nil, fmt.Errorf("read updated lockfile: %w", err)
+	}
+	directs, _ := directsFromNPMManifest(pjBytes)
+	return parseNPMLockTreeWithDirects(data, directs)
+}
+
+// directsFromNPMManifest extracts the names declared as direct deps
+// in a package.json — the set the user actually wrote down. Used by
+// ResolveNPMUpdateAll to mark direct vs transitive in the rendered
+// gate output. Errors here are non-fatal upstream (we fall back to
+// an empty map and just lose the direct/transitive distinction).
+func directsFromNPMManifest(b []byte) (map[string]bool, error) {
+	var pkg struct {
+		Dependencies         map[string]string `json:"dependencies"`
+		DevDependencies      map[string]string `json:"devDependencies"`
+		OptionalDependencies map[string]string `json:"optionalDependencies"`
+	}
+	if err := json.Unmarshal(b, &pkg); err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for k := range pkg.Dependencies {
+		out[k] = true
+	}
+	for k := range pkg.DevDependencies {
+		out[k] = true
+	}
+	for k := range pkg.OptionalDependencies {
+		out[k] = true
+	}
+	return out, nil
+}
+
 // parseNPMLockTree turns a package-lock.json v3 blob into PackageRefs.
 // Marked direct=true for any package whose name appears in
 // installArgs (the user asked for it explicitly); everything else
 // is transitive.
 func parseNPMLockTree(data []byte, installArgs []string) ([]PackageRef, error) {
+	return parseNPMLockTreeWithDirects(data, directNamesFromArgs(installArgs))
+}
+
+// parseNPMLockTreeWithDirects is the inner implementation that takes
+// a precomputed directs map. Used by both the install-args path
+// (parseNPMLockTree) and the update-all path (ResolveNPMUpdateAll).
+func parseNPMLockTreeWithDirects(data []byte, directs map[string]bool) ([]PackageRef, error) {
 	var lock struct {
 		Packages map[string]struct {
 			Version  string `json:"version"`
@@ -109,7 +204,6 @@ func parseNPMLockTree(data []byte, installArgs []string) ([]PackageRef, error) {
 	if err := json.Unmarshal(data, &lock); err != nil {
 		return nil, fmt.Errorf("parse package-lock.json: %w", err)
 	}
-	directs := directNamesFromArgs(installArgs)
 
 	// Dedup: when npm resolves multiple versions of the same
 	// package (e.g. lodash@4 alongside lodash@3 in different
