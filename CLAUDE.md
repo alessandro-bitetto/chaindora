@@ -80,13 +80,51 @@ default policy. Registered in `internal/cli/gate_stack.go`.
 | `static-pattern` | `internal/gate/static.go` | Score-based: curl-pipe-shell, eval-of-dynamic, base64-encoded URLs, obfuscated blobs. Per-pattern dedup so a library using eval in multiple files counts once |
 | `version-diff` | `internal/gate/versiondiff.go` | Scores the *delta* of static-pattern hits between requested and prior version |
 | `git-url` | `internal/gate/giturl.go` | Evaluates `user/repo`, `git+...`, `FetchContent` style deps on host-tier + ref-pin + transport scheme. 40-hex SHA on well-known host = Approve; branch refs / unknown hosts / `http://` = Block |
+| `republish-guard` | `internal/gate/cache.go` (fires inside `CachedRun`) | Block when the cache already holds an entry for `(eco, name, version)` with a DIFFERENT `Integrity` than the current ref. Catches the maintainer-account-takeover republish pattern. Inactive when integrity is empty |
 
-Per-ecosystem resolvers produce the install tree: `resolve_npm.go`,
-`resolve_yarn.go`, `resolve_pnpm.go`, `resolve_pip.go`, `resolve_cargo.go`,
-`resolve_bundler.go`, `resolve_mvn.go`, `resolve_gomod.go`. Each shells
-out to the real package manager with `--ignore-scripts` (or the
-equivalent) for safe transitive resolution. Probe registration lives
-in `probes.go`.
+Per-ecosystem resolvers produce the install tree. **30 resolvers
+across 42 PM names** (some share resolvers — bundle/gem, dart/flutter,
+conda/mamba/micromamba, R/Rscript, etc.):
+
+- **JS / TS** (5): `resolve_npm.go`, `resolve_yarn.go`,
+  `resolve_pnpm.go`, `resolve_bun.go`, `resolve_deno.go`.
+- **Python** (5): `resolve_pip.go`, `resolve_poetry.go`,
+  `resolve_uv.go`, `resolve_pipenv.go`, `resolve_pdm.go`.
+- **JVM** (3): `resolve_mvn.go`, `resolve_gradle.go`, `resolve_sbt.go`.
+- **.NET** (2): `resolve_nuget.go`, `resolve_paket.go`.
+- **Ruby** (1): `resolve_bundler.go`.
+- **PHP** (1): `resolve_composer.go`.
+- **Rust** (1): `resolve_cargo.go`.
+- **Go** (1): `resolve_gomod.go`.
+- **Mobile Apple** (3): `resolve_cocoapods.go`, `resolve_swiftpm.go`, `resolve_carthage.go`.
+- **Dart** (1): `resolve_pub.go`.
+- **BEAM** (2): `resolve_hex.go`, `resolve_rebar3.go`.
+- **Haskell** (2): `resolve_stack.go`, `resolve_cabal.go`.
+- **C/C++** (2): `resolve_conan.go`, `resolve_vcpkg.go`.
+- **Conda** (1): `resolve_conda.go`.
+- **macOS dev** (1): `resolve_brew.go`.
+- **Long tail** (8): `resolve_opam.go`, `resolve_julia.go`,
+  `resolve_renv.go`, `resolve_cpan.go`, `resolve_luarocks.go`,
+  `resolve_elm.go`, `resolve_nimble.go`, `resolve_shards.go`,
+  `resolve_zig.go`.
+
+Each shells out to the real package manager with `--ignore-scripts`
+(or the equivalent) for safe transitive resolution OR parses an
+existing lockfile directly. Probe registration lives in `probes.go`.
+
+**Two integrity-fetcher helpers** in `integrity_fetch.go` cover
+ecosystems whose lockfile doesn't carry hashes: `enrichRubyGemsIntegrity`
+hits rubygems.org's v2 API for `.sha`, and `enrichMavenIntegrity` hits
+`repo1.maven.org` for `.jar.sha1` (with `.pom.sha1` fallback for
+parent-pom-only entries). Bounded-pool concurrent fetch with 5 s
+per-request timeout; failures degrade to empty Integrity, not gate
+failure.
+
+**Verdict cache** at `~/.chaindora/gate-cache/<ecosystem>/<key-hash>.json`.
+Keyed on `(eco, name, version, integrity)`. Stores Approve verdicts
+only (Warn/Block/Unknown get re-evaluated). 7-day TTL. Same-tuple
+different-integrity → `republish-guard` Block. See `cache.go` for the
+store; `gate_cache.go` exposes `chdora gate cache {stats,clear,path}`.
 
 ---
 
@@ -150,11 +188,20 @@ internal/
     {update,upgrade}.go                           maintenance commands
     {render,scanprojects,registries_helper}.go    shared helpers
   gate/                         install-time prevention (v0.9+)
-    gate.go                     Verdict / Checker / Policy / Run
+    gate.go                     Verdict / Checker / Policy / Run / CachedRun
+    cache.go                    verdict cache (~/.chaindora/gate-cache/) + republish-guard
+    errors.go                   PMError (distinguishes PM-said-no from chdora-internal)
+    integrity_fetch.go          rubygems.org + Maven Central .sha1 fetchers
     {cooldown,osv,allowlist,publisher,maintainer,static,versiondiff}.go
     {provenance,giturl}.go                        v0.10 / v0.11 additions
     probes.go                                     per-ecosystem probe registration
-    resolve_{npm,yarn,pnpm,pip,cargo,bundler,mvn,gomod}.go   resolvers
+    resolve_{npm,yarn,pnpm,pip,cargo,bundler,mvn,gomod}.go   v1 resolvers
+    resolve_{nuget,composer,poetry,uv,gradle}.go            Tier 1 (v0.14)
+    resolve_{cocoapods,swiftpm,pub,hex}.go                  Tier 2 (v0.14)
+    resolve_{bun,conda,brew,conan,vcpkg}.go                 Tier 3-4 (v0.14)
+    resolve_{pipenv,pdm,deno,stack,cabal,sbt,opam,
+             rebar3,paket,julia,renv,carthage,
+             cpan,luarocks,elm,nimble,shards,zig}.go        long tail (v0.14)
   fixplan/                      persistent fix plans (v0.8+)
     {fixplan,diskstore,sudo}.go DiskStore at ~/.chaindora/fix-plans/
   inventory/                    per-ecosystem lockfile / manifest parsers
@@ -224,10 +271,40 @@ website/                        chaindora.dev — Angular 18 static site (v0.13.
 
 ### `internal/gate`
 
-- The gate fails CLOSED. Network errors / parse failures return
-  `Verdict=Unknown` which the default Strict Policy treats as Block.
-  Detection tools fail open; a prevention tool must fail closed. Don't
-  add `Approve` returns on error.
+- The gate fails CLOSED on internal failures. Network errors / parse
+  failures inside chdora return `Verdict=Unknown` which the default
+  Strict Policy treats as Block. Detection tools fail open; a
+  prevention tool must fail closed. Don't add `Approve` returns on
+  error.
+- **PMError vs chdora-internal error is a load-bearing distinction.**
+  When the underlying PM exits non-zero (npm 404, peer-dep conflict,
+  unresolvable spec, malformed lockfile), the resolver returns
+  `*gate.PMError` carrying the captured output + exit code. The CLI
+  layer (`asPMError` / `surfacePMError` in `gate_exec.go`) prints
+  the PM's stderr verbatim and exits with the PM's code — no chdora
+  wrapping. Rationale: that install was going to fail regardless of
+  chdora. Don't pollute the user's view with a chdora-prefixed error
+  layered over npm's own error. Use `wrapPMError(pm, command, output,
+  err)` in `errors.go` from every resolver — it categorizes
+  `*exec.ExitError` into PMError and leaves other failures wrapped
+  normally.
+- **`CachedRun` is the entry point, not `Run`.** `gate_exec.go` calls
+  `gate.CachedRun(ctx, checkers, refs, cache)` with the disk-backed
+  cache. CachedRun does three things per package: republish-guard
+  lookup, exact-match cache lookup, and (on miss) full checker run +
+  store. Plain `Run` is still the fallback for `cache == nil` and
+  for the `chdora gate check` single-package path. Both use the same
+  bounded worker pool (`maxConcurrentChecks = 16`).
+- **Verdict cache writes only on Approve.** Warn/Block/Unknown
+  verdicts deliberately don't cache — a user chasing a fix needs
+  fresh signal next run, not yesterday's verdict. Empty `Integrity`
+  also skips the cache entirely (no tamper detection means no entry).
+- **Republish-guard semantics**: same `(eco, name, version)` cached
+  with integrity X, install attempt presents integrity Y → Block
+  with a `republish-guard` finding. Don't add Approve fall-throughs
+  here; this is the supply-chain takeover signal. If a maintainer
+  legitimately republishes (rare), the user clears the cache with
+  `chdora gate cache clear`.
 - The npm resolver shells out to the real `npm`. Recursion guard in
   `findRealPackageManager` content-sniffs the `"chdora gate shim"`
   marker so the shim can't loop into itself even if `$HOME` shifted.
@@ -256,13 +333,29 @@ website/                        chaindora.dev — Angular 18 static site (v0.13.
     yarn / cargo / bundle. gem doesn't have one (no manifest;
     `gem update` walks system-wide installed gems).
 - Adding a new PM means touching `classifyGateArgs` plus the per-PM
-  `isXxxInstallVerb` / `isXxxUpdateVerb` predicates plus the two
-  resolvers. Tests for verb classification live in
-  `gate_exec_test.go`.
+  `isXxxInstallVerb` / `isXxxUpdateVerb` predicates plus the resolver,
+  plus `isGatedPM` and `shimManagers` for visibility in `gate status`
+  / `gate install`. If the PM has no install-args CLI (devs edit
+  manifest by hand), add it to `isPMCwdOnly` so the "no real args →
+  passthrough" guard doesn't shortcut the resolution. Multi-token
+  verbs (`dotnet add package`, `swift package resolve`, `dart pub add`)
+  get inline-handled in `classifyGateArgs` rather than a single-verb
+  predicate. Tests for verb classification live in `gate_exec_test.go`.
 - `static-pattern` scores per UNIQUE pattern, not per occurrence — a
   library that legitimately uses `new Function()` in multiple files
   counts once. Without this, lodash blocks itself on its templating
   engine.
+- **42 PMs share 10 checkers but only 23-ish ecosystems have
+  integrity in lockfile or via fetcher**. Ecosystems without
+  integrity (bun, opam, cabal, CPAN, luarocks, Paket, Elm) hit the
+  gate but skip cache + republish-guard. This is deliberate — empty
+  integrity means no tamper detection possible, and we'd rather not
+  cache a verdict that we can't tie back to specific bytes.
+- **OS-level PMs** (apt/yum/dnf/apk/winget/chocolatey/scoop) are
+  intentionally out of scope for the gate. Different threat model
+  (root install, distribution-signed packages, vetted by Debian /
+  Red Hat / Alpine maintainers). Detection-side `forensics --deep`
+  enumerates installed system packages instead.
 
 ### `internal/findings`
 
@@ -331,6 +424,12 @@ website/                        chaindora.dev — Angular 18 static site (v0.13.
   3. An `osvEcosystem` mapping (or explicit `""`) in `osvioc.go`
 
   Don't add a parser without all three.
+
+- Note: many of the v0.14 ecosystems are gate-only and don't yet have
+  detection-side inventory parsers. Detection-side coverage is a
+  follow-up — file a separate issue per ecosystem. The OSV ecosystem
+  strings used at the gate (`mapEcosystemToOSV` in `osv.go`) are
+  independent of the inventory constants.
 
 ---
 

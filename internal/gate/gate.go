@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Verdict is one Checker's per-package opinion. The aggregator picks
@@ -79,11 +81,20 @@ type CheckResult struct {
 // the same by default but tighter policies may relax checks on
 // transitives (the user can't realistically vet 700 transitive
 // deps by hand).
+//
+// Integrity is the content hash the package manager's lockfile
+// carries for this exact version — "sha512-..." for npm/yarn/pnpm,
+// the bare sha256 hex for cargo, "h1:..." for go. Empty when the
+// ecosystem's lockfile doesn't expose one (bundler, maven). The
+// verdict cache keys on this field, so a known name@version
+// reappearing with different bytes is detectable as a possible
+// republish/maintainer-takeover attack.
 type PackageRef struct {
 	Ecosystem string `json:"ecosystem"`
 	Name      string `json:"name"`
 	Version   string `json:"version"`
 	Direct    bool   `json:"direct"`
+	Integrity string `json:"integrity,omitempty"`
 }
 
 // String produces the "<eco>:<name>@<ver>" form used in user-facing
@@ -219,30 +230,139 @@ func (p Policy) Decide(pc PackageCheck) (allow bool, verdict Verdict) {
 	return false, d
 }
 
+// maxConcurrentChecks bounds the number of packages whose checker
+// stacks may execute concurrently. Picked to amortize network I/O
+// (most checkers hit a registry probe) without overwhelming small
+// public APIs (OSV, npm registry) when a 47-node tree shows up.
+const maxConcurrentChecks = 16
+
 // Run executes every Checker against every PackageRef, returning the
 // per-package aggregated results. Order in the returned slice matches
 // the input order (so the caller can render a stable "tree" view).
-// Checkers run sequentially per-package; parallelism across packages
-// is the caller's choice — we don't fan out here because some
-// checkers (cooldown, OSV) share an HTTP-cache and concurrent
-// access patterns differ by checker.
+//
+// Packages are checked concurrently with a bounded worker pool;
+// checkers run sequentially within a single package. Checkers MUST
+// be safe for concurrent calls — the Checker interface documents
+// this contract and the in-tree checkers (cooldown, OSV, publisher,
+// ...) all satisfy it via mutex-protected probe caches.
 func Run(ctx context.Context, checkers []Checker, packages []PackageRef) []PackageCheck {
-	out := make([]PackageCheck, 0, len(packages))
-	for _, ref := range packages {
-		pc := PackageCheck{Package: ref}
-		for _, c := range checkers {
-			if ctx.Err() != nil {
-				pc.Results = append(pc.Results, CheckResult{
-					Checker: c.Name(),
-					Verdict: VerdictUnknown,
-					Reason:  "context cancelled before check could run",
-				})
-				continue
-			}
-			pc.Results = append(pc.Results, c.Check(ctx, ref))
-		}
-		out = append(out, pc)
+	if len(packages) == 0 {
+		return nil
 	}
+	out := make([]PackageCheck, len(packages))
+	sem := make(chan struct{}, maxConcurrentChecks)
+	var wg sync.WaitGroup
+	for i, ref := range packages {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, r PackageRef) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			pc := PackageCheck{Package: r}
+			for _, c := range checkers {
+				if ctx.Err() != nil {
+					pc.Results = append(pc.Results, CheckResult{
+						Checker: c.Name(),
+						Verdict: VerdictUnknown,
+						Reason:  "context cancelled before check could run",
+					})
+					continue
+				}
+				pc.Results = append(pc.Results, c.Check(ctx, r))
+			}
+			out[idx] = pc
+		}(i, ref)
+	}
+	wg.Wait()
+	return out
+}
+
+// CachedRun is Run with a verdict-cache layer in front. For each
+// package it does, in order:
+//
+//  1. Republish guard. If the cache holds a prior entry for the same
+//     (ecosystem, name, version) with a different Integrity, emit a
+//     Block CheckResult immediately and skip the checker stack. This
+//     catches the supply-chain pattern where an attacker takes over
+//     a maintainer account and overwrites a known-good version with
+//     a malicious payload — the bytes change while the version
+//     number doesn't, and only an integrity comparison spots it.
+//
+//  2. Exact-match lookup. Same (eco, name, version, integrity)
+//     returns the cached results — no network, no checker work.
+//
+//  3. Fresh run. Checker stack executes; if the aggregate decision
+//     is Approve, the result is stored for future lookups. Warn /
+//     Block / Unknown verdicts are NOT cached: when a user is
+//     chasing a fix, they should see current signal, not yesterday's
+//     verdict.
+//
+// Falls back to plain Run when cache is nil. Same concurrency
+// guarantees as Run; cache reads / writes are independent per
+// package and safe under parallel access (atomic file rename on
+// store, single-file read on lookup).
+func CachedRun(ctx context.Context, checkers []Checker, packages []PackageRef, cache *Cache) []PackageCheck {
+	if cache == nil || cache.Root == "" {
+		return Run(ctx, checkers, packages)
+	}
+	if len(packages) == 0 {
+		return nil
+	}
+	out := make([]PackageCheck, len(packages))
+	sem := make(chan struct{}, maxConcurrentChecks)
+	var wg sync.WaitGroup
+	for i, ref := range packages {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, r PackageRef) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			// 1. Republish guard. Only meaningful when both the
+			//    incoming ref AND a previously-cached entry have a
+			//    non-empty integrity to compare.
+			if r.Integrity != "" {
+				if prev := cache.LookupAnyIntegrity(r.Ecosystem, r.Name, r.Version); prev != nil && prev.Integrity != "" && prev.Integrity != r.Integrity {
+					out[idx] = PackageCheck{
+						Package: r,
+						Results: []CheckResult{{
+							Checker: "republish-guard",
+							Verdict: VerdictBlock,
+							Reason:  fmt.Sprintf("version %s@%s republished with different bytes since %s", r.Name, r.Version, prev.CachedAt.UTC().Format(time.RFC3339)),
+							Detail: fmt.Sprintf(
+								"previously cached integrity: %s\ncurrent install integrity:  %s\n\nA published version was overwritten with different contents — possible maintainer-account takeover or registry compromise. Inspect the upstream registry and audit log before installing.",
+								prev.Integrity, r.Integrity,
+							),
+						}},
+					}
+					return
+				}
+			}
+
+			// 2. Exact-match cache hit.
+			if hit := cache.Lookup(r); hit != nil {
+				out[idx] = PackageCheck{Package: r, Results: hit.Results}
+				return
+			}
+
+			// 3. Cache miss — run the full checker stack.
+			pc := PackageCheck{Package: r}
+			for _, c := range checkers {
+				if ctx.Err() != nil {
+					pc.Results = append(pc.Results, CheckResult{
+						Checker: c.Name(),
+						Verdict: VerdictUnknown,
+						Reason:  "context cancelled before check could run",
+					})
+					continue
+				}
+				pc.Results = append(pc.Results, c.Check(ctx, r))
+			}
+			_ = cache.Store(r, pc)
+			out[idx] = pc
+		}(i, ref)
+	}
+	wg.Wait()
 	return out
 }
 

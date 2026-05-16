@@ -54,11 +54,7 @@ func ResolvePipTree(ctx context.Context, pipPath string, installArgs []string) (
 	}, cleaned...)
 	cmd := exec.CommandContext(ctx, pip, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("pip install --dry-run --report failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("pip", "install --dry-run --report", out, err)
 	}
 	return parsePipReport(reportPath, installArgs)
 }
@@ -74,7 +70,13 @@ func parsePipReport(reportPath string, installArgs []string) ([]PackageRef, erro
 				Name    string `json:"name"`
 				Version string `json:"version"`
 			} `json:"metadata"`
-			IsDirect bool `json:"is_direct"`
+			IsDirect     bool `json:"is_direct"`
+			DownloadInfo struct {
+				ArchiveInfo struct {
+					// pip emits "sha256=<hex>" (PEP 658).
+					Hash string `json:"hash"`
+				} `json:"archive_info"`
+			} `json:"download_info"`
 		} `json:"install"`
 	}
 	if err := json.Unmarshal(data, &report); err != nil {
@@ -99,6 +101,7 @@ func parsePipReport(reportPath string, installArgs []string) ([]PackageRef, erro
 			Name:      name,
 			Version:   version,
 			Direct:    entry.IsDirect || directs[name],
+			Integrity: entry.DownloadInfo.ArchiveInfo.Hash,
 		})
 	}
 	return refs, nil

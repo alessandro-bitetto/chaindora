@@ -93,17 +93,26 @@ fix-plan integration) live alongside.
             ▼
    ┌───────────────────────────────────────────────────┐
    │  Resolve full install tree (NO code execution):   │
-   │    resolve_npm.go / resolve_pip.go / ...          │
-   │  → []PackageRef (direct + transitive)             │
+   │    resolve_npm / resolve_pip / resolve_nuget /    │
+   │    resolve_composer / resolve_poetry / ... (30    │
+   │    resolvers, 42 PM names — many share)           │
+   │  → []PackageRef (eco, name, version, integrity)   │
    └────────────────┬──────────────────────────────────┘
                     │
                     ▼
    ┌───────────────────────────────────────────────────┐
+   │  CachedRun(ctx, checkers, refs, cache):           │
+   │    1. republish-guard: cache has same (eco,name,  │
+   │       version) with DIFFERENT integrity? → Block  │
+   │    2. exact-match cache hit → return cached       │
+   │    3. miss → run checker stack, store Approve     │
+   │                                                    │
    │  buildCheckerStack(Probes, policy):               │
    │    allowlist → osv-malicious → cooldown →         │
    │    publisher-change → maintainer-trust →          │
    │    provenance → static-pattern → version-diff →   │
    │    git-url                                         │
+   │  (bounded worker pool, 16 concurrent packages)    │
    └────────────────┬──────────────────────────────────┘
                     │
                     ▼
@@ -153,7 +162,10 @@ internal/
     {render,scanprojects,registries_helper}.go    shared helpers
 
   gate/                     install-time prevention (v0.9+)
-    gate.go                 Verdict / Checker / Policy / Run orchestrator
+    gate.go                 Verdict / Checker / Policy / Run / CachedRun
+    cache.go                ~/.chaindora/gate-cache/ + republish-guard
+    errors.go               PMError vs chdora-internal-error split
+    integrity_fetch.go      rubygems.org + Maven Central .sha1 fetchers
     probes.go               VersionProbe + ProvenanceProbe + dispatch
     allowlist.go            chaindora.yml schema + Config + Checker
     cooldown.go             registry publish-date check
@@ -164,8 +176,16 @@ internal/
     static.go               tarball download + per-language patterns
     versiondiff.go          delta scoring between bumps
     giturl.go               host-tier + ref-pin + GitHub-API enrichment
-    resolve_{npm,yarn,pnpm,pip,cargo,bundler,mvn,gomod}.go
-                            per-package-manager dry-run resolvers
+    resolve_*.go            30 per-PM resolvers covering 42 PM names:
+                            npm/yarn/pnpm/bun/deno (JS), pip/poetry/uv/
+                            pipenv/pdm (Python), nuget/paket (.NET),
+                            composer (PHP), cargo (Rust), gomod (Go),
+                            mvn/gradle/sbt (JVM), bundler (Ruby),
+                            cocoapods/swiftpm/carthage (Apple),
+                            pub (Dart), hex/rebar3 (BEAM),
+                            stack/cabal (Haskell), conda, brew, conan,
+                            vcpkg, opam, julia, renv, cpan, luarocks,
+                            elm, nimble, shards, zig
 
   server/                   v0.13 fleet mode
     server.go               HTTP routes + auth middleware

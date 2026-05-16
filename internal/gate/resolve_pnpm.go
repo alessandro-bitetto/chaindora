@@ -49,11 +49,7 @@ func ResolvePnpmTree(ctx context.Context, pnpmPath string, addArgs []string) ([]
 	cmd := exec.CommandContext(ctx, pnpm, args...)
 	cmd.Dir = tmp
 	if out, err := cmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("pnpm add --lockfile-only failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("pnpm", "add --lockfile-only", out, err)
 	}
 	return parsePnpmLock(tmp, addArgs)
 }
@@ -69,7 +65,12 @@ func parsePnpmLock(dir string, addArgs []string) ([]PackageRef, error) {
 	}
 	var lock struct {
 		Packages map[string]struct {
-			Version string `yaml:"version"`
+			Version   string `yaml:"version"`
+			Integrity string `yaml:"integrity"`
+			// Pre-v7 lockfile schema used `resolution: {integrity: ...}`.
+			Resolution struct {
+				Integrity string `yaml:"integrity"`
+			} `yaml:"resolution"`
 		} `yaml:"packages"`
 		// Newer pnpm uses `snapshots:` keyed similarly.
 		Snapshots map[string]any `yaml:"snapshots,omitempty"`
@@ -95,11 +96,18 @@ func parsePnpmLock(dir string, addArgs []string) ([]PackageRef, error) {
 			continue
 		}
 		seen[ident] = struct{}{}
+		// v7+ flattened integrity to a top-level field; pre-v7
+		// nested it under resolution. Take whichever has a value.
+		integrity := entry.Integrity
+		if integrity == "" {
+			integrity = entry.Resolution.Integrity
+		}
 		refs = append(refs, PackageRef{
 			Ecosystem: "npm",
 			Name:      name,
 			Version:   version,
 			Direct:    directs[name],
+			Integrity: integrity,
 		})
 	}
 	return refs, nil
@@ -181,11 +189,7 @@ func ResolvePnpmUpdateAll(ctx context.Context, pnpmPath, cwd string) ([]PackageR
 	)
 	cmd.Dir = tmp
 	if out, err := cmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("pnpm update --lockfile-only failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("pnpm", "update --lockfile-only", out, err)
 	}
 	// Reuse the standard parser; pass no addArgs so directs comes
 	// from the pnpm lockfile structure itself (top-level importers).

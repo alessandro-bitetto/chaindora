@@ -24,7 +24,14 @@ import (
 // Package managers we know how to shim. Even ecosystems chdora
 // doesn't gate yet get a shim — the shim falls through to
 // passThroughToReal so it's safe to enable everywhere.
-var shimManagers = []string{"npm", "yarn", "pnpm", "pip", "pip3", "cargo", "bundle", "gem", "mvn", "go"}
+var shimManagers = []string{"npm", "yarn", "pnpm", "pip", "pip3", "cargo", "bundle", "gem", "mvn", "go",
+	"dotnet", "composer", "poetry", "uv", "gradle",
+	"pod", "swift", "dart", "flutter", "mix",
+	"bun", "conda", "mamba", "micromamba", "brew", "conan",
+	"pipenv", "pdm", "deno", "stack", "cabal", "sbt", "opam",
+	"rebar3", "paket", "vcpkg",
+	"cpanm", "luarocks", "carthage", "elm", "nimble", "shards", "zig",
+	"julia", "R", "Rscript"}
 
 var gateInstallCmd = &cobra.Command{
 	Use:   "install",
@@ -139,7 +146,7 @@ var gateStatusCmd = &cobra.Command{
 			installed := fileExists(path)
 			real, _ := findRealPackageManager(pm)
 			gated := "false"
-			if pm == "npm" {
+			if isGatedPM(pm) {
 				gated = "true"
 			}
 			switch {
@@ -151,6 +158,9 @@ var gateStatusCmd = &cobra.Command{
 				fmt.Fprintf(os.Stderr, "  %-6s shim=missing               (real: %s)\n", pm, real)
 			}
 		}
+		fmt.Fprintln(os.Stderr, "\nTo audit shim overhead on non-install verbs (expected <100ms):")
+		fmt.Fprintln(os.Stderr, "    time npm run --silent noop   # without chdora")
+		fmt.Fprintln(os.Stderr, "    time npm run --silent noop   # with chdora shim on PATH")
 		return nil
 	},
 }

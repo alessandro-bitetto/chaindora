@@ -76,17 +76,14 @@ func ResolveMavenTree(ctx context.Context, mvnPath string, addArgs []string) ([]
 	)
 	cmd.Dir = tmp
 	if out, err := cmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("mvn dependency:list failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("mvn", "dependency:list", out, err)
 	}
 	data, err := os.ReadFile(filepath.Join(tmp, "deps.txt"))
 	if err != nil {
 		return nil, fmt.Errorf("read mvn deps.txt: %w", err)
 	}
-	return parseMavenDepsList(data, coords), nil
+	refs := parseMavenDepsList(data, coords)
+	return enrichMavenIntegrity(ctx, refs), nil
 }
 
 type mavenCoord struct {

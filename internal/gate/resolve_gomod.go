@@ -71,11 +71,7 @@ func ResolveGoModTree(ctx context.Context, goPath string, args []string) ([]Pack
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		snippet := strings.TrimSpace(stderr.String())
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("go mod download -json all failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("go", "mod download -json all", stderr.Bytes(), err)
 	}
 	return parseGoModDownloadJSON(stdout.Bytes(), mods)
 }
@@ -129,6 +125,7 @@ func parseGoModDownloadJSON(data []byte, directs []goModArg) ([]PackageRef, erro
 		var entry struct {
 			Path    string `json:"Path"`
 			Version string `json:"Version"`
+			Sum     string `json:"Sum"`
 			Error   string `json:"Error"`
 		}
 		if err := dec.Decode(&entry); err != nil {
@@ -154,6 +151,7 @@ func parseGoModDownloadJSON(data []byte, directs []goModArg) ([]PackageRef, erro
 			Name:      entry.Path,
 			Version:   entry.Version,
 			Direct:    isDirect,
+			Integrity: entry.Sum,
 		})
 	}
 	return refs, nil

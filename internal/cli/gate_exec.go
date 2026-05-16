@@ -91,6 +91,10 @@ Examples:
 		if err != nil {
 			return err
 		}
+		// Capture cwd here so the gradle resolver's closure can
+		// see it. Other resolvers operate from a synthetic temp
+		// dir and don't read cwd directly.
+		cwd, _ := os.Getwd()
 		var resolve func(context.Context, string, []string) ([]gate.PackageRef, error)
 		var resolveUpdateAll func(context.Context, string, string) ([]gate.PackageRef, error)
 		switch pm {
@@ -120,11 +124,123 @@ Examples:
 			resolve = gate.ResolveMavenTree
 		case "go":
 			resolve = gate.ResolveGoModTree
+		case "dotnet":
+			resolve = gate.ResolveNuGetTree
+		case "composer":
+			resolve = gate.ResolveComposerTree
+		case "poetry":
+			resolve = gate.ResolvePoetryTree
+		case "uv":
+			resolve = gate.ResolveUVTree
+		case "gradle":
+			// Gradle has no install-args path — resolution operates
+			// against the user's actual project. We capture cwd here
+			// rather than threading it through the install-args slice.
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveGradleTree(ctx, bin, cwd)
+			}
+		case "pod":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveCocoaPodsTree(ctx, bin, cwd)
+			}
+		case "swift":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveSwiftPMTree(ctx, bin, cwd)
+			}
+		case "dart", "flutter":
+			// Dispatch on the subverb: `pub add <pkg>` uses the
+			// args-based resolver; `pub get` / `upgrade` uses the
+			// cwd-based one.
+			resolve = func(ctx context.Context, bin string, args []string) ([]gate.PackageRef, error) {
+				if len(args) >= 2 && args[0] == "pub" && args[1] == "add" {
+					return gate.ResolvePubTree(ctx, bin, args[2:])
+				}
+				return gate.ResolvePubFromCwd(ctx, bin, cwd)
+			}
+		case "mix":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveHexTree(ctx, bin, cwd)
+			}
+		case "bun":
+			resolve = gate.ResolveBunTree
+		case "conda", "mamba", "micromamba":
+			resolve = gate.ResolveCondaTree
+		case "brew":
+			resolve = gate.ResolveBrewTree
+		case "conan":
+			resolve = gate.ResolveConanTree
+		case "pipenv":
+			resolve = gate.ResolvePipenvTree
+		case "pdm":
+			resolve = gate.ResolvePDMTree
+		case "deno":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveDenoTree(ctx, bin, cwd)
+			}
+		case "stack":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveStackTree(ctx, bin, cwd)
+			}
+		case "cabal":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveCabalTree(ctx, bin, cwd)
+			}
+		case "sbt":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveSBTTree(ctx, bin, cwd)
+			}
+		case "opam":
+			resolve = gate.ResolveOpamTree
+		case "rebar3":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveRebar3Tree(ctx, bin, cwd)
+			}
+		case "paket":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolvePaketTree(ctx, bin, cwd)
+			}
+		case "vcpkg":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveVcpkgTree(ctx, bin, cwd)
+			}
+		case "cpanm":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveCpanTree(ctx, bin, cwd)
+			}
+		case "luarocks":
+			resolve = gate.ResolveLuaRocksTree
+		case "carthage":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveCarthageTree(ctx, bin, cwd)
+			}
+		case "elm":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveElmTree(ctx, bin, cwd)
+			}
+		case "nimble":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveNimbleTree(ctx, bin, cwd)
+			}
+		case "shards":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveShardsTree(ctx, bin, cwd)
+			}
+		case "zig":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveZigTree(ctx, bin, cwd)
+			}
+		case "julia":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveJuliaTree(ctx, bin, cwd)
+			}
+		case "R", "Rscript":
+			resolve = func(ctx context.Context, bin string, _ []string) ([]gate.PackageRef, error) {
+				return gate.ResolveRenvTree(ctx, bin, cwd)
+			}
 		default:
 			return passThroughToReal(pm, pmArgs)
 		}
 
-		cwd, _ := os.Getwd()
 		cfg, _ := gate.LoadConfig(cwd)
 
 		// Build the checker stack — identical to `gate check`.
@@ -167,32 +283,55 @@ Examples:
 			fmt.Fprintf(os.Stderr, "[chdora] resolving update-all tree (%s) from %s\n", pm, cwd)
 			refs, err = resolveUpdateAll(ctx, realBin, cwd)
 			if err != nil {
+				if pmErr := asPMError(err); pmErr != nil {
+					surfacePMError(pmErr)
+				}
 				return fmt.Errorf("resolve update-all tree: %w", err)
 			}
 		case gateProceed:
 			installArgs := pmArgs[1:]
-			// Skip the gate when EVERY install arg is a flag (no real
-			// packages to vet). `npm install --save-dev` with nothing
-			// after it is effectively the no-args case.
-			realPkgs := 0
-			for _, a := range installArgs {
-				if !strings.HasPrefix(a, "-") {
-					realPkgs++
-				}
+			// dotnet's install verb is two tokens (`add package <id>`).
+			// classifyGateArgs already keyed on both, but the args
+			// slice still carries the "package" subcommand token —
+			// strip it so the resolver sees just the package names.
+			if pm == "dotnet" && len(installArgs) > 0 && installArgs[0] == "package" {
+				installArgs = installArgs[1:]
 			}
-			if realPkgs == 0 {
-				return execReal(realBin, pmArgs)
+			// Cwd-only PMs (gradle/pod/swift/mix and the dart-pub-cwd
+			// path) have no install-args contract — the user's manifest
+			// is the input. Skip the no-args passthrough other PMs use
+			// for `npm install` (lockfile restore from vetted state).
+			if !isPMCwdOnly(pm) {
+				// Skip the gate when EVERY install arg is a flag (no real
+				// packages to vet). `npm install --save-dev` with nothing
+				// after it is effectively the no-args case.
+				realPkgs := 0
+				for _, a := range installArgs {
+					if !strings.HasPrefix(a, "-") {
+						realPkgs++
+					}
+				}
+				if realPkgs == 0 {
+					return execReal(realBin, pmArgs)
+				}
 			}
 			fmt.Fprintf(os.Stderr, "[chdora] resolving install tree (%s) for: %s\n", pm, strings.Join(pmArgs, " "))
 			refs, err = resolve(ctx, realBin, installArgs)
 			if err != nil {
+				if pmErr := asPMError(err); pmErr != nil {
+					surfacePMError(pmErr)
+				}
 				return fmt.Errorf("resolve tree: %w", err)
 			}
 		}
 		fmt.Fprintf(os.Stderr, "[chdora] tree resolved: %d unique (name, version) tuple(s)\n", len(refs))
 
-		// Gate every node.
-		results := gate.Run(ctx, checkers, refs)
+		// Gate every node. CachedRun reads from ~/.chaindora/gate-cache/
+		// (per-(eco,name,version,integrity) verdicts, TTL 7 days for
+		// Approve-only) and inserts a republish-guard finding when
+		// the same name@version reappears with different integrity.
+		cache := gate.NewCache(gate.DefaultCacheRoot(), 7*24*time.Hour)
+		results := gate.CachedRun(ctx, checkers, refs, cache)
 		gate.SortByVerdict(results)
 
 		// Render results — show problems first, then a summary.
@@ -403,6 +542,215 @@ func isGoInstallVerb(v string) bool {
 	return v == "get" || v == "install"
 }
 
+// isComposerInstallVerb — `composer require` is the package-add
+// verb. `composer install` restores from existing composer.lock
+// (already-vetted state → passthrough).
+func isComposerInstallVerb(v string) bool { return v == "require" }
+
+// isComposerUpdateVerb — `composer update [pkg]` re-resolves the
+// lockfile against newer compatible versions.
+func isComposerUpdateVerb(v string) bool { return v == "update" }
+
+// isPoetryInstallVerb / UpdateVerb — Poetry's `add` adds to
+// pyproject.toml + lockfile; `update` re-resolves to latest
+// compatible. `install` restores from existing poetry.lock so
+// passes through.
+func isPoetryInstallVerb(v string) bool { return v == "add" }
+func isPoetryUpdateVerb(v string) bool  { return v == "update" }
+
+// isUVInstallVerb / UpdateVerb — uv's `add` adds to pyproject.toml.
+// `uv lock --upgrade` re-resolves; `uv sync` restores from lockfile.
+func isUVInstallVerb(v string) bool { return v == "add" }
+func isUVUpdateVerb(v string) bool  { return v == "lock" }
+
+// isGradleResolvingVerb covers the gradle tasks that trigger
+// dependency resolution. Whitelist — anything not listed
+// (`gradle wrapper`, `gradle init`, `gradle tasks`, `gradle clean`)
+// passes through. The list errs on the side of "gate slightly more
+// than necessary" because a missed verb that does pull deps
+// silently bypasses the gate.
+func isGradleResolvingVerb(v string) bool {
+	switch v {
+	case "build", "dependencies", "assemble", "test", "check",
+		"compile", "compileJava", "compileKotlin",
+		"compileTestJava", "compileTestKotlin",
+		"run", "bootRun", "publish", "publishToMavenLocal",
+		"installDist", "shadowJar":
+		return true
+	}
+	return false
+}
+
+// isCocoaPodsResolvingVerb — `pod install` / `pod update` both
+// trigger dep resolution. Other verbs (`pod init`, `pod search`,
+// `pod outdated`) don't pull new content.
+func isCocoaPodsResolvingVerb(v string) bool {
+	return v == "install" || v == "update"
+}
+
+// isHexResolvingVerb — Mix dependency verbs that fetch from
+// hex.pm. `mix deps.compile` also fetches if cache is cold.
+func isHexResolvingVerb(v string) bool {
+	switch v {
+	case "deps.get", "deps.update", "deps.compile":
+		return true
+	}
+	return false
+}
+
+// isBunInstallVerb — bun's add / install / i are all install
+// verbs (i is alias). Lockfile-restore (`bun install` alone with
+// existing bun.lockb) is handled by the no-args passthrough at
+// the bottom of classifyGateArgs.
+func isBunInstallVerb(v string) bool {
+	switch v {
+	case "add", "install", "i":
+		return true
+	}
+	return false
+}
+
+// isCondaInstallVerb — conda / mamba / micromamba all expose
+// `install` as the package-fetch verb. `update` and `upgrade`
+// also pull new content.
+func isCondaInstallVerb(v string) bool {
+	switch v {
+	case "install", "update", "upgrade":
+		return true
+	}
+	return false
+}
+
+// isBrewInstallVerb — `brew install <formula>` is the gateable
+// verb. `brew upgrade` and `brew reinstall` also fetch.
+func isBrewInstallVerb(v string) bool {
+	switch v {
+	case "install", "upgrade", "reinstall":
+		return true
+	}
+	return false
+}
+
+// isConanInstallVerb — Conan 2.x's `conan install <recipe>` is
+// the gateable verb. We also gate `conan graph info` since users
+// occasionally invoke it to surface vulnerabilities in their
+// dep graph.
+func isConanInstallVerb(v string) bool {
+	switch v {
+	case "install":
+		return true
+	}
+	return false
+}
+
+// Round 1 verb classifiers.
+
+func isPipenvInstallVerb(v string) bool { return v == "install" }
+func isPDMInstallVerb(v string) bool    { return v == "add" }
+func isDenoResolvingVerb(v string) bool {
+	switch v {
+	case "cache", "add", "install":
+		return true
+	}
+	return false
+}
+func isStackResolvingVerb(v string) bool {
+	switch v {
+	case "build", "test", "ghci", "ls":
+		return true
+	}
+	return false
+}
+func isCabalResolvingVerb(v string) bool {
+	switch v {
+	case "build", "install", "test", "run":
+		return true
+	}
+	return false
+}
+func isSBTResolvingVerb(v string) bool {
+	switch v {
+	case "compile", "build", "test", "run", "package", "publishLocal", "dependencyTree":
+		return true
+	}
+	return false
+}
+func isOpamInstallVerb(v string) bool { return v == "install" }
+func isRebar3ResolvingVerb(v string) bool {
+	switch v {
+	case "compile", "build", "do", "deps", "release":
+		return true
+	}
+	return false
+}
+func isPaketResolvingVerb(v string) bool {
+	switch v {
+	case "install", "update", "restore":
+		return true
+	}
+	return false
+}
+func isVcpkgInstallVerb(v string) bool { return v == "install" }
+
+// Round 2 verb classifiers.
+
+// cpanm is unusual: most invocations are `cpanm Module::Name`
+// with no explicit verb. We treat any non-flag first arg as an
+// install request.
+func isCpanmInstallArg(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	return !strings.HasPrefix(args[0], "-")
+}
+func isLuaRocksInstallVerb(v string) bool { return v == "install" }
+func isCarthageResolvingVerb(v string) bool {
+	switch v {
+	case "update", "bootstrap", "build":
+		return true
+	}
+	return false
+}
+func isElmInstallVerb(v string) bool { return v == "install" }
+func isNimbleInstallVerb(v string) bool {
+	switch v {
+	case "install", "develop":
+		return true
+	}
+	return false
+}
+func isShardsResolvingVerb(v string) bool {
+	switch v {
+	case "install", "update", "build":
+		return true
+	}
+	return false
+}
+func isZigResolvingVerb(v string) bool {
+	switch v {
+	case "build", "test", "run":
+		return true
+	}
+	return false
+}
+
+// isPMCwdOnly reports whether a PM's resolver operates against
+// the user's project cwd rather than installArgs. These PMs have
+// no "install <pkg>" CLI — devs edit the manifest by hand and run
+// a resolver verb. The gate proceeds even when args contain only
+// the verb (no positional packages to vet from the CLI).
+func isPMCwdOnly(pm string) bool {
+	switch pm {
+	case "gradle", "pod", "swift", "mix":
+		return true
+	// Round 1 + 2 cwd-only additions.
+	case "deno", "stack", "cabal", "sbt", "rebar3", "paket",
+		"carthage", "shards", "zig", "julia", "R", "Rscript", "renv":
+		return true
+	}
+	return false
+}
+
 // gateDecision describes what the dispatcher should do with a
 // (package-manager, args) pair.
 type gateDecision int
@@ -452,14 +800,127 @@ func classifyGateArgs(pm string, args []string) gateDecision {
 		isInstall = isMavenInstallVerb(verb)
 	case "go":
 		isInstall = isGoInstallVerb(verb)
+	case "dotnet":
+		// dotnet's install verb is two tokens: `dotnet add package <id>`.
+		// `dotnet add reference / project / ...` are different subcommands
+		// (project-graph manipulation, no registry fetch) — passthrough.
+		if len(args) >= 2 && args[0] == "add" && args[1] == "package" {
+			isInstall = true
+		}
+	case "composer":
+		isInstall, isUpdate = isComposerInstallVerb(verb), isComposerUpdateVerb(verb)
+	case "poetry":
+		isInstall, isUpdate = isPoetryInstallVerb(verb), isPoetryUpdateVerb(verb)
+	case "uv":
+		isInstall, isUpdate = isUVInstallVerb(verb), isUVUpdateVerb(verb)
+	case "gradle":
+		// Gradle has no install-args verb; we gate on tasks that
+		// trigger resolution. classifyGateArgs returns gateProceed
+		// for these even though args[0] is just the task name.
+		if isGradleResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "pod":
+		if isCocoaPodsResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "swift":
+		// `swift package resolve` / `swift package update` — two-token
+		// verbs. Other `swift package ...` subcommands (init, dump-package,
+		// show-dependencies) don't fetch.
+		if len(args) >= 2 && args[0] == "package" {
+			switch args[1] {
+			case "resolve", "update":
+				isInstall = true
+			}
+		}
+	case "dart", "flutter":
+		// `dart pub add <pkg>` (with packages → install).
+		// `dart pub get` / `upgrade` (cwd-based — also install).
+		if len(args) >= 2 && args[0] == "pub" {
+			switch args[1] {
+			case "add", "get", "upgrade":
+				isInstall = true
+			}
+		}
+	case "mix":
+		if isHexResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "bun":
+		isInstall = isBunInstallVerb(verb)
+	case "conda", "mamba", "micromamba":
+		isInstall = isCondaInstallVerb(verb)
+	case "brew":
+		isInstall = isBrewInstallVerb(verb)
+	case "conan":
+		isInstall = isConanInstallVerb(verb)
+	case "vcpkg":
+		isInstall = isVcpkgInstallVerb(verb)
+	case "pipenv":
+		isInstall = isPipenvInstallVerb(verb)
+	case "pdm":
+		isInstall = isPDMInstallVerb(verb)
+	case "deno":
+		isInstall = isDenoResolvingVerb(verb)
+	case "stack":
+		if isStackResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "cabal":
+		if isCabalResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "sbt":
+		if isSBTResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "opam":
+		isInstall = isOpamInstallVerb(verb)
+	case "rebar3":
+		if isRebar3ResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "paket":
+		if isPaketResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "cpanm":
+		isInstall = isCpanmInstallArg(args)
+	case "luarocks":
+		isInstall = isLuaRocksInstallVerb(verb)
+	case "carthage":
+		if isCarthageResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "elm":
+		isInstall = isElmInstallVerb(verb)
+	case "nimble":
+		isInstall = isNimbleInstallVerb(verb)
+	case "shards":
+		if isShardsResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "zig":
+		if isZigResolvingVerb(verb) {
+			isInstall = true
+		}
+	case "julia", "R", "Rscript":
+		// Pkg.jl and renv are REPL-driven; no clean install verb
+		// to hook into at runtime. Gate every invocation that has
+		// a project file in cwd — the cwd-only resolver will read
+		// Manifest.toml / renv.lock and emit refs, otherwise no-op.
+		isInstall = true
 	default:
 		return gatePassthrough
 	}
 	if !isInstall && !isUpdate {
 		return gatePassthrough
 	}
-	if isInstall && len(args) == 1 {
-		// `npm install` alone — lockfile restore.
+	if isInstall && len(args) == 1 && !isPMCwdOnly(pm) {
+		// `npm install` alone — lockfile restore. Cwd-only PMs
+		// (gradle/pod/swift/mix) intentionally have no positional
+		// args; we still want to resolve their project state.
 		return gatePassthrough
 	}
 	if isUpdate && len(args) == 1 {
@@ -546,6 +1007,61 @@ func chaindoraShimDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".chaindora", "bin"), nil
+}
+
+// asPMError unwraps an error chain looking for a *gate.PMError.
+// Returns nil when err didn't originate from a non-zero PM exit
+// (i.e. it's a chdora-internal failure — parse, network, etc.).
+// The gate uses this to distinguish "the PM said no, just surface
+// its diagnostics" from "chdora couldn't even ask".
+func asPMError(err error) *gate.PMError {
+	var pmErr *gate.PMError
+	if errors.As(err, &pmErr) {
+		return pmErr
+	}
+	return nil
+}
+
+// surfacePMError prints the package manager's captured output
+// verbatim to stderr and exits with the PM's exit code. Used when
+// the resolver step failed because the underlying PM rejected the
+// command (typo'd package, 404, peer-dep conflict, malformed
+// lockfile, ...). The install would have failed regardless of
+// chdora, so the gate stays out of the way — no chdora prefix, no
+// extra wrapping, no second invocation of the PM.
+//
+// Never returns.
+func surfacePMError(pmErr *gate.PMError) {
+	if len(pmErr.Output) > 0 {
+		os.Stderr.Write(pmErr.Output)
+		if pmErr.Output[len(pmErr.Output)-1] != '\n' {
+			os.Stderr.WriteString("\n")
+		}
+	}
+	code := pmErr.ExitCode
+	if code == 0 {
+		code = 1
+	}
+	os.Exit(code)
+}
+
+// isGatedPM reports whether the given package manager name is one
+// chdora gate actively wraps (vs falls through). Single source of
+// truth — `chdora gate status` reads from this so its display
+// can't drift from the switch in gateExecCmd.
+func isGatedPM(name string) bool {
+	switch name {
+	case "npm", "yarn", "pnpm", "pip", "pip3", "cargo", "bundle", "gem", "mvn", "go",
+		"dotnet", "composer", "poetry", "uv", "gradle",
+		"pod", "swift", "dart", "flutter", "mix",
+		"bun", "conda", "mamba", "micromamba", "brew", "conan",
+		"pipenv", "pdm", "deno", "stack", "cabal", "sbt", "opam",
+		"rebar3", "paket", "vcpkg",
+		"cpanm", "luarocks", "carthage", "elm", "nimble", "shards", "zig",
+		"julia", "R", "Rscript":
+		return true
+	}
+	return false
 }
 
 // passThroughToReal is the fallback path for package managers the

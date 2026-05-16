@@ -21,7 +21,7 @@ matches what you need — or run both side by side.
 
 | Mode | When it runs | What it does | Command |
 |---|---|---|---|
-| **Prevention** | Before `npm install` writes bytes | Resolves the full transitive install tree, runs 9 independent checks against every node, refuses the install if any node fails | `chdora gate ...` |
+| **Prevention** | Before `npm install` writes bytes | Resolves the full transitive install tree across **42 package managers**, runs 10 independent checks against every node, refuses the install if any node fails | `chdora gate ...` |
 | **Detection** | After packages are already on disk | Scans lockfiles, host state, and CI manifests for indicators of a compromise that already happened | `chdora scan` / `audit` / `forensics` / `ci` |
 
 Both modes share the same incident pack, the same OSV.dev integration, and
@@ -46,6 +46,7 @@ malware, and the inventory you already installed before chaindora existed.
 | Host-state compromise indicators (leaked tokens, shell rc tampering, worm-deployed files) | yes | — |
 | Post-compromise persistence (cron, launchd, systemd, Scheduled Tasks) | yes | — |
 | Compromised browser / VS Code extensions | yes | — |
+| Republished version with different bytes (maintainer-account compromise) | — | yes |
 
 Scope: prevention targets what is detectable at install time — known-malicious
 packages, suspicious publisher/maintainer changes, freshly published versions,
@@ -61,39 +62,39 @@ auto-rollback applies retroactively.
 ### Pre-built binary (recommended)
 
 Pick the matching archive from the [Releases page](https://github.com/alessandro-bitetto/chaindora/releases/latest),
-extract, place `chdora` on `$PATH`. Replace `0.13.2` with the version you
+extract, place `chdora` on `$PATH`. Replace `0.14.0` with the version you
 want; `latest` works as a redirect for the most recent tag.
 
 ```sh
 # macOS, Apple Silicon
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_darwin_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # macOS, Intel
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_darwin_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_darwin_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, x86_64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_linux_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_linux_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, ARM64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_linux_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_linux_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Windows, x86_64 (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_windows_amd64.zip" -OutFile chdora.zip
+Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_windows_amd64.zip" -OutFile chdora.zip
 Expand-Archive chdora.zip -DestinationPath .
 Move-Item chdora.exe "$env:USERPROFILE\bin\chdora.exe"   # ensure this dir is on PATH
 
 chdora --version
 ```
 
-Each release publishes a `chaindora_0.13.2_checksums.txt`. Verify before running:
+Each release publishes a `chaindora_0.14.0_checksums.txt`. Verify before running:
 
 ```sh
-curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.2_checksums.txt
-shasum -a 256 -c chaindora_0.13.2_checksums.txt
+curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_checksums.txt
+shasum -a 256 -c chaindora_0.14.0_checksums.txt
 ```
 
 ### From source
@@ -110,7 +111,7 @@ Requires Go 1.22+.
 ```sh
 chdora upgrade               # latest tagged release
 chdora upgrade --check       # report only, don't download
-chdora upgrade --version v0.13.2
+chdora upgrade --version v0.14.0
 ```
 
 `upgrade` refuses on Homebrew-managed binaries — use `brew upgrade` there.
@@ -120,9 +121,12 @@ chdora upgrade --version v0.13.2
 ## Mode 1: Prevention (`chdora gate`)
 
 The gate sits between you and the package registry. Every `npm install`
-resolves the full transitive tree, runs every node through a stack of
-nine independent checkers, and refuses the install if any node fails the
-configured policy. Fail-closed by design: network errors block, not pass.
+(or `dotnet add package`, `composer require`, `cargo add`, `bundle add`,
+`pod install`, `mix deps.get`, `gradle build`, … — **42 package managers
+across 20+ language ecosystems**) resolves the full transitive tree, runs
+every node through a stack of ten independent checkers, and refuses the
+install if any node fails the configured policy. Fail-closed by design:
+network errors block, not pass.
 
 ### Activating the gate
 
@@ -162,6 +166,7 @@ For every `(ecosystem, name, version)` in the resolved tree:
 | `static-pattern` | Downloads the tarball, scans for curl-pipe-shell in scripts, `eval(<dynamic>)`, base64-encoded URLs, 256+ char high-entropy blobs. Score ≥3 → Block, ≥1 → Warn |
 | `version-diff` | Scores the *delta* in static-pattern hits between requested and prior version. Catches "previously clean, now malicious" without false-positiving on libraries that always used eval |
 | `git-url` | For `npm install user/repo`, `pip install git+...`, CMake `FetchContent` etc.: host-tier + ref-pin + transport-scheme evaluation. 40-hex SHA on a well-known host = Approve; branch refs / unknown hosts / `http://` = Block under Strict |
+| `republish-guard` | Block when a previously-cached `(name, version)` reappears with a DIFFERENT content hash. Catches the maintainer-account-takeover pattern where an attacker republishes a known-good version with malicious bytes. Driven by `~/.chaindora/gate-cache/` |
 
 Per-package decision = worst Verdict across all checkers. Whole-install
 decision = worst per-package decision.
@@ -399,7 +404,7 @@ A daily cron (`0 9 * * * chdora update`) is the recommended setup.
 ```sh
 chdora upgrade                 # latest tagged release
 chdora upgrade --check         # what's available
-chdora upgrade --version v0.13.2
+chdora upgrade --version v0.14.0
 ```
 
 Verifies the SHA-256 against the published checksums file before swap.
@@ -410,21 +415,70 @@ overwrite running executables).
 
 ## Supported ecosystems
 
-| Ecosystem | Manifests recognized | OSV.dev | Gate |
-|---|---|:---:|:---:|
-| npm | `package-lock.json` (v1/v2/v3), `yarn.lock`, `pnpm-lock.yaml` | yes | **yes** |
-| PyPI | `requirements.txt`, `poetry.lock`, `uv.lock`, `Pipfile.lock` | yes | **yes** |
-| RubyGems | `Gemfile.lock` | yes | **yes** |
-| crates.io | `Cargo.lock` | yes | **yes** |
-| Maven Central | `pom.xml` (incl. `<dependencyManagement>`) | yes | **yes** |
-| Go modules | `go.sum` | yes | **yes** |
-| Docker | `Dockerfile`, `docker-compose.yml`, CI YAML `image:` | yes (OCI) | — |
-| GitHub Actions | `.github/workflows/*.yml` | — | — |
-| Gitea Actions | `.gitea/workflows/*.yml` | — | — |
-| GitLab CI | `.gitlab-ci.yml` (`include:`) | — | — |
-| Bitbucket Pipelines | `bitbucket-pipelines.yml` (`pipe:`) | — | — |
-| CircleCI Orbs | `.circleci/config.yml` (`orbs:`) | — | — |
-| Azure Pipelines | `azure-pipelines.yml` (`task:`) | — | — |
+42 package managers across 20+ language ecosystems are gated at install
+time. **Gate** means chaindora resolves the full transitive tree, runs
+the checker stack, and refuses installs that fail policy. **OSV** means
+the OSV.dev vulnerability database is queried for that ecosystem.
+
+### Tier 1 — gated with full integrity coverage
+
+These have lockfile-side content hashes used directly for the
+republish-guard. Vulnerability data flows through OSV.
+
+| Ecosystem | Package managers | OSV |
+|---|---|:---:|
+| npm | `npm`, `yarn` (classic + Berry), `pnpm`, `bun`, `deno` | yes |
+| PyPI | `pip`, `poetry`, `uv`, `pipenv`, `pdm` | yes |
+| Java / JVM | `mvn`, `gradle`, `sbt` | yes (Maven) |
+| .NET | `dotnet` (NuGet), `paket` | yes (NuGet) |
+| Ruby | `bundle`, `gem` | yes |
+| PHP | `composer` | yes (Packagist) |
+| Rust | `cargo` | yes |
+| Go | `go` modules | yes |
+| Mobile (Apple) | `pod` (CocoaPods), `swift` (SPM), `carthage` | yes (SwiftURL) |
+| Dart/Flutter | `dart`, `flutter` | yes (Pub) |
+| Elixir/Erlang | `mix` (Hex), `rebar3` | yes (Hex) |
+| Haskell | `stack`, `cabal` | yes (Hackage) |
+| R | `R`, `Rscript` (renv) | yes (CRAN) |
+
+### Tier 2 — gated; integrity via registry fetch
+
+Lockfile doesn't carry hashes; chaindora fetches from the registry.
+
+| Ecosystem | Package managers | Integrity source |
+|---|---|---|
+| Bundler | `bundle add`, `bundle update` | rubygems.org API `sha` |
+| Maven / Gradle / sbt | (above) | repo1.maven.org `.jar.sha1` |
+| Homebrew | `brew install`, `upgrade`, `reinstall` | `brew info --json=v2` |
+
+### Tier 3 — gated; no OSV coverage but signal from cooldown / republish-guard / static-pattern
+
+| Ecosystem | Package managers |
+|---|---|
+| Conda | `conda`, `mamba`, `micromamba` |
+| C/C++ | `conan`, `vcpkg` |
+| OCaml | `opam` |
+| Julia | `julia` (Pkg.jl, Manifest.toml) |
+| Perl | `cpanm` |
+| Lua | `luarocks` |
+| Niche | `elm`, `nimble` (Nim), `shards` (Crystal), `zig` |
+
+### Detection only (no registry boundary)
+
+| Ecosystem | Manifests recognized |
+|---|---|
+| Docker / OCI | `Dockerfile`, `docker-compose.yml`, CI YAML `image:` |
+| GitHub Actions / Gitea Actions | `.github/workflows/*.yml`, `.gitea/workflows/*.yml` |
+| GitLab CI | `.gitlab-ci.yml` (`include:`) |
+| Bitbucket Pipelines | `bitbucket-pipelines.yml` (`pipe:`) |
+| CircleCI Orbs | `.circleci/config.yml` (`orbs:`) |
+| Azure Pipelines | `azure-pipelines.yml` (`task:`) |
+
+OS-level package managers (apt / yum / dnf / apk / winget / chocolatey)
+are **deliberately out of scope for the gate** — different threat
+model, root-level install boundary, distribution maintainers do their
+own vetting. Detection-side coverage (`chdora forensics --deep`)
+enumerates installed system packages and matches against OSV.
 
 Findings normalize to [Package URLs (PURLs)](https://github.com/package-url/purl-spec).
 
@@ -474,18 +528,25 @@ surface gap identified there.
   TLS termination is bring-your-own (caddy / nginx / Cloudflare Tunnel).
   Webhook ingest, scheduled fleet scans, SAML/OIDC dashboard auth and a
   SQL backend remain on the v0.13.x backlog — not yet implemented.
-- **v0.14** — IaC supply chain: Terraform / OpenTofu modules +
-  providers, Helm charts (deps + hooks), Ansible Galaxy,
-  Composer/Packagist (PHP), NuGet (.NET).
+- **v0.14** ✅ shipped — package-manager coverage push:
+  Composer/Packagist (PHP), NuGet (.NET), Poetry / uv / Pipenv /
+  PDM (Python alts), Gradle, sbt, CocoaPods + Swift PM + Carthage
+  (mobile), Hex/Mix + rebar3 (Erlang/Elixir), Pub (Dart/Flutter),
+  bun + deno (modern JS), conda + mamba, Homebrew, Conan, vcpkg,
+  Paket (F#), stack + cabal (Haskell), opam (OCaml), renv (R),
+  Pkg.jl (Julia), cpanm (Perl), luarocks, Elm, nimble, shards, zig.
+  **42 package managers in total.** Hash-keyed verdict cache at
+  `~/.chaindora/gate-cache/` doubles as a republish-attack detector
+  (same `name@version` reappearing with different bytes → Block).
 - **v0.15** — AI / ML supply chain: HuggingFace pickle scanner,
   PyTorch / TF / Keras model file scanner, MCP server / Claude
-  Code skill auditor, Gradle (separate parser from Maven).
-- **v0.16** — Emerging surfaces: `bun.lockb` binary lockfile, Deno
-  URL-import map evaluation, devcontainer feature scanner,
+  Code skill auditor.
+- **v0.16** — IaC supply chain: Terraform / OpenTofu modules +
+  providers, Helm charts (deps + hooks), Ansible Galaxy.
+- **v0.17** — Emerging surfaces: devcontainer feature scanner,
   slopsquatting heuristic (LLM-hallucinated typosquats), Vim /
-  Neovim / JetBrains plugin-manager inventory.
-- **v0.17+** — Long tail (CRAN, opam, Hackage, LuaRocks, Julia,
-  PlatformIO, game-engine asset stores) — community-driven.
+  Neovim / JetBrains plugin-manager inventory; PlatformIO; game-
+  engine asset stores — community-driven.
 - **v1.0** — Reproducible-build verification: for sigstore-attested
   packages, byte-compare the published tarball against what builds
   from the attested git commit. Closes the "registry compromised

@@ -78,13 +78,7 @@ func ResolveNPMTree(ctx context.Context, npmPath string, installArgs []string) (
 	// (404 on a typo'd package) shows up cleaner when combined.
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		// Preserve a snippet of npm's output so the user can debug
-		// "did I typo the package name" without re-running.
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("npm install --package-lock-only failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("npm", "install --package-lock-only", out, err)
 	}
 
 	lockPath := filepath.Join(tmp, "package-lock.json")
@@ -142,11 +136,7 @@ func ResolveNPMUpdateAll(ctx context.Context, npmPath, cwd string) ([]PackageRef
 	cmd.Dir = tmp
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("npm update --package-lock-only failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("npm", "update --package-lock-only", out, err)
 	}
 	data, err := os.ReadFile(filepath.Join(tmp, "package-lock.json"))
 	if err != nil {
@@ -197,8 +187,9 @@ func parseNPMLockTree(data []byte, installArgs []string) ([]PackageRef, error) {
 func parseNPMLockTreeWithDirects(data []byte, directs map[string]bool) ([]PackageRef, error) {
 	var lock struct {
 		Packages map[string]struct {
-			Version  string `json:"version"`
-			Resolved string `json:"resolved"`
+			Version   string `json:"version"`
+			Resolved  string `json:"resolved"`
+			Integrity string `json:"integrity"`
 		} `json:"packages"`
 	}
 	if err := json.Unmarshal(data, &lock); err != nil {
@@ -253,6 +244,7 @@ func parseNPMLockTreeWithDirects(data []byte, directs map[string]bool) ([]Packag
 			Name:      name,
 			Version:   entry.Version,
 			Direct:    directs[name],
+			Integrity: entry.Integrity,
 		})
 	}
 	return refs, nil

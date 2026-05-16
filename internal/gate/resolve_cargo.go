@@ -65,11 +65,7 @@ func ResolveCargoTree(ctx context.Context, cargoPath string, addArgs []string) (
 	cmd := exec.CommandContext(ctx, cargo, "generate-lockfile")
 	cmd.Dir = tmp
 	if out, err := cmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("cargo generate-lockfile failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("cargo", "generate-lockfile", out, err)
 	}
 
 	data, err := os.ReadFile(filepath.Join(tmp, "Cargo.lock"))
@@ -122,6 +118,7 @@ func parseCargoLockTree(data []byte, directs []cargoDepArg) []PackageRef {
 		name := cargoLockField(b, "name")
 		version := cargoLockField(b, "version")
 		source := cargoLockField(b, "source")
+		checksum := cargoLockField(b, "checksum")
 		// Skip non-registry sources and our synthetic root.
 		if name == "" || version == "" || name == "chdora-gate-resolve" {
 			continue
@@ -142,6 +139,7 @@ func parseCargoLockTree(data []byte, directs []cargoDepArg) []PackageRef {
 			Name:      name,
 			Version:   version,
 			Direct:    isDirect,
+			Integrity: checksum,
 		})
 	}
 	return refs
@@ -186,11 +184,7 @@ func ResolveCargoUpdateAll(ctx context.Context, cargoPath, cwd string) ([]Packag
 	cmd := exec.CommandContext(ctx, cargo, "update")
 	cmd.Dir = tmp
 	if out, err := cmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("cargo update failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("cargo", "update", out, err)
 	}
 	data, err := os.ReadFile(filepath.Join(tmp, "Cargo.lock"))
 	if err != nil {

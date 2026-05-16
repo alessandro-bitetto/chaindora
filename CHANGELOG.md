@@ -8,7 +8,195 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
-and the [threat model](./docs/threat-model.md).
+and the [threat model](./docs/threat-model.md). Next milestone is
+v0.15 — predictive detection (replay gate checkers against installed
+inventory) and fleet behavioral signals (cross-agent hash divergence,
+publish-cadence anomaly, cohort dwell-time).
+
+## [0.14.0] — 2026-05-16
+
+Massive expansion of the gate-mode ecosystem coverage (8 PMs → 42),
+plus a hash-keyed verdict cache that doubles as a republish-attack
+detector. Quiet UX fixes to silence chdora when the underlying PM
+would have failed anyway.
+
+### Added — 30 new package-manager resolvers
+
+Phase coverage matches the brainstorm in [docs/threat-model.md](./docs/threat-model.md).
+
+**High-impact (Tier 1)** — .NET, modern Python, PHP, JVM:
+
+| PM | Lockfile / source | Integrity field | OSV ecosystem |
+|---|---|---|---|
+| `dotnet` (NuGet) | `packages.lock.json` | `contentHash` (sha512) | NuGet |
+| `composer` | `composer.lock` | `dist.shasum` (sha1) | Packagist |
+| `poetry` | `poetry.lock` | files\[\].hash (sha256) | PyPI |
+| `uv` | `uv.lock` | hash (sha256) | PyPI |
+| `gradle` | `gradle dependencies` (cwd) | Maven Central .sha1 (via mvn fetcher) | Maven |
+
+**Mobile / functional (Tier 2)** — iOS, Flutter, Elixir:
+
+| PM | Lockfile / source | Integrity field | OSV ecosystem |
+|---|---|---|---|
+| `pod` (CocoaPods) | `Podfile.lock` (cwd) | SPEC CHECKSUMS (sha1) | SwiftURL |
+| `swift` (Swift PM) | `Package.resolved` (cwd) | revision (git SHA) | SwiftURL |
+| `dart` / `flutter` (Pub) | `pubspec.lock` | sha256 | Pub |
+| `mix` (Hex) | `mix.lock` (cwd) | outer checksum (sha256) | Hex |
+
+**Emerging / mainstream (Tier 3)** — bun, conda:
+
+| PM | Source | Integrity | OSV ecosystem |
+|---|---|---|---|
+| `bun` | `bun pm ls --all` after `--ignore-scripts` install | — (binary lockfile) | npm |
+| `conda` / `mamba` / `micromamba` | `--dry-run --json` | sha256 | — |
+
+**OS-level dev + C/C++ (Tier 4)** — Homebrew, Conan, vcpkg:
+
+| PM | Source | Integrity | OSV ecosystem |
+|---|---|---|---|
+| `brew` (Homebrew) | `brew info --json=v2` (recursive deps) | bottle / stable url sha256 | — |
+| `conan` | `conan graph info --format=json` | package_id or recipe revision | — |
+| `vcpkg` | `vcpkg.json` (manifest mode, direct deps only) | builtin-baseline (git SHA) | — |
+
+**Long tail (full parity)** — all the rest of the major-ish ecosystems:
+
+| PM | Source | Integrity | OSV ecosystem |
+|---|---|---|---|
+| `pipenv` | `Pipfile.lock` | hashes\[0\] (sha256) | PyPI |
+| `pdm` | `pdm.lock` | hash (sha256) | PyPI |
+| `deno` | `deno.lock` (cwd) | sha512 (npm:) / sha256 (remote) | npm (partial) |
+| `stack` | `stack.yaml.lock` (cwd) | pantry-tree sha256 | Hackage |
+| `cabal` | `cabal.project.freeze` (cwd) | — | Hackage |
+| `sbt` | `sbt dependencyTree` (cwd) | Maven Central .sha1 (via mvn fetcher) | Maven |
+| `opam` | `opam install --show-actions` | — | — |
+| `rebar3` | `rebar.lock` (cwd) | sha256 (pkg_hash) | Hex |
+| `paket` | `paket.lock` (cwd) | — | NuGet |
+| `cpanm` | `cpanfile.snapshot` (cwd) | — | — |
+| `luarocks` | `luarocks search --porcelain` | — | — |
+| `carthage` | `Cartfile.resolved` (cwd) | git SHA (when 40-hex) | — |
+| `elm` | `elm.json` (cwd) | — | — |
+| `nimble` | `nimble.lock` (cwd) | sha1 or git revision | — |
+| `shards` | `shard.lock` (cwd) | git commit | — |
+| `zig` | `build.zig.zon` (cwd) | Zig content-addressed hash | — |
+| `julia` | `Manifest.toml` (cwd) | git-tree-sha1 | — |
+| `R` / `Rscript` (renv) | `renv.lock` (cwd) | renv `Hash` field | CRAN |
+
+### Added — hash-keyed verdict cache + republish-attack detector
+
+`~/.chaindora/gate-cache/<ecosystem>/<sha256-of-tuple>.json` stores
+Approve verdicts keyed on `(ecosystem, name, version, integrity)`.
+Two purposes:
+
+1. **Perf**: a repeat install of an already-vetted version reads one
+   small JSON file instead of re-running the checker stack across
+   the network. 7-day TTL for Approve verdicts; Warn / Block / Unknown
+   are never cached (users chasing a fix see fresh signal each time).
+2. **Security**: a cache hit with the same `(eco, name, version)` but a
+   DIFFERENT integrity than what was cached fires a new
+   `republish-guard` check — Block, severity critical — surfacing the
+   supply-chain pattern where a maintainer account is compromised and
+   an attacker overwrites a known-good version with malicious bytes.
+
+Three subcommands manage it:
+
+```sh
+chdora gate cache stats      # entries per ecosystem
+chdora gate cache clear      # wipe (next install rebuilds)
+chdora gate cache path       # print root
+```
+
+### Added — integrity fetchers for ecosystems whose lockfile lacks hashes
+
+| Ecosystem | Endpoint | Output |
+|---|---|---|
+| RubyGems | `https://rubygems.org/api/v2/rubygems/<n>/versions/<v>.json` | `sha` → `sha256:...` |
+| Maven Central | `<group>/<artifact>/<v>/<artifact>-<v>.jar.sha1` (fallback `pom.sha1`) | sha1 hex |
+
+Bounded-pool concurrent fetch (16 in flight, 5 s per-request timeout).
+Failures degrade gracefully: empty `Integrity` means the republish-guard
+can't fire for that package, but the install still proceeds.
+
+### Added — parallel checker execution
+
+`gate.Run` now uses a bounded worker pool (`maxConcurrentChecks = 16`)
+to fan out checker work across packages. Within a single package the
+checkers stay sequential. Tests pass under `-race`. Expected 3–5×
+speedup on the per-package phase for typical install trees.
+
+### Added — `chdora gate cache` subcommand family
+
+See above. Three subcommands: `stats`, `clear`, `path`.
+
+### Changed — chdora is silent when the package manager itself errors
+
+New `PMError` type carrying the PM's captured stdout/stderr + exit
+code, returned by every resolver when the underlying PM exits
+non-zero. The CLI layer detects it and surfaces the PM's output
+verbatim to the user, then exits with the PM's exit code. No
+chdora-prefixed wrapping, no second invocation.
+
+Rationale: if `npm install nonexistent-pkg` would have failed
+regardless of chdora (typo, 404, peer-dep conflict, malformed
+lockfile), that's not a gate concern. chdora stays out of the way.
+Chdora-internal failures (parse error, network failure in chdora's
+own probes) still fail-closed under policy as before.
+
+### Changed — `chdora gate status` display
+
+The "gates-install" column previously hardcoded `true` only for npm
+and printed `false` for every other PM. Now derives from
+`isGatedPM()` — single source of truth shared with `gateExecCmd`'s
+switch, so the display can't drift.
+
+### Changed — verdict cache integrity coverage
+
+`PackageRef.Integrity` is now populated by:
+
+- **From lockfile**: npm, yarn (classic + Berry), pnpm, pip, cargo,
+  go, NuGet, Composer, Poetry, uv, Pipenv, PDM, deno, Pub, Hex
+  (mix.lock), Swift PM, CocoaPods, Carthage, Conan, nimble, renv,
+  Julia, vcpkg, zig, shards, rebar3.
+- **Via registry fetch**: bundler (rubygems.org API), mvn + gradle
+  + sbt (Maven Central .sha1), Homebrew (`brew info --json=v2`).
+- **Not yet populated** (republish-guard inactive for these
+  ecosystems): bun (binary lockfile), opam, cabal, CPAN, luarocks,
+  Paket, Elm.
+
+### Changed — `gate status` footer adds latency-audit instructions
+
+Short hint at the bottom of `gate status` showing how to time
+passthrough overhead: `time npm run --silent noop` with and without
+the shim on PATH. Expected delta is <100ms; anything higher is a
+shim-overhead bug worth opening.
+
+### Fixed — passthrough for cwd-only PMs
+
+`classifyGateArgs`'s "isInstall && len(args)==1 → passthrough"
+short-circuit was correct for npm (the `npm install` bare-restore
+case) but wrong for resolution-only PMs (gradle, pod, swift, mix,
+and the new Tier 2/3/4 additions). Added an `isPMCwdOnly` guard
+that skips the short-circuit for those PMs.
+
+### Fixed — gradle / pod / swift / mix invocation overhead
+
+These PMs have no install-args contract; the user's manifest IS
+the input. The gateProceed branch now skips the realPkgs check for
+cwd-only PMs so they resolve cleanly with just the verb.
+
+### Notes
+
+- All 30 new resolvers use the same temp-dir + scripts-disabled
+  posture as the original 8. Nothing executes user-controlled
+  package code during resolution.
+- The verdict cache writes only when `Integrity` is non-empty — no
+  tamper detection means no cache entry, by design.
+- vcpkg is direct-deps-only for now (manifest mode without
+  registry-baseline walking). Transitive coverage is on the
+  follow-up backlog.
+- `chdora gate cache` subcommands are read-mostly; the cache
+  rebuilds on the next install if cleared.
+
+## [0.13.5] — 2026-05-16
 
 ## [0.13.5] — 2026-05-16
 

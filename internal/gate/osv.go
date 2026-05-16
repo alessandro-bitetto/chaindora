@@ -112,6 +112,16 @@ func mapEcosystemToOSV(eco string) string {
 		return "NuGet"
 	case "packagist", "composer":
 		return "Packagist"
+	case "swift":
+		return "SwiftURL"
+	case "pub":
+		return "Pub"
+	case "hex":
+		return "Hex"
+	case "hackage":
+		return "Hackage"
+	case "cran":
+		return "CRAN"
 	}
 	return ""
 }

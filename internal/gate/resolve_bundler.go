@@ -57,18 +57,15 @@ func ResolveBundlerTree(ctx context.Context, bundlerPath string, addArgs []strin
 	cmd := exec.CommandContext(ctx, bundler, "lock")
 	cmd.Dir = tmp
 	if out, err := cmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("bundle lock failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("bundle", "lock", out, err)
 	}
 
 	data, err := os.ReadFile(filepath.Join(tmp, "Gemfile.lock"))
 	if err != nil {
 		return nil, fmt.Errorf("read generated Gemfile.lock: %w", err)
 	}
-	return parseGemfileLockTree(data, gems), nil
+	refs := parseGemfileLockTree(data, gems)
+	return enrichRubyGemsIntegrity(ctx, refs), nil
 }
 
 // ResolveBundlerUpdateAll resolves what `bundle update` (no args)
@@ -103,17 +100,14 @@ func ResolveBundlerUpdateAll(ctx context.Context, bundlerPath, cwd string) ([]Pa
 	cmd := exec.CommandContext(ctx, bundler, "lock", "--update")
 	cmd.Dir = tmp
 	if out, err := cmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("bundle lock --update failed: %w\n%s", err, snippet)
+		return nil, wrapPMError("bundle", "lock --update", out, err)
 	}
 	data, err := os.ReadFile(filepath.Join(tmp, "Gemfile.lock"))
 	if err != nil {
 		return nil, fmt.Errorf("read updated Gemfile.lock: %w", err)
 	}
-	return parseGemfileLockTree(data, nil), nil
+	refs := parseGemfileLockTree(data, nil)
+	return enrichRubyGemsIntegrity(ctx, refs), nil
 }
 
 type bundleAddArg struct {

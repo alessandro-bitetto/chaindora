@@ -70,11 +70,7 @@ func ResolveYarnTree(ctx context.Context, yarnPath string, addArgs []string) ([]
 	classicCmd := exec.CommandContext(ctx, yarn, classicArgs...)
 	classicCmd.Dir = tmp
 	if out, err := classicCmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("yarn add failed (Berry and classic both refused): %w\n%s", err, snippet)
+		return nil, wrapPMError("yarn", "add (Berry and classic both refused)", out, err)
 	}
 	return parseYarnLock(tmp, addArgs)
 }
@@ -101,20 +97,46 @@ func parseYarnLock(dir string, addArgs []string) ([]PackageRef, error) {
 //	pkg@^1.0.0:
 //	  version "1.2.3"
 //	  resolved "..."
+//	  integrity "sha512-..."
 //
-// We scan for `version "X"` lines paired with the immediately-
-// preceding stanza header.
+// We scan stanza-by-stanza: a header line that isn't indented and
+// ends with ':' starts a new stanza, indented lines extract
+// version + integrity, and we emit one PackageRef when the stanza
+// ends.
 func parseYarnClassicLock(data []byte, addArgs []string) ([]PackageRef, error) {
 	directs := directNamesFromArgs(addArgs)
 	seen := map[string]struct{}{}
 	var refs []PackageRef
 
 	lines := strings.Split(string(data), "\n")
-	var currentName string
+	var currentName, currentVersion, currentIntegrity string
+
+	flush := func() {
+		if currentName == "" || currentVersion == "" {
+			return
+		}
+		ident := currentName + "@" + currentVersion
+		if _, dup := seen[ident]; dup {
+			return
+		}
+		seen[ident] = struct{}{}
+		refs = append(refs, PackageRef{
+			Ecosystem: "npm",
+			Name:      currentName,
+			Version:   currentVersion,
+			Direct:    directs[currentName],
+			Integrity: currentIntegrity,
+		})
+	}
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		// Stanza header line — not indented, ends with ':'
 		if !strings.HasPrefix(line, " ") && strings.HasSuffix(trimmed, ":") {
+			// New stanza starts: flush whatever we accumulated.
+			flush()
+			currentName, currentVersion, currentIntegrity = "", "", ""
+
 			// "@scope/pkg@^1.0.0, @scope/pkg@~1.1.0:" — the
 			// first comma-separated spec gives us the package.
 			spec := strings.TrimSuffix(trimmed, ":")
@@ -140,23 +162,19 @@ func parseYarnClassicLock(data []byte, addArgs []string) ([]PackageRef, error) {
 		// `  version "1.2.3"` — extract the version string.
 		if strings.HasPrefix(trimmed, "version ") {
 			ver := strings.TrimSpace(strings.TrimPrefix(trimmed, "version"))
-			ver = strings.Trim(ver, `"`)
-			if currentName == "" || ver == "" {
-				continue
-			}
-			ident := currentName + "@" + ver
-			if _, dup := seen[ident]; dup {
-				continue
-			}
-			seen[ident] = struct{}{}
-			refs = append(refs, PackageRef{
-				Ecosystem: "npm",
-				Name:      currentName,
-				Version:   ver,
-				Direct:    directs[currentName],
-			})
+			currentVersion = strings.Trim(ver, `"`)
+			continue
+		}
+		// `  integrity sha512-...` (no quotes in older yarn; some
+		// versions add quotes — handle both).
+		if strings.HasPrefix(trimmed, "integrity ") {
+			val := strings.TrimSpace(strings.TrimPrefix(trimmed, "integrity"))
+			currentIntegrity = strings.Trim(val, `"`)
+			continue
 		}
 	}
+	// Final stanza.
+	flush()
 	return refs, nil
 }
 
@@ -172,6 +190,7 @@ func parseYarnBerryLock(data []byte, addArgs []string) ([]PackageRef, error) {
 	var raw map[string]struct {
 		Version    string `yaml:"version"`
 		Resolution string `yaml:"resolution"`
+		Checksum   string `yaml:"checksum"`
 	}
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse berry yarn.lock: %w", err)
@@ -202,6 +221,7 @@ func parseYarnBerryLock(data []byte, addArgs []string) ([]PackageRef, error) {
 			Name:      name,
 			Version:   entry.Version,
 			Direct:    directs[name],
+			Integrity: entry.Checksum,
 		})
 	}
 	return refs, nil
@@ -271,11 +291,7 @@ func ResolveYarnUpdateAll(ctx context.Context, yarnPath, cwd string) ([]PackageR
 	classicCmd := exec.CommandContext(ctx, yarn, "upgrade", "--silent", "--ignore-scripts", "--no-progress")
 	classicCmd.Dir = tmp
 	if out, err := classicCmd.CombinedOutput(); err != nil {
-		snippet := strings.TrimSpace(string(out))
-		if len(snippet) > 400 {
-			snippet = snippet[:400] + "..."
-		}
-		return nil, fmt.Errorf("yarn upgrade failed (Berry and classic both refused): %w\n%s", err, snippet)
+		return nil, wrapPMError("yarn", "upgrade (Berry and classic both refused)", out, err)
 	}
 	return parseYarnLock(tmp, nil)
 }
