@@ -7,6 +7,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ParseCargoLock is the exported entry point used by the integrity
+// detector's lockfile-vs-disk drift check.
+func ParseCargoLock(path string) ([]Package, error) {
+	return parseCargoLock(path)
+}
+
 // parseCargoLock walks Cargo.lock and emits a Package per resolved
 // crate. Cargo.lock is TOML — we use the yaml.v3 parser because
 // it tolerates the subset of TOML this file uses (it actually
@@ -55,17 +61,23 @@ func parseCargoLock(path string) ([]Package, error) {
 		if !strings.Contains(source, "crates.io-index") {
 			continue
 		}
+		checksum, _ := cargoBlockField(b, "checksum")
 		key := name + "@" + version
 		if _, dup := seen[key]; dup {
 			continue
 		}
 		seen[key] = struct{}{}
+		integrity := ""
+		if checksum != "" {
+			integrity = "sha256:" + checksum
+		}
 		packages = append(packages, Package{
 			Ecosystem:  EcosystemCrates,
 			Name:       name,
 			Version:    version,
 			PURL:       PURL(EcosystemCrates, name, version),
 			SourcePath: path,
+			Integrity:  integrity,
 		})
 	}
 	return packages, nil

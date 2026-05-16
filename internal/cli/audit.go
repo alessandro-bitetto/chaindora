@@ -35,10 +35,11 @@ var (
 	auditSavePlan     bool
 	auditSSHBaseline  string
 	auditSkipRegistry bool
-	auditExcludeCVEs   bool
-	auditExcludeSupply bool
-	auditExcludeConfig bool
-	auditExcludeHost   bool
+	auditExcludeCVEs       bool
+	auditExcludeSupply     bool
+	auditExcludeConfig     bool
+	auditExcludeHost       bool
+	auditExcludePredictive bool
 	auditOffline       bool
 )
 
@@ -126,6 +127,7 @@ Each detector can be individually disabled with its --skip-X flag.`,
 		forensicsExcludeSupply = auditExcludeSupply
 		forensicsExcludeConfig = auditExcludeConfig
 		forensicsExcludeHost = auditExcludeHost
+		forensicsExcludePredictive = auditExcludePredictive
 		forensicsOffline = auditOffline
 		forensicsFixPlan = auditFixPlan
 		forensicsFix = auditFix
@@ -216,6 +218,8 @@ func init() {
 		"hide the configuration-risks section (unpinned action refs, curl|bash CI patterns)")
 	auditCmd.Flags().BoolVar(&auditExcludeHost, "exclude-host", false,
 		"hide the host-state section (credential files, shell-rc, persistence)")
+	auditCmd.Flags().BoolVar(&auditExcludePredictive, "exclude-predictive", false,
+		"hide the predictive-signals section (gate-style behavioral checks on installed packages)")
 	auditCmd.Flags().BoolVar(&auditOffline, "offline", false,
 		"no network calls — implies --skip-osv and --skip-registry. Uses only the local incident pack + cached registry data.")
 

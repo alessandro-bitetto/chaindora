@@ -7,6 +7,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ParseYarnLock is the exported entry point for callers outside
+// the inventory package (e.g. the integrity detector's lockfile-
+// vs-disk drift check, which needs to enumerate yarn lockfile
+// entries without reimplementing both the v1 and Berry formats).
+// Delegates to the same internal parser used by the inventory
+// scan dispatcher.
+func ParseYarnLock(path string) ([]Package, error) {
+	return parseYarnLock(path)
+}
+
 // parseYarnLock dispatches between the two yarn lockfile formats. Yarn v1
 // uses a custom indentation-based format, while Berry (Yarn v2/v3+) emits
 // valid YAML.
@@ -28,32 +38,24 @@ func parseYarnLock(path string) ([]Package, error) {
 
 // parseYarnV1 scans the legacy yarn.lock format line by line. Top-level
 // entries start unindented and end with a colon; their version sits two
-// spaces in on a "version" line.
+// spaces in on a "version" line; integrity (when present) on a separate
+// "integrity" line within the same stanza.
 func parseYarnV1(text, source string) []Package {
 	var out []Package
 	seen := map[string]struct{}{}
 	var currentKeys []string
+	var currentVer, currentInt string
 
-	for _, line := range strings.Split(text, "\n") {
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	flush := func() {
+		if currentVer == "" {
+			return
 		}
-		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
-			currentKeys = parseYarnV1Keys(strings.TrimSuffix(line, ":"))
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "version ") {
-			continue
-		}
-		v := strings.TrimSpace(strings.TrimPrefix(trimmed, "version"))
-		v = strings.Trim(v, `"`)
 		for _, k := range currentKeys {
 			name := yarnNameFromV1Spec(k)
 			if name == "" {
 				continue
 			}
-			key := name + "@" + v
+			key := name + "@" + currentVer
 			if _, ok := seen[key]; ok {
 				continue
 			}
@@ -61,13 +63,38 @@ func parseYarnV1(text, source string) []Package {
 			out = append(out, Package{
 				Ecosystem:  EcosystemNPM,
 				Name:       name,
-				Version:    v,
-				PURL:       PURL(EcosystemNPM, name, v),
+				Version:    currentVer,
+				PURL:       PURL(EcosystemNPM, name, currentVer),
 				SourcePath: source,
+				Integrity:  currentInt,
 			})
 		}
-		currentKeys = nil
 	}
+
+	for _, line := range strings.Split(text, "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			// New stanza — flush previous before resetting.
+			flush()
+			currentKeys = parseYarnV1Keys(strings.TrimSuffix(line, ":"))
+			currentVer, currentInt = "", ""
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "version ") {
+			v := strings.TrimSpace(strings.TrimPrefix(trimmed, "version"))
+			currentVer = strings.Trim(v, `"`)
+			continue
+		}
+		if strings.HasPrefix(trimmed, "integrity ") {
+			v := strings.TrimSpace(strings.TrimPrefix(trimmed, "integrity"))
+			currentInt = strings.Trim(v, `"`)
+			continue
+		}
+	}
+	flush()
 	return out
 }
 
@@ -127,7 +154,8 @@ func yarnNameFromV1Spec(spec string) string {
 // and multiple aliases get comma-joined into a single YAML key string.
 func parseYarnBerry(text, source string) ([]Package, error) {
 	var raw map[string]struct {
-		Version string `yaml:"version"`
+		Version  string `yaml:"version"`
+		Checksum string `yaml:"checksum"`
 	}
 	if err := yaml.Unmarshal([]byte(text), &raw); err != nil {
 		return nil, err
@@ -154,6 +182,7 @@ func parseYarnBerry(text, source string) ([]Package, error) {
 				Version:    entry.Version,
 				PURL:       PURL(EcosystemNPM, name, entry.Version),
 				SourcePath: source,
+				Integrity:  entry.Checksum,
 			})
 		}
 	}

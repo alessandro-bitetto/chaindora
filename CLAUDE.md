@@ -27,6 +27,26 @@ Two modes, sharing the same finding format and the same incident pack:
 | **Prevention** (v0.9+) | Before install — block bad packages at the registry boundary | `internal/gate/` + `internal/cli/gate{,_exec,_shim}.go` |
 | **Detection** (v0.1+) | After install — find compromise already on disk | `internal/detectors/*` + `internal/cli/{scan,forensics,audit,ci}.go` |
 
+**Predictive** (v0.15+) is detection's third gear — it replays the
+gate's behavioral checkers (cooldown, publisher-change, maintainer-
+trust, version-diff, provenance, republish-guard) against already-
+installed packages across **32 ecosystems** (full parity with the
+v0.14 gate-side coverage). Code lives in `internal/detectors/predictive/`.
+Findings flow through the same renderer; default severity is medium
+so the default `--fail-on=critical,high` CI gate stays quiet.
+Republish-guard escalates to critical (hard tamper signal). See
+[docs/architecture.md](./docs/architecture.md) for the data flow.
+
+**Fleet behavioral signals** (v0.15+, server-side) — three checks
+that fire only with `chdora server` aggregating multi-agent state:
+`fleet:republish-detected` (cross-agent integrity divergence),
+`fleet:publish-cadence-anomaly` (4+ versions of same package
+first-seen within 24h), `fleet:cohort-fresh-install` (new agent
+reports a version the rest of the fleet has had for 7+ days).
+Code lives in `internal/server/store.go`'s `recordCadenceAnd
+CohortLocked` — same `IngestFindings` hot path as republish
+detection.
+
 Detection has four commands that differ only in **what populates the
 inventory**:
 
@@ -53,12 +73,14 @@ Each detector emits `findings.Finding`. Each detector can be skipped via
 | `hostforensics` | `internal/detectors/hostforensics/` | Tokens, shell rc, PowerShell, ssh-diff, persistence, extensions, global packages |
 | `heuristic` | `internal/detectors/heuristic/` | Unpinned CI refs, curl-pipe in CI scripts, install hooks, typosquat, dep-confusion, fresh-popular |
 | `trustdrift` | `internal/detectors/trustdrift/` | `.npmrc` / `pip.conf` / `git insteadOf` / `/etc/hosts` / CA store baseline + drift |
-| `integrity` | `internal/detectors/integrity/` | `go.sum` ↔ sum.golang.org, `Cargo.lock` checksum verification |
+| `integrity` | `internal/detectors/integrity/` | `go.sum` ↔ sum.golang.org, `Cargo.lock` checksum verification, **v0.15: lockfile-vs-disk** for npm/yarn/pnpm (`package-lock.json` / `yarn.lock` / `pnpm-lock.yaml` vs `node_modules/<pkg>/package.json` — critical), plus cargo (`~/.cargo/registry/`), go (`$GOPATH/pkg/mod/`), and pip (`.venv/lib/python*/site-packages/`) drift checks at medium severity |
+| `predictive` | `internal/detectors/predictive/` | v0.15+. Replays gate checkers (cooldown, publisher-change, maintainer-trust, version-diff, provenance) against the scan inventory. Republish-guard via `~/.chaindora/gate-cache/` fires on same `name@version` reappearing with different `Integrity`. Findings default to severity medium (advisory at scan time); republish-guard escalates to critical |
 
 Findings get tagged with one `Category`:
-`supply-chain-attack` / `dependency-cve` / `host-state` / `configuration`.
-The `--exclude-<category>` flags filter at render time, not detection
-time — JSON output still contains every category.
+`supply-chain-attack` / `dependency-cve` / `host-state` /
+`configuration` / `predictive` (v0.15+). The `--exclude-<category>`
+flags filter at render time, not detection time — JSON output still
+contains every category.
 
 ---
 
@@ -227,9 +249,23 @@ internal/
     trustdrift/                 v0.11+ — .npmrc / pip.conf / git insteadOf /
                                 /etc/hosts / CA store baseline + drift detection
     integrity/                  v0.13.1+ — go.sum ↔ sumdb and Cargo.lock
-                                checksum verification
+                                checksum verification + v0.15 lockfile-vs-disk
+                                drift detection (`lockdrift.go` for npm,
+                                `lockdrift_yarnpnpm.go` for yarn/pnpm,
+                                `lockdrift_other.go` for cargo/go/pip)
+    predictive/                 v0.15+ — gate-checker replay against scan
+                                inventory across 32 ecosystems; emits findings
+                                with severity=medium by default, critical for
+                                republish-guard
   server/                       v0.13+ — JSON-backed fleet store + HTTP API
     {server,store,dashboard}.go HTTP routes + persistence + HTML dashboard
+                                v0.15: store tracks PackageObservations
+                                (per-tuple integrity), VersionTimeline
+                                (per-(eco,name) version-first-seen list), and
+                                CohortObservations (per-tuple per-agent first-
+                                sighting), emitting three synthetic fleet
+                                findings — republish-detected, publish-cadence-
+                                anomaly, cohort-fresh-install
   registries/                   npm + PyPI + RubyGems + crates + Maven + Go
                                 HTTP probes with disk cache
   progress/                     stderr status-line for slow walks
@@ -416,6 +452,29 @@ website/                        chaindora.dev — Angular 18 static site (v0.13.
 - `wincreds.scanWindowsCredentials` is `runtime.GOOS=="windows"`-gated;
   `scanCredentialDirs` is the testable helper for non-Windows hosts.
 
+### `internal/detectors/predictive` (v0.15+)
+
+- The predictive detector is a thin shim — it converts the scan
+  inventory into `gate.PackageRef`s and calls `gate.CachedRun` with
+  a subset of the gate checker stack. New behavioral checks land in
+  `internal/gate/` and predictive picks them up for free, same as
+  the gate exec path.
+- `inventoryToGateEcosystem` is the ecosystem-string mapping seam.
+  When you add a new gate ecosystem AND an inventory parser for it,
+  add a case here so predictive lights up for the new ecosystem too.
+  Currently covers npm / pypi / rubygems / crates / maven / go.
+- Severity calibration matters more than usual here. The defaults
+  are intentionally medium (advisory at scan time) — republish-guard
+  is the one exception (critical, hard tamper signal). Don't add new
+  predictive checks at high or critical without considering whether
+  they'll bypass the default `--fail-on=critical,high` CI gate users
+  expect.
+- The cache passed to `predictive.New` is the same
+  `~/.chaindora/gate-cache/` the gate uses. Don't introduce a
+  separate cache — the republish-guard signal works best when the
+  same integrity dictionary is built up across both prevention and
+  detection runs.
+
 ### `internal/inventory`
 
 - Every new ecosystem needs three updates:
@@ -430,6 +489,13 @@ website/                        chaindora.dev — Angular 18 static site (v0.13.
   follow-up — file a separate issue per ecosystem. The OSV ecosystem
   strings used at the gate (`mapEcosystemToOSV` in `osv.go`) are
   independent of the inventory constants.
+
+- v0.15 added `Package.Integrity`. Every new lockfile parser should
+  populate it when the format carries a content hash — that's what
+  drives both the predictive republish-guard at scan time and the
+  v0.13 server's cross-agent republish-detection. Empty Integrity
+  is fine (some lockfiles don't carry hashes); the downstream
+  consumers degrade gracefully.
 
 ---
 

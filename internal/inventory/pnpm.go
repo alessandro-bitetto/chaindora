@@ -8,7 +8,22 @@ import (
 )
 
 type pnpmLockDoc struct {
-	Packages map[string]any `yaml:"packages"`
+	Packages map[string]pnpmPackageEntry `yaml:"packages"`
+}
+
+type pnpmPackageEntry struct {
+	Integrity  string `yaml:"integrity"`
+	Resolution struct {
+		// Pre-v7 nested integrity here.
+		Integrity string `yaml:"integrity"`
+	} `yaml:"resolution"`
+}
+
+// ParsePnpmLock is the exported entry point for callers outside
+// the inventory package (the integrity detector's lockfile-vs-disk
+// check, etc.). Delegates to parsePnpmLock.
+func ParsePnpmLock(path string) ([]Package, error) {
+	return parsePnpmLock(path)
 }
 
 // parsePnpmLock parses a pnpm-lock.yaml. Package keys take forms like:
@@ -27,7 +42,7 @@ func parsePnpmLock(path string) ([]Package, error) {
 	}
 	var out []Package
 	seen := map[string]struct{}{}
-	for k := range doc.Packages {
+	for k, entry := range doc.Packages {
 		name, version := parsePnpmKey(k)
 		if name == "" || version == "" {
 			continue
@@ -37,12 +52,17 @@ func parsePnpmLock(path string) ([]Package, error) {
 			continue
 		}
 		seen[key] = struct{}{}
+		integrity := entry.Integrity
+		if integrity == "" {
+			integrity = entry.Resolution.Integrity
+		}
 		out = append(out, Package{
 			Ecosystem:  EcosystemNPM,
 			Name:       name,
 			Version:    version,
 			PURL:       PURL(EcosystemNPM, name, version),
 			SourcePath: path,
+			Integrity:  integrity,
 		})
 	}
 	return out, nil

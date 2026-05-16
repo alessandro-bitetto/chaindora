@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -9,11 +10,19 @@ import (
 // entry. Both single-line and grouped `require (...)` blocks are supported.
 // `// indirect` annotations are kept (indirect deps are still in the build
 // graph and OSV catalogs them under the same Go ecosystem).
+//
+// When a `go.sum` sits alongside `go.mod`, we populate Integrity with the
+// `h1:` hash for each (module, version) — the cryptographic content hash
+// Go records at module download time. Hash mismatches at scan-time vs the
+// gate-cache then trigger the predictive republish-guard.
 func parseGoMod(path string) ([]Package, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	// Best-effort companion go.sum lookup. Missing/unreadable go.sum is
+	// fine — we just leave Integrity empty.
+	hashes := loadGoSumHashes(filepath.Join(filepath.Dir(path), "go.sum"))
 	var out []Package
 	seen := map[string]struct{}{}
 	inBlock := false
@@ -70,7 +79,36 @@ func parseGoMod(path string) ([]Package, error) {
 			Version:    version,
 			PURL:       PURL(EcosystemGoModules, name, version),
 			SourcePath: path,
+			Integrity:  hashes[name+"@"+version],
 		})
 	}
 	return out, nil
+}
+
+// loadGoSumHashes reads a go.sum file (if present) and returns a map
+// of "module@version" → "h1:..." entries. Skips the "module/go.mod"
+// h1 lines — those hash only the go.mod content, not the module bytes
+// the build actually uses.
+func loadGoSumHashes(path string) map[string]string {
+	out := map[string]string{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			continue
+		}
+		mod, ver, hash := fields[0], fields[1], fields[2]
+		// Skip "module v1.2.3/go.mod h1:..." entries.
+		if strings.HasSuffix(ver, "/go.mod") {
+			continue
+		}
+		if !strings.HasPrefix(hash, "h1:") {
+			continue
+		}
+		out[mod+"@"+ver] = hash
+	}
+	return out
 }

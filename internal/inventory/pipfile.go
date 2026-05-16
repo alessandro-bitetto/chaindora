@@ -7,12 +7,19 @@ import (
 )
 
 type pipfileEntry struct {
-	Version string `json:"version"`
+	Version string   `json:"version"`
+	Hashes  []string `json:"hashes"`
 }
 
 type pipfileLockDoc struct {
 	Default map[string]pipfileEntry `json:"default"`
 	Develop map[string]pipfileEntry `json:"develop"`
+}
+
+// ParsePipfileLock is the exported entry point used by the integrity
+// detector's lockfile-vs-disk drift check.
+func ParsePipfileLock(path string) ([]Package, error) {
+	return parsePipfileLock(path)
 }
 
 // parsePipfileLock parses Pipfile.lock JSON. Each entry's "version" field is
@@ -41,12 +48,17 @@ func parsePipfileLock(path string) ([]Package, error) {
 				continue
 			}
 			seen[key] = struct{}{}
+			integrity := ""
+			if len(entry.Hashes) > 0 {
+				integrity = entry.Hashes[0]
+			}
 			out = append(out, Package{
 				Ecosystem:  EcosystemPyPI,
 				Name:       nn,
 				Version:    v,
 				PURL:       PURL(EcosystemPyPI, nn, v),
 				SourcePath: path,
+				Integrity:  integrity,
 			})
 		}
 	}

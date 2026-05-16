@@ -45,10 +45,11 @@ var (
 	// v0.13.1 integrity verification
 	forensicsSkipIntegrity bool
 	forensicsSkipRegistry bool
-	forensicsExcludeCVEs   bool
-	forensicsExcludeSupply bool
-	forensicsExcludeConfig bool
-	forensicsExcludeHost   bool
+	forensicsExcludeCVEs       bool
+	forensicsExcludeSupply     bool
+	forensicsExcludeConfig     bool
+	forensicsExcludeHost       bool
+	forensicsExcludePredictive bool
 	forensicsOffline       bool
 )
 
@@ -176,6 +177,7 @@ func runForensicsFlow(ctx context.Context) error {
 				SkipOSV:       forensicsSkipOSV,
 				SkipIncidents: false,
 				SkipHeuristic: forensicsSkipHeur,
+				SkipRegistry:  forensicsSkipRegistry,
 				FreshPopular:  false,
 				Verbose:       forensicsVerbose,
 				Excludes:      forensicsExcludes,
@@ -261,6 +263,7 @@ func runForensicsFlow(ctx context.Context) error {
 				SkipOSV:       forensicsSkipOSV,
 				SkipIncidents: false,
 				SkipHeuristic: forensicsSkipHeur,
+				SkipRegistry:  forensicsSkipRegistry,
 				FreshPopular:  false,
 				Verbose:       forensicsVerbose,
 				NPMProbe:      npmProbe,
@@ -286,6 +289,7 @@ func runForensicsFlow(ctx context.Context) error {
 		ExcludeSupplyChain = forensicsExcludeSupply
 		ExcludeConfig = forensicsExcludeConfig
 		ExcludeHost = forensicsExcludeHost
+		ExcludePredictive = forensicsExcludePredictive
 		if err := renderFindings(os.Stdout, all, effectiveFormat(forensicsFormat, forensicsJSON)); err != nil {
 			return err
 		}
@@ -369,6 +373,7 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsExcludeSupply, "exclude-supply-chain", false, "hide the supply-chain attack section")
 	forensicsCmd.Flags().BoolVar(&forensicsExcludeConfig, "exclude-config", false, "hide the configuration-risks section")
 	forensicsCmd.Flags().BoolVar(&forensicsExcludeHost, "exclude-host", false, "hide the host-state section")
+	forensicsCmd.Flags().BoolVar(&forensicsExcludePredictive, "exclude-predictive", false, "hide the predictive-signals section (gate-style behavioral checks on installed packages)")
 	forensicsCmd.Flags().BoolVar(&forensicsOffline, "offline", false, "no network calls — implies --skip-osv and --skip-registry")
 	rootCmd.AddCommand(forensicsCmd)
 }

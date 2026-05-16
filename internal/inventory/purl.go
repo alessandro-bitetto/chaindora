@@ -49,6 +49,46 @@ func PURL(eco Ecosystem, name, version string) string {
 		typ = "browserext"
 	case EcosystemIDEExt:
 		typ = "ideext"
+	case EcosystemNuGet:
+		typ = "nuget"
+	case EcosystemPackagist:
+		typ = "composer"
+	case EcosystemPub:
+		typ = "pub"
+	case EcosystemHex:
+		typ = "hex"
+	case EcosystemSwift:
+		typ = "swift"
+	case EcosystemHackage:
+		typ = "hackage"
+	case EcosystemCRAN:
+		typ = "cran"
+	case EcosystemJulia:
+		typ = "julia"
+	case EcosystemConda:
+		typ = "conda"
+	case EcosystemConan:
+		typ = "conan"
+	case EcosystemVcpkg:
+		typ = "vcpkg"
+	case EcosystemOpam:
+		typ = "opam"
+	case EcosystemCocoaPods:
+		typ = "cocoapods"
+	case EcosystemCarthage:
+		typ = "carthage"
+	case EcosystemCPAN:
+		typ = "cpan"
+	case EcosystemLuaRocks:
+		typ = "luarocks"
+	case EcosystemNimble:
+		typ = "nimble"
+	case EcosystemShards:
+		typ = "shards"
+	case EcosystemZig:
+		typ = "zig"
+	case EcosystemElm:
+		typ = "elm"
 	default:
 		typ = strings.ToLower(string(eco))
 	}

@@ -27,6 +27,37 @@ const (
 	EcosystemRubyGems     Ecosystem = "RubyGems"
 	EcosystemCrates       Ecosystem = "crates.io"
 	EcosystemMavenCentral Ecosystem = "Maven Central"
+	// v0.15 ecosystems — added to extend detection-side parity with the
+	// v0.14 gate-side coverage push. Each has a lockfile that exposes
+	// content hashes, so predictive + republish-guard light up
+	// automatically once the parser populates inventory.Package.Integrity.
+	EcosystemNuGet     Ecosystem = "NuGet"
+	EcosystemPackagist Ecosystem = "Packagist" // Composer
+	EcosystemPub       Ecosystem = "Pub"       // Dart / Flutter
+	EcosystemHex       Ecosystem = "Hex"       // Elixir / Erlang
+	// v0.15 full-parity push — every remaining v0.14 gate-side
+	// ecosystem with a parseable lockfile, so detection-side coverage
+	// matches prevention-side coverage as closely as the ecosystems
+	// allow. Behavioral signal varies per ecosystem: those covered by
+	// OSV (Swift, Hackage, CRAN) get vuln data automatically; the rest
+	// rely on the cache-driven republish-guard alone until gate Probes
+	// land per ecosystem.
+	EcosystemSwift     Ecosystem = "SwiftURL"
+	EcosystemHackage   Ecosystem = "Hackage"
+	EcosystemCRAN      Ecosystem = "CRAN"
+	EcosystemJulia     Ecosystem = "Julia"
+	EcosystemConda     Ecosystem = "Conda"
+	EcosystemConan     Ecosystem = "ConanCenter"
+	EcosystemVcpkg     Ecosystem = "vcpkg"
+	EcosystemOpam      Ecosystem = "opam"
+	EcosystemCocoaPods Ecosystem = "CocoaPods"
+	EcosystemCarthage  Ecosystem = "Carthage"
+	EcosystemCPAN      Ecosystem = "CPAN"
+	EcosystemLuaRocks  Ecosystem = "LuaRocks"
+	EcosystemNimble    Ecosystem = "Nimble"
+	EcosystemShards    Ecosystem = "Shards"
+	EcosystemZig       Ecosystem = "Zig"
+	EcosystemElm       Ecosystem = "Elm"
 )
 
 // Package represents one resolved dependency discovered in a manifest or lockfile.
@@ -51,6 +82,13 @@ type Package struct {
 	// "resolved from artifactory.corp/..." (private scope, real risk if
 	// the same name exists publicly).
 	ResolvedURL string `json:"resolved_url,omitempty"`
+	// Integrity is the lockfile-recorded content hash for this version
+	// (e.g. "sha512-..." for npm, "sha256:..." for cargo, "h1:..." for
+	// Go modules). v0.15+. Used by the predictive detector to fire
+	// republish-guard via the gate-cache: a known (name, version) seen
+	// before with a DIFFERENT Integrity is a maintainer-account-takeover
+	// signal. Empty when the ecosystem's lockfile doesn't expose it.
+	Integrity string `json:"integrity,omitempty"`
 }
 
 // Source identifies a manifest file that was successfully parsed.
@@ -210,6 +248,198 @@ func Scan(root string, opts ...ScanOption) (*Inventory, error) {
 			}
 			inv.Packages = append(inv.Packages, pkgs...)
 			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemMavenCentral, Kind: "pom.xml"})
+		case "packages.lock.json":
+			pkgs, perr := parseNuGetPackagesLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "packages.lock.json "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemNuGet, Kind: "packages.lock.json"})
+		case "composer.lock":
+			pkgs, perr := parseComposerLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "composer.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemPackagist, Kind: "composer.lock"})
+		case "pubspec.lock":
+			pkgs, perr := parsePubspecLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "pubspec.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemPub, Kind: "pubspec.lock"})
+		case "mix.lock":
+			pkgs, perr := parseMixLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "mix.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemHex, Kind: "mix.lock"})
+		case "Package.resolved":
+			pkgs, perr := parsePackageResolved(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "Package.resolved "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemSwift, Kind: "Package.resolved"})
+		case "stack.yaml.lock":
+			pkgs, perr := parseStackYamlLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "stack.yaml.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemHackage, Kind: "stack.yaml.lock"})
+		case "cabal.project.freeze":
+			pkgs, perr := parseCabalProjectFreeze(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "cabal.project.freeze "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemHackage, Kind: "cabal.project.freeze"})
+		case "renv.lock":
+			pkgs, perr := parseRenvLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "renv.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemCRAN, Kind: "renv.lock"})
+		case "Manifest.toml":
+			pkgs, perr := parseJuliaManifest(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "Manifest.toml "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemJulia, Kind: "Manifest.toml"})
+		case "conda-lock.yml", "conda-lock.yaml":
+			pkgs, perr := parseCondaLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "conda-lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemConda, Kind: "conda-lock"})
+		case "conan.lock":
+			pkgs, perr := parseConanLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "conan.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemConan, Kind: "conan.lock"})
+		case "vcpkg.json":
+			pkgs, perr := parseVcpkgManifest(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "vcpkg.json "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemVcpkg, Kind: "vcpkg.json"})
+		case "deno.lock":
+			pkgs, perr := parseDenoLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "deno.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemNPM, Kind: "deno.lock"})
+		case "pdm.lock":
+			pkgs, perr := parsePDMLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "pdm.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemPyPI, Kind: "pdm.lock"})
+		case "paket.lock":
+			pkgs, perr := parsePaketLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "paket.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemNuGet, Kind: "paket.lock"})
+		case "Podfile.lock":
+			pkgs, perr := parsePodfileLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "Podfile.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemCocoaPods, Kind: "Podfile.lock"})
+		case "Cartfile.resolved":
+			pkgs, perr := parseCartfileResolved(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "Cartfile.resolved "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemCarthage, Kind: "Cartfile.resolved"})
+		case "cpanfile.snapshot":
+			pkgs, perr := parseCpanfileSnapshot(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "cpanfile.snapshot "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemCPAN, Kind: "cpanfile.snapshot"})
+		case "nimble.lock":
+			pkgs, perr := parseNimbleLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "nimble.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemNimble, Kind: "nimble.lock"})
+		case "shard.lock":
+			pkgs, perr := parseShardLock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "shard.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemShards, Kind: "shard.lock"})
+		case "build.zig.zon":
+			pkgs, perr := parseZigZon(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "build.zig.zon "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemZig, Kind: "build.zig.zon"})
+		case "elm.json":
+			pkgs, perr := parseElmJSON(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "elm.json "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemElm, Kind: "elm.json"})
+		case "rebar.lock":
+			pkgs, perr := parseRebar3Lock(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "rebar.lock "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemHex, Kind: "rebar.lock"})
+		case "gradle.lockfile":
+			pkgs, perr := parseGradleLockfile(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "gradle.lockfile "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemMavenCentral, Kind: "gradle.lockfile"})
 		case ".gitlab-ci.yml", ".gitlab-ci.yaml":
 			pkgs, perr := parseGitLabCI(path)
 			if perr != nil {

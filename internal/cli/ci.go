@@ -13,6 +13,8 @@ import (
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/heuristic"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/osvioc"
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/predictive"
+	"github.com/alessandro-bitetto/chaindora/internal/gate"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
@@ -25,6 +27,7 @@ var (
 	ciSARIFPath      string
 	ciIncidentsDir   string
 	ciSkipOSV        bool
+	ciSkipPredictive bool
 	ciSkipIncidents  bool
 	ciSkipHeuristic  bool
 	ciFreshPopular   bool
@@ -36,10 +39,11 @@ var (
 	ciAggressive     bool
 	ciSavePlan       bool
 	ciSkipRegistry   bool
-	ciExcludeCVEs    bool
-	ciExcludeSupply  bool
-	ciExcludeConfig  bool
-	ciExcludeHost    bool
+	ciExcludeCVEs       bool
+	ciExcludeSupply     bool
+	ciExcludeConfig     bool
+	ciExcludeHost       bool
+	ciExcludePredictive bool
 	ciOffline        bool
 	// SonarQube-grade CI surface (v0.10).
 	ciBaselinePath       string
@@ -155,6 +159,26 @@ continuous-integration use:
 			all = append(all, results...)
 		}
 
+		// Predictive layer: gate-style behavioral signals replayed
+		// against installed packages. Defaults to severity=medium so
+		// the default --fail-on=critical,high CI gate stays quiet;
+		// republish-guard (cache-based) escalates to critical.
+		if !ciSkipPredictive && !ciSkipRegistry {
+			tally.Enable("predictive")
+			probes := buildGateProbes()
+			cache := gate.NewCache(gate.DefaultCacheRoot(), 7*24*time.Hour)
+			det := predictive.New(probes, 72*time.Hour, cache)
+			results, err := det.Detect(ctx, inv)
+			if err != nil {
+				if ciVerbose {
+					fmt.Fprintln(os.Stderr, "warn: predictive detector:", err)
+				}
+			} else {
+				tally.AbsorbFindings(results)
+				all = append(all, results...)
+			}
+		}
+
 		tally.Print(os.Stderr)
 
 		// SonarQube-grade CI pipeline:
@@ -211,6 +235,7 @@ continuous-integration use:
 		ExcludeSupplyChain = ciExcludeSupply
 		ExcludeConfig = ciExcludeConfig
 		ExcludeHost = ciExcludeHost
+		ExcludePredictive = ciExcludePredictive
 		// pr-comment is a new format that bypasses the standard
 		// renderer. Everything else still flows through renderFindings.
 		if format == "pr-comment" {
@@ -392,12 +417,14 @@ func init() {
 	ciCmd.Flags().BoolVar(&ciSkipOSV, "skip-osv", false, "skip OSV.dev queries")
 	ciCmd.Flags().BoolVar(&ciSkipIncidents, "skip-incidents", false, "skip the curated incident pack")
 	ciCmd.Flags().BoolVar(&ciSkipHeuristic, "skip-heuristic", false, "skip behavioral heuristics")
+	ciCmd.Flags().BoolVar(&ciSkipPredictive, "skip-predictive", false, "skip the predictive detector (gate-style behavioral signals replayed against installed packages)")
 	ciCmd.Flags().BoolVar(&ciFreshPopular, "fresh-popular", false, "also check publish dates of top-N popular npm/PyPI deps (requires network)")
 	ciCmd.Flags().BoolVar(&ciSkipRegistry, "skip-registry", false, "do not query npm/PyPI for evidence (offline mode; evidence-based heuristics become silent)")
 	ciCmd.Flags().BoolVar(&ciExcludeCVEs, "exclude-cves", false, "hide the dependency-CVE section")
 	ciCmd.Flags().BoolVar(&ciExcludeSupply, "exclude-supply-chain", false, "hide the supply-chain attack section")
 	ciCmd.Flags().BoolVar(&ciExcludeConfig, "exclude-config", false, "hide the configuration-risks section")
 	ciCmd.Flags().BoolVar(&ciExcludeHost, "exclude-host", false, "hide the host-state section")
+	ciCmd.Flags().BoolVar(&ciExcludePredictive, "exclude-predictive", false, "hide the predictive-signals section (gate-style behavioral checks on installed packages)")
 	ciCmd.Flags().BoolVar(&ciOffline, "offline", false, "no network calls — implies --skip-osv and --skip-registry")
 	ciCmd.Flags().BoolVar(&ciVerbose, "verbose", false, "emit diagnostic logs to stderr")
 	ciCmd.Flags().StringSliceVar(&ciExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated)")

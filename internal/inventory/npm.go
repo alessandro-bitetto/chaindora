@@ -17,6 +17,7 @@ type npmPackageEntry struct {
 	Version          string `json:"version"`
 	HasInstallScript bool   `json:"hasInstallScript"`
 	Resolved         string `json:"resolved"`
+	Integrity        string `json:"integrity"`
 }
 
 type npmDependencyEntry struct {
@@ -62,6 +63,7 @@ func parseNPMPackageLock(path string) ([]Package, error) {
 			SourcePath:       path,
 			HasInstallScript: v.HasInstallScript,
 			ResolvedURL:      v.Resolved,
+			Integrity:        v.Integrity,
 		})
 	}
 

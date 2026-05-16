@@ -73,13 +73,33 @@ func (d *Detector) Detect(ctx context.Context) ([]findings.Finding, error) {
 			case "go.sum":
 				fs := d.checkGoSum(ctx, path)
 				out = append(out, fs...)
+				// v0.15: also do lockfile-vs-disk for go modules.
+				out = append(out, d.checkGoModulesLockfileVsDisk(ctx, path)...)
 			case "Cargo.lock":
-				// Cargo.lock has integrity info but verifying it
-				// requires hitting the crates.io registry index
-				// (a separate API). For v0.13.1 we emit
-				// presence-only findings — a future patch wires
-				// the index lookup.
-				_ = path
+				// v0.15: lockfile-vs-disk drift check for cargo.
+				// Cross-references Cargo.lock against
+				// ~/.cargo/registry/src/.
+				out = append(out, d.checkCargoLockfileVsDisk(ctx, path)...)
+			case "Pipfile.lock":
+				// v0.15: lockfile-vs-disk drift check for pip.
+				// Compares Pipfile.lock against the project's
+				// .venv/lib/python*/site-packages METADATA.
+				out = append(out, d.checkPipLockfileVsDisk(ctx, path)...)
+			case "package-lock.json":
+				// v0.15: lockfile-vs-disk check for npm — compare
+				// what's pinned in package-lock.json to what's
+				// actually under node_modules/. Catches post-install
+				// tampering by a malicious dependency, a worm
+				// artifact, or a manual edit by an attacker with
+				// file-level access.
+				fs := d.checkNPMLockfileVsDisk(ctx, path)
+				out = append(out, fs...)
+			case "yarn.lock":
+				fs := d.checkYarnLockfileVsDisk(ctx, path)
+				out = append(out, fs...)
+			case "pnpm-lock.yaml":
+				fs := d.checkPnpmLockfileVsDisk(ctx, path)
+				out = append(out, fs...)
 			}
 			return nil
 		})

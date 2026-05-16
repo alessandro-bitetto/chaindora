@@ -73,7 +73,7 @@ func parsePoetryLock(path string) ([]Package, error) {
 
 	var out []Package
 	var inPkg bool
-	var name, version string
+	var name, version, integrity string
 
 	flush := func() {
 		if inPkg && name != "" && version != "" {
@@ -84,11 +84,13 @@ func parsePoetryLock(path string) ([]Package, error) {
 				Version:    version,
 				PURL:       PURL(EcosystemPyPI, nn, version),
 				SourcePath: path,
+				Integrity:  integrity,
 			})
 		}
 		inPkg = false
 		name = ""
 		version = ""
+		integrity = ""
 	}
 
 	for _, raw := range lines {
@@ -103,6 +105,16 @@ func parsePoetryLock(path string) ([]Package, error) {
 			name = extractTomlString(line)
 		case inPkg && strings.HasPrefix(line, "version"):
 			version = extractTomlString(line)
+		case inPkg && integrity == "":
+			// First sha256:... we encounter in the stanza —
+			// poetry/uv both emit `hash = "sha256:..."` inside
+			// `files = [{file=..., hash=...}, ...]` arrays.
+			if i := strings.Index(line, `hash = "sha256:`); i >= 0 {
+				rest := line[i+len(`hash = "`):]
+				if end := strings.Index(rest, `"`); end >= 0 {
+					integrity = rest[:end]
+				}
+			}
 		}
 	}
 	flush()

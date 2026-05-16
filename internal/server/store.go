@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
+	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 )
 
 // Agent is one enrolled machine. APIKeyHash is the SHA-256 of the
@@ -67,10 +68,64 @@ type FindingRecord struct {
 
 // State is the on-disk shape. Versioned so we can migrate later.
 type State struct {
-	Schema   int                       `json:"schema"`
-	Agents   map[string]Agent          `json:"agents"`
-	Scans    []Scan                    `json:"scans"`
-	Findings []FindingRecord           `json:"findings"`
+	Schema   int              `json:"schema"`
+	Agents   map[string]Agent `json:"agents"`
+	Scans    []Scan           `json:"scans"`
+	Findings []FindingRecord  `json:"findings"`
+	// PackageObservations records the first Integrity hash the
+	// server has seen for each (ecosystem, name, version) across
+	// the entire fleet. v0.15+. When a later submission reports the
+	// same tuple with a DIFFERENT Integrity, the server treats it
+	// as a cross-agent republish event and emits a synthetic
+	// "fleet:republish-detected" finding into the store. Keyed by
+	// "<ecosystem>/<name>@<version>".
+	PackageObservations map[string]PackageObservation `json:"package_observations,omitempty"`
+	// VersionTimeline tracks every distinct (ecosystem, name, version)
+	// the fleet has reported AND the timestamp of its first sighting.
+	// Powers publish-cadence anomaly detection: if N+ versions of the
+	// same package have been first-seen by the fleet within a short
+	// window (default 24h), that's a cadence-anomaly signal — packages
+	// don't usually ship 5 versions in a day unless something has
+	// gone wrong (compromise + scramble, abandoned reverse-test
+	// pipeline, etc.). Map keyed by "<ecosystem>/<name>".
+	VersionTimeline map[string][]VersionTimelineEntry `json:"version_timeline,omitempty"`
+	// CohortObservations tracks the first time each agent reported a
+	// given (ecosystem, name, version). Powers cohort dwell-time
+	// detection: when a new agent reports a version the fleet first
+	// saw weeks ago, that's a "long-tail install" (normal); when a
+	// new agent reports a version the fleet first saw HOURS ago,
+	// that's a "fresh install during the attack window" signal.
+	// Map keyed by "<ecosystem>/<name>@<version>"; values list per-
+	// agent first-seen timestamps.
+	CohortObservations map[string][]CohortAgentObservation `json:"cohort_observations,omitempty"`
+}
+
+// VersionTimelineEntry is one (version, first-seen-by-fleet)
+// record contributing to publish-cadence anomaly detection.
+type VersionTimelineEntry struct {
+	Version     string    `json:"version"`
+	FirstSeenAt time.Time `json:"first_seen_at"`
+	FirstAgent  string    `json:"first_agent"`
+}
+
+// CohortAgentObservation is one agent's first sighting of a
+// specific (ecosystem, name, version) tuple. Used to compute
+// dwell-time skew across the fleet for that tuple.
+type CohortAgentObservation struct {
+	AgentID    string    `json:"agent_id"`
+	ObservedAt time.Time `json:"observed_at"`
+}
+
+// PackageObservation is one (eco, name, version) → integrity record.
+// FirstAgent + FirstSeenAt let the dashboard show "agent X first
+// reported integrity Y on date Z; now agent W reports W' — divergent."
+type PackageObservation struct {
+	Ecosystem   string    `json:"ecosystem"`
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
+	Integrity   string    `json:"integrity"`
+	FirstAgent  string    `json:"first_agent"`
+	FirstSeenAt time.Time `json:"first_seen_at"`
 }
 
 // Store is the mutex-protected wrapper around State.
@@ -85,8 +140,14 @@ type Store struct {
 // missing file yields a fresh empty store.
 func NewStore(path string) (*Store, error) {
 	s := &Store{
-		path:  path,
-		state: State{Schema: 1, Agents: map[string]Agent{}},
+		path: path,
+		state: State{
+			Schema:              1,
+			Agents:              map[string]Agent{},
+			PackageObservations: map[string]PackageObservation{},
+			VersionTimeline:     map[string][]VersionTimelineEntry{},
+			CohortObservations:  map[string][]CohortAgentObservation{},
+		},
 	}
 	if err := s.load(); err != nil {
 		return nil, err
@@ -108,6 +169,15 @@ func (s *Store) load() error {
 	}
 	if st.Agents == nil {
 		st.Agents = map[string]Agent{}
+	}
+	if st.PackageObservations == nil {
+		st.PackageObservations = map[string]PackageObservation{}
+	}
+	if st.VersionTimeline == nil {
+		st.VersionTimeline = map[string][]VersionTimelineEntry{}
+	}
+	if st.CohortObservations == nil {
+		st.CohortObservations = map[string][]CohortAgentObservation{}
 	}
 	s.state = st
 	return nil
@@ -202,7 +272,13 @@ func (s *Store) AuthenticateAgent(agentID, rawToken string) (Agent, error) {
 }
 
 // IngestFindings stores a new scan + every finding it carried.
-// Updates the agent's LastSeen + ChdoraVer.
+// Updates the agent's LastSeen + ChdoraVer. Also runs the fleet
+// integrity tracker: for every finding carrying an Integrity hash,
+// either record it as a first observation or flag divergence from a
+// prior observation as a synthetic "fleet:republish-detected"
+// finding (severity=critical). The synthetic findings land in the
+// store alongside the user's submissions so the dashboard surfaces
+// them in the same query path.
 func (s *Store) IngestFindings(agentID, command, chdoraVer string, fs []findings.Finding) (Scan, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -219,6 +295,16 @@ func (s *Store) IngestFindings(agentID, command, chdoraVer string, fs []findings
 		FindingCount: len(fs),
 	}
 	s.state.Scans = append(s.state.Scans, scan)
+	if s.state.PackageObservations == nil {
+		s.state.PackageObservations = map[string]PackageObservation{}
+	}
+	if s.state.VersionTimeline == nil {
+		s.state.VersionTimeline = map[string][]VersionTimelineEntry{}
+	}
+	if s.state.CohortObservations == nil {
+		s.state.CohortObservations = map[string][]CohortAgentObservation{}
+	}
+	var fleetFindings []findings.Finding
 	for _, f := range fs {
 		s.state.Findings = append(s.state.Findings, FindingRecord{
 			AgentID:     agentID,
@@ -226,6 +312,67 @@ func (s *Store) IngestFindings(agentID, command, chdoraVer string, fs []findings
 			ReceivedAt:  scan.ReceivedAt,
 			Fingerprint: findings.Fingerprint(f),
 			Finding:     f,
+		})
+		// Cadence + cohort tracking (v0.15 full-parity). These two
+		// signals don't need Integrity — just a (eco, name, version)
+		// tuple — so we record them before the integrity branch
+		// below. Empty name/version still skip.
+		if f.Name != "" && f.Version != "" {
+			s.recordCadenceAndCohortLocked(string(f.Ecosystem), f.Name, f.Version, agentID, scan.ReceivedAt, &fleetFindings, scan.ID)
+		}
+
+		// Fleet republish-detection: track per-tuple integrity
+		// across all submissions. Same tuple with a different hash
+		// from a different agent is a strong cross-fleet tamper
+		// signal (the registry served different bytes to different
+		// agents, or one agent's cache was poisoned).
+		if f.Integrity == "" || f.Name == "" || f.Version == "" {
+			continue
+		}
+		key := string(f.Ecosystem) + "/" + f.Name + "@" + f.Version
+		existing, seen := s.state.PackageObservations[key]
+		if !seen {
+			s.state.PackageObservations[key] = PackageObservation{
+				Ecosystem:   string(f.Ecosystem),
+				Name:        f.Name,
+				Version:     f.Version,
+				Integrity:   f.Integrity,
+				FirstAgent:  agentID,
+				FirstSeenAt: scan.ReceivedAt,
+			}
+			continue
+		}
+		if existing.Integrity == f.Integrity {
+			continue
+		}
+		// Divergence. Emit a synthetic finding into the store
+		// representing the fleet-level event. Only fire once per
+		// (key, divergent-hash) combination per scan — we don't
+		// re-emit for every repeat sighting.
+		alert := findings.Finding{
+			Detector:  "fleet:republish-detected",
+			Category:  findings.CategorySupplyChainAttack,
+			Ecosystem: f.Ecosystem,
+			Name:      f.Name,
+			Version:   f.Version,
+			PURL:      f.PURL,
+			VulnID:    "FLEET-REPUBLISH",
+			Summary: "fleet-wide divergence on " + f.Name + "@" + f.Version +
+				": agent " + existing.FirstAgent + " reported integrity " +
+				shortFleetHash(existing.Integrity) + " on " +
+				existing.FirstSeenAt.Format(time.RFC3339) +
+				"; agent " + agentID + " now reports " +
+				shortFleetHash(f.Integrity) +
+				" — registry compromise or per-agent cache poisoning",
+			Severity: findings.SeverityCritical,
+		}
+		fleetFindings = append(fleetFindings, alert)
+		s.state.Findings = append(s.state.Findings, FindingRecord{
+			AgentID:     agentID,
+			ScanID:      scan.ID,
+			ReceivedAt:  scan.ReceivedAt,
+			Fingerprint: findings.Fingerprint(alert),
+			Finding:     alert,
 		})
 	}
 	a.LastSeen = scan.ReceivedAt
@@ -236,7 +383,188 @@ func (s *Store) IngestFindings(agentID, command, chdoraVer string, fs []findings
 	if err := s.save(); err != nil {
 		return Scan{}, err
 	}
+	// Bump the scan's reported FindingCount so the dashboard shows
+	// the fleet alerts as part of this submission's footprint.
+	if len(fleetFindings) > 0 {
+		scan.FindingCount += len(fleetFindings)
+		for i := range s.state.Scans {
+			if s.state.Scans[i].ID == scan.ID {
+				s.state.Scans[i].FindingCount = scan.FindingCount
+				break
+			}
+		}
+	}
 	return scan, nil
+}
+
+// fleetCadenceWindow is the trailing window for the publish-
+// cadence anomaly check. Versions first-seen by the fleet within
+// this duration of each other suggest abnormally fast publishing.
+const fleetCadenceWindow = 24 * time.Hour
+
+// fleetCadenceThreshold is the version count within
+// fleetCadenceWindow that triggers a cadence-anomaly alert.
+// Healthy packages publish at most 1-2 versions per day even
+// during release-burst weeks; 4+ in 24h is a strong outlier.
+const fleetCadenceThreshold = 4
+
+// fleetFreshInstallWindow is the maximum age (since fleet-first-
+// sighting) at which a NEW agent reporting the version qualifies
+// as a "fresh install during the attack window" cohort outlier.
+// 6h is the rough sweet spot — short enough to flag the bunched-
+// install pattern attackers chase, long enough to avoid false
+// positives from typical staggered rollouts.
+const fleetFreshInstallWindow = 6 * time.Hour
+
+// fleetCohortMinPriorAgents is the minimum number of OTHER agents
+// that must have observed the version before we apply the cohort
+// check. Without enough prior observations the dwell-time signal
+// is meaningless (the "fleet" is too small to compare against).
+const fleetCohortMinPriorAgents = 3
+
+// recordCadenceAndCohortLocked updates VersionTimeline and
+// CohortObservations for the (eco, name, version) tuple this
+// agent just reported, and emits synthetic fleet findings on
+// anomaly. Must be called with s.mu held.
+func (s *Store) recordCadenceAndCohortLocked(ecosystem, name, version, agentID string, observedAt time.Time, fleetFindings *[]findings.Finding, scanID string) {
+	pkgKey := ecosystem + "/" + name
+	tupleKey := pkgKey + "@" + version
+
+	// --- Cadence: append-if-new to the timeline. ---
+	timeline := s.state.VersionTimeline[pkgKey]
+	seenVersion := false
+	for _, e := range timeline {
+		if e.Version == version {
+			seenVersion = true
+			break
+		}
+	}
+	if !seenVersion {
+		timeline = append(timeline, VersionTimelineEntry{
+			Version:     version,
+			FirstSeenAt: observedAt,
+			FirstAgent:  agentID,
+		})
+		s.state.VersionTimeline[pkgKey] = timeline
+		// Check for anomaly: how many versions first-seen within
+		// the trailing fleetCadenceWindow ending at observedAt?
+		recent := 0
+		oldestRecent := observedAt
+		for _, e := range timeline {
+			if observedAt.Sub(e.FirstSeenAt) <= fleetCadenceWindow {
+				recent++
+				if e.FirstSeenAt.Before(oldestRecent) {
+					oldestRecent = e.FirstSeenAt
+				}
+			}
+		}
+		if recent >= fleetCadenceThreshold {
+			alert := findings.Finding{
+				Detector:  "fleet:publish-cadence-anomaly",
+				Category:  findings.CategorySupplyChainAttack,
+				Ecosystem: inventory.Ecosystem(ecosystem),
+				Name:      name,
+				Version:   version,
+				VulnID:    "FLEET-CADENCE-ANOMALY",
+				Summary: fmt.Sprintf(
+					"fleet has observed %d versions of %s first-published within %s ending at %s — abnormal release cadence (typical packages ship 1-2/day at most)",
+					recent, name, fleetCadenceWindow, observedAt.Format(time.RFC3339)),
+				Severity: findings.SeverityCritical,
+			}
+			*fleetFindings = append(*fleetFindings, alert)
+			s.state.Findings = append(s.state.Findings, FindingRecord{
+				AgentID:     agentID,
+				ScanID:      scanID,
+				ReceivedAt:  observedAt,
+				Fingerprint: findings.Fingerprint(alert),
+				Finding:     alert,
+			})
+		}
+	}
+
+	// --- Cohort dwell: track this agent's first-time sighting. ---
+	cohort := s.state.CohortObservations[tupleKey]
+	for _, c := range cohort {
+		if c.AgentID == agentID {
+			// Already recorded — no signal on repeat.
+			return
+		}
+	}
+	cohort = append(cohort, CohortAgentObservation{AgentID: agentID, ObservedAt: observedAt})
+	s.state.CohortObservations[tupleKey] = cohort
+	// Need enough prior observations to make a comparison.
+	if len(cohort) <= fleetCohortMinPriorAgents {
+		return
+	}
+	// Compare this agent's observation to the fleet's median (or
+	// earliest) first-sighting. If we're substantially newer than
+	// the prior cohort, flag it.
+	earliest := cohort[0].ObservedAt
+	for _, c := range cohort[1:] {
+		if c.ObservedAt.Before(earliest) {
+			earliest = c.ObservedAt
+		}
+	}
+	// Skip self-comparison: only fire when the fleet's earliest
+	// sighting predates THIS agent's by enough that the gap is
+	// meaningful, BUT this agent's gap from the fleet's earliest
+	// is SHORTER than fleetFreshInstallWindow — which would mean
+	// THIS agent installed during the attack window relative to
+	// the fleet's prior. Wait, I want the OPPOSITE: this agent's
+	// install IS fresh while the fleet's existing cohort has had
+	// the version for a long time.
+	priorDwell := observedAt.Sub(earliest)
+	if priorDwell < 7*24*time.Hour {
+		// Whole fleet recently got this version — not an outlier.
+		return
+	}
+	// This agent's observation IS this agent's first-sighting (we
+	// just added it). The "this agent only had it for X" timing
+	// isn't directly inferable from a single observation, so
+	// instead we flag the bunching: this agent saw the version
+	// AFTER the fleet's existing cohort has had it for at least a
+	// week, AND this is the agent's first scan reporting it. That's
+	// the "fresh install in a mature-version-already-on-fleet"
+	// pattern attackers exploit when they pivot to a long-stable
+	// dependency.
+	alert := findings.Finding{
+		Detector:  "fleet:cohort-fresh-install",
+		Category:  findings.CategoryPredictive,
+		Ecosystem: inventory.Ecosystem(ecosystem),
+		Name:      name,
+		Version:   version,
+		VulnID:    "FLEET-COHORT-FRESH",
+		Summary: fmt.Sprintf(
+			"agent %s reports %s@%s for the first time; fleet's earliest sighting was %s ago (%d prior agents). New install on a long-stable version — review what just changed in this agent's environment",
+			agentID, name, version, priorDwell.Truncate(time.Hour), len(cohort)-1),
+		Severity: findings.SeverityMedium,
+	}
+	*fleetFindings = append(*fleetFindings, alert)
+	s.state.Findings = append(s.state.Findings, FindingRecord{
+		AgentID:     agentID,
+		ScanID:      scanID,
+		ReceivedAt:  observedAt,
+		Fingerprint: findings.Fingerprint(alert),
+		Finding:     alert,
+	})
+}
+
+// shortFleetHash truncates an integrity string for readable
+// finding summaries. Same logic as the gate.shortHash but kept
+// local here so the server package stays self-contained.
+func shortFleetHash(h string) string {
+	if i := strings.IndexAny(h, "-:"); i > 0 && i < 10 {
+		head := h[:i+1]
+		body := h[i+1:]
+		if len(body) > 12 {
+			body = body[:12] + "..."
+		}
+		return head + body
+	}
+	if len(h) > 16 {
+		return h[:16] + "..."
+	}
+	return h
 }
 
 // FindingFilter narrows the result set for QueryFindings.

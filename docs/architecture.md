@@ -20,6 +20,42 @@ remediation pipeline (`fix`, `plans`). Multi-machine fleet observability
 (`chdora server`, `chdora agent`) is a separate v0.13 layer on top of
 both.
 
+**v0.15 added predictive detection** — a third gear inside the
+detection mode that replays the gate's behavioral checkers
+(cooldown, publisher-change, maintainer-trust, version-diff,
+provenance) against the scan inventory. Same `gate.Checker`
+interface, same `gate.Probes` table, same `gate.CachedRun` — just
+fed inventory packages instead of a resolved install tree. Findings
+default to severity medium (advisory at scan time) so they don't
+break the default `--fail-on=critical,high` CI gate. The republish-
+guard piggy-backs on `~/.chaindora/gate-cache/` so a known
+`name@version` reappearing with different bytes fires across both
+prevention and detection runs.
+
+**v0.15 also added three fleet behavioral signals** — server-side
+tracking that fires only when `chdora server` is aggregating
+multi-agent state:
+
+- `fleet:republish-detected` — cross-agent integrity divergence for
+  the same `(eco, name, version)`. Registry served different bytes
+  to different agents, or one agent's cache was poisoned.
+- `fleet:publish-cadence-anomaly` — 4+ versions of the same package
+  first-seen by the fleet within a trailing 24h window.
+- `fleet:cohort-fresh-install` — new agent reports a `name@version`
+  the rest of the fleet's cohort has had for 7+ days. Surfaces "this
+  dev just installed a long-stable dep" — the pattern attackers
+  exploit when pivoting to a low-attention package.
+
+All three emit through the regular `Findings` stream so the dashboard
+surfaces them through existing query paths.
+
+**Inventory parser coverage now spans 32 ecosystems** at the
+inventory layer (the v0.13-and-earlier 12 plus 20 added in v0.15:
+NuGet, Composer, Pub, Hex, Swift, Hackage stack+cabal, CRAN/renv,
+Julia, Conda, Conan, vcpkg, Deno, Paket, CocoaPods, Carthage, CPAN,
+Nimble, Shards, Zig, Elm, Rebar3, Gradle, opam, LuaRocks, PDM).
+Predictive coverage is parity-matched.
+
 ## Top-level commands
 
 Twelve commands at the cobra root:
@@ -48,21 +84,29 @@ fix-plan integration) live alongside.
 ```
                   filesystem tree
                          │
-                  inventory.Scan()
+                  inventory.Scan()  (Packages now carry Integrity v0.15+)
                          │
                          ▼
                 ┌────────────────────┐
                 │     Inventory      │  Packages + Sources
                 └────────┬───────────┘
                          │
-   ┌──────────┬──────────┼──────────┬──────────────┬───────────┐
-   ▼          ▼          ▼          ▼              ▼           ▼
- osvioc   incident   hostforen.  heuristic    trustdrift   integrity
-   │          │          │          │              │           │
-   └──────────┴──────────┴──────────┴──────────────┴───────────┘
+   ┌──────────┬──────────┼──────────┬──────────────┬──────────┬─────────────┐
+   ▼          ▼          ▼          ▼              ▼          ▼             ▼
+ osvioc   incident   hostforen.  heuristic    trustdrift  integrity  predictive(v0.15)
+   │          │          │          │              │          │             │
+   │          │          │          │              │ (+lock-  │ (cooldown,  │
+   │          │          │          │              │  drift)  │  publisher, │
+   │          │          │          │              │          │  maintainer,│
+   │          │          │          │              │          │  version-   │
+   │          │          │          │              │          │  diff,      │
+   │          │          │          │              │          │  republish- │
+   │          │          │          │              │          │  guard via  │
+   │          │          │          │              │          │  gate-cache)│
+   └──────────┴──────────┴──────────┴──────────────┴──────────┴─────────────┘
                          │
                          ▼
-                  findings.Finding[]
+                  findings.Finding[]   (now also carries Integrity for fleet)
                          │
         ┌────────────────┼─────────────────┐
         ▼                ▼                 ▼

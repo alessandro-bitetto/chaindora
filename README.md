@@ -22,7 +22,8 @@ matches what you need — or run both side by side.
 | Mode | When it runs | What it does | Command |
 |---|---|---|---|
 | **Prevention** | Before `npm install` writes bytes | Resolves the full transitive install tree across **42 package managers**, runs 10 independent checks against every node, refuses the install if any node fails | `chdora gate ...` |
-| **Detection** | After packages are already on disk | Scans lockfiles, host state, and CI manifests for indicators of a compromise that already happened | `chdora scan` / `audit` / `forensics` / `ci` |
+| **Detection** | After packages are already on disk | Scans lockfiles, host state, and CI manifests for indicators of a compromise that already happened — including **predictive signals**: gate-style behavioral checks (cooldown, publisher-change, republish-guard) replayed against installed packages, plus **lockfile-vs-disk** integrity drift across npm/yarn/pnpm/cargo/go/pip | `chdora scan` / `audit` / `forensics` / `ci` |
+| **Fleet** | Across many machines | v0.13 server aggregates findings + cross-agent integrity tracking + publish-cadence anomaly + cohort fresh-install detection — three fleet-level signals that catch attack patterns no single-machine check can see | `chdora server` / `agent` |
 
 Both modes share the same incident pack, the same OSV.dev integration, and
 the same finding format. They are complementary: prevention catches new
@@ -46,7 +47,10 @@ malware, and the inventory you already installed before chaindora existed.
 | Host-state compromise indicators (leaked tokens, shell rc tampering, worm-deployed files) | yes | — |
 | Post-compromise persistence (cron, launchd, systemd, Scheduled Tasks) | yes | — |
 | Compromised browser / VS Code extensions | yes | — |
-| Republished version with different bytes (maintainer-account compromise) | — | yes |
+| Republished version with different bytes (maintainer-account compromise) | yes (v0.15 predictive) | yes |
+| Installed package whose latest published version was just uploaded by a different account | yes (v0.15 predictive) | yes |
+| `package-lock.json` integrity mismatch vs what's actually under `node_modules/` (post-install swap) | yes (v0.15) | — |
+| Cross-fleet republish: agent A and agent B report same `name@version` with different bytes | yes (v0.13 server + v0.15) | — |
 
 Scope: prevention targets what is detectable at install time — known-malicious
 packages, suspicious publisher/maintainer changes, freshly published versions,
@@ -62,39 +66,39 @@ auto-rollback applies retroactively.
 ### Pre-built binary (recommended)
 
 Pick the matching archive from the [Releases page](https://github.com/alessandro-bitetto/chaindora/releases/latest),
-extract, place `chdora` on `$PATH`. Replace `0.14.0` with the version you
+extract, place `chdora` on `$PATH`. Replace `0.15.0` with the version you
 want; `latest` works as a redirect for the most recent tag.
 
 ```sh
 # macOS, Apple Silicon
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.0_darwin_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # macOS, Intel
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_darwin_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.0_darwin_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, x86_64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_linux_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.0_linux_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, ARM64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_linux_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.0_linux_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Windows, x86_64 (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_windows_amd64.zip" -OutFile chdora.zip
+Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.0_windows_amd64.zip" -OutFile chdora.zip
 Expand-Archive chdora.zip -DestinationPath .
 Move-Item chdora.exe "$env:USERPROFILE\bin\chdora.exe"   # ensure this dir is on PATH
 
 chdora --version
 ```
 
-Each release publishes a `chaindora_0.14.0_checksums.txt`. Verify before running:
+Each release publishes a `chaindora_0.15.0_checksums.txt`. Verify before running:
 
 ```sh
-curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.14.0_checksums.txt
-shasum -a 256 -c chaindora_0.14.0_checksums.txt
+curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.0_checksums.txt
+shasum -a 256 -c chaindora_0.15.0_checksums.txt
 ```
 
 ### From source
@@ -111,7 +115,7 @@ Requires Go 1.22+.
 ```sh
 chdora upgrade               # latest tagged release
 chdora upgrade --check       # report only, don't download
-chdora upgrade --version v0.14.0
+chdora upgrade --version v0.15.0
 ```
 
 `upgrade` refuses on Homebrew-managed binaries — use `brew upgrade` there.
@@ -166,7 +170,7 @@ For every `(ecosystem, name, version)` in the resolved tree:
 | `static-pattern` | Downloads the tarball, scans for curl-pipe-shell in scripts, `eval(<dynamic>)`, base64-encoded URLs, 256+ char high-entropy blobs. Score ≥3 → Block, ≥1 → Warn |
 | `version-diff` | Scores the *delta* in static-pattern hits between requested and prior version. Catches "previously clean, now malicious" without false-positiving on libraries that always used eval |
 | `git-url` | For `npm install user/repo`, `pip install git+...`, CMake `FetchContent` etc.: host-tier + ref-pin + transport-scheme evaluation. 40-hex SHA on a well-known host = Approve; branch refs / unknown hosts / `http://` = Block under Strict |
-| `republish-guard` | Block when a previously-cached `(name, version)` reappears with a DIFFERENT content hash. Catches the maintainer-account-takeover pattern where an attacker republishes a known-good version with malicious bytes. Driven by `~/.chaindora/gate-cache/` |
+| `republish-guard` | Block when a previously-cached `(name, version)` reappears with a DIFFERENT content hash. Catches the maintainer-account-takeover pattern where an attacker republishes a known-good version with malicious bytes. Driven by `~/.chaindora/gate-cache/`. Fires at both gate time AND scan time (predictive detector) |
 
 Per-package decision = worst Verdict across all checkers. Whole-install
 decision = worst per-package decision.
@@ -404,7 +408,7 @@ A daily cron (`0 9 * * * chdora update`) is the recommended setup.
 ```sh
 chdora upgrade                 # latest tagged release
 chdora upgrade --check         # what's available
-chdora upgrade --version v0.14.0
+chdora upgrade --version v0.15.0
 ```
 
 Verifies the SHA-256 against the published checksums file before swap.
@@ -528,6 +532,20 @@ surface gap identified there.
   TLS termination is bring-your-own (caddy / nginx / Cloudflare Tunnel).
   Webhook ingest, scheduled fleet scans, SAML/OIDC dashboard auth and a
   SQL backend remain on the v0.13.x backlog — not yet implemented.
+- **v0.15** ✅ shipped — predictive detection across **32 inventory
+  ecosystems** (full parity with the v0.14 gate-side coverage push).
+  Gate-style behavioral checks (cooldown, publisher-change,
+  maintainer-trust, version-diff, republish-guard via gate-cache)
+  replayed against already-installed packages. Lockfile-vs-disk
+  integrity drift for npm/yarn/pnpm (critical) + cargo/go/pip
+  (medium). Three new fleet behavioral signals: cross-agent
+  republish-detection, publish-cadence anomaly (4+ versions in
+  24h), cohort fresh-install (new agent reports a long-stable
+  version). 22 new inventory parsers added: NuGet, Composer,
+  Poetry/uv/PDM, Swift PM, Hackage (stack+cabal), CRAN/renv,
+  Julia, Conda, Conan, vcpkg, Deno, Paket, CocoaPods, Carthage,
+  CPAN, Nimble, Shards, Zig, Elm, Rebar3, Gradle, opam, LuaRocks,
+  Pub, Hex.
 - **v0.14** ✅ shipped — package-manager coverage push:
   Composer/Packagist (PHP), NuGet (.NET), Poetry / uv / Pipenv /
   PDM (Python alts), Gradle, sbt, CocoaPods + Swift PM + Carthage

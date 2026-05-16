@@ -8,11 +8,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/heuristic"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/osvioc"
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/predictive"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
+	"github.com/alessandro-bitetto/chaindora/internal/gate"
 	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 	"github.com/alessandro-bitetto/chaindora/internal/osv"
@@ -26,9 +29,17 @@ type projectScanOpts struct {
 	SkipOSV       bool
 	SkipIncidents bool
 	SkipHeuristic bool
-	FreshPopular  bool
-	Verbose       bool
-	Excludes      []string
+	// SkipPredictive disables the predictive layer (v0.15+) that
+	// replays the gate's behavioral checkers (cooldown, publisher-
+	// change, maintainer-trust, version-diff, provenance) against
+	// the installed inventory. Defaults to honoring the registry-
+	// network setting — when SkipRegistry is on, predictive
+	// implicitly silences because every checker needs the registry.
+	SkipPredictive bool
+	SkipRegistry   bool
+	FreshPopular   bool
+	Verbose        bool
+	Excludes       []string
 	// NPMProbe / PyPIProbe — registry probes the evidence-based
 	// heuristics use to confirm package signals (existence, freshness,
 	// download count). nil → falls back to registries.Noop (no network,
@@ -99,6 +110,18 @@ func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]find
 			PyPIProbe:    opts.PyPIProbe,
 		})
 		if results, err := det.Detect(ctx, inv, root); err == nil {
+			all = append(all, results...)
+		}
+	}
+	// Predictive: gate-style behavioral checks replayed against the
+	// installed inventory. Skipped when SkipRegistry is on (every
+	// checker needs a probe). Emits at severity=medium by default,
+	// critical for republish-guard cache hits.
+	if !opts.SkipPredictive && !opts.SkipRegistry {
+		probes := buildGateProbes()
+		cache := gate.NewCache(gate.DefaultCacheRoot(), 7*24*time.Hour)
+		det := predictive.New(probes, 72*time.Hour, cache)
+		if results, err := det.Detect(ctx, inv); err == nil {
 			all = append(all, results...)
 		}
 	}

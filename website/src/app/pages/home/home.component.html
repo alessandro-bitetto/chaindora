@@ -66,10 +66,15 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
       <div class="mode-stamp">After install</div>
       <h3>chdora scan · audit · forensics · ci</h3>
       <p>
-        Finds compromise already on disk. Four entry points that differ only in
-        what populates the inventory: one project tree, the whole host, every
+        Finds compromise already on disk across <strong>32 inventory
+        ecosystems</strong>. Four entry points that differ only in what
+        populates the inventory: one project tree, the whole host, every
         project under <code>$HOME</code>, or a CI gate tuned for sticky PR
-        comments and baseline-aware fail-on.
+        comments and baseline-aware fail-on. <strong>Predictive signals</strong>
+        (v0.15) replay gate-style behavioral checks against installed
+        packages — cooldown, publisher-change, maintainer-trust, republish-
+        guard — plus lockfile-vs-disk integrity drift on every JS/Rust/Go/
+        Python ecosystem.
       </p>
 <pre><code>$ chdora scan .
 <span class="cd-critical">[CRITICAL]</span> [osv-ioc] request&#64;2.88.2
@@ -275,7 +280,7 @@ chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
 <!-- Fleet mode -->
 <section class="container fleet-section" id="fleet">
   <div class="fleet-band">
-    <div class="fleet-stamp">Fleet mode · v0.13+</div>
+    <div class="fleet-stamp">Fleet mode · v0.13+ · 3 signals shipped in v0.15</div>
     <h2 class="brand-display fleet-h">One dashboard. <span class="accent">Every machine.</span></h2>
     <p class="fleet-lede">
       When chaindora runs across multiple developer machines and CI nodes,

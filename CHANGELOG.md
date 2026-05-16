@@ -9,9 +9,259 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md). Next milestone is
-v0.15 — predictive detection (replay gate checkers against installed
-inventory) and fleet behavioral signals (cross-agent hash divergence,
-publish-cadence anomaly, cohort dwell-time).
+v0.16 — AI/ML supply chain (HuggingFace pickle scanner, PyTorch /
+TF / Keras model file scanner, MCP server / agent-framework
+auditor).
+
+## [0.15.0] — 2026-05-16
+
+Predictive detection across **32 inventory ecosystems** (full
+parity with the v0.14 gate-side coverage push). chdora now
+applies gate-style behavioral checks to packages that are ALREADY
+installed, plus three fleet-level signals for v0.13 server
+deployments. The question shifts from "is this on a known-bad
+list?" to "does this installed package match an attack-in-progress
+shape?" — even when no CVE or incident-pack entry exists for it
+yet.
+
+### Added — predictive detector (`internal/detectors/predictive/`)
+
+Replays the gate's behavioral checkers against the scan inventory:
+
+- `predictive:cooldown` — the version you installed was published
+  within the last 72h (configurable). Catches "you installed
+  during the attack window" after the fact.
+- `predictive:publisher-change` — the latest published version of
+  this package was uploaded by a different account than the one
+  you have installed. Strong account-takeover signal.
+- `predictive:maintainer-trust` — publisher shows dormancy-gap,
+  fresh-account, or single-version-author signals.
+- `predictive:provenance` — package previously had sigstore /
+  sumdb / GPG attestation and stopped (regression).
+- `predictive:version-diff` — significant cross-version drift in
+  static-pattern score between this version and recent prior
+  releases (new `child_process`, new eval-of-dynamic, etc.).
+- `predictive:republish-guard` — content hash differs from what's
+  cached in `~/.chaindora/gate-cache/` for the same name@version.
+  Escalates to **critical**: a known version reappearing with
+  different bytes is a hard tamper signal regardless of context.
+
+Predictive findings default to **severity=medium** so the default
+`--fail-on=critical,high` CI gate stays quiet. Republish-guard is
+the one exception — critical, never silently passed. Users who
+want predictive signals to break the build add `medium` to their
+`--fail-on` list.
+
+Wired into `chdora scan`, `chdora audit`, `chdora ci`, and
+`chdora forensics --scan-projects` via the shared `scanProject`
+helper. Opt-out per command with `--skip-predictive`; predictive
+implicitly turns off when `--skip-registry` is set (every checker
+needs the registry probe).
+
+New category `findings.CategoryPredictive` + dedicated
+`PREDICTIVE SIGNALS` section in the text renderer. New flag
+`--exclude-predictive` mirrors the other `--exclude-*` toggles.
+
+### Added — lockfile-vs-disk integrity check
+
+`internal/detectors/integrity/lockdrift.go`. Three drift checks
+against installed `node_modules/`:
+
+1. **Version drift** — `package-lock.json` pins `lodash@4.17.21`
+   but `node_modules/lodash/package.json` reports a different
+   version. Means install never completed, or a postinstall
+   payload (or human attacker) swapped the directory.
+2. **Name drift** — installed `package.json` reports a different
+   `name` field. Symlink swap, manual edit, malicious extractor.
+3. **Mirror-lockfile drift** — `package-lock.json` and
+   `node_modules/.package-lock.json` disagree on integrity for
+   the same `(name, version)`. One was modified without the other.
+
+All three emit at **severity=critical** with category
+`host-forensics`. Cross-platform: walks any project root that
+contains a `package-lock.json`. Future ecosystems (Cargo.lock vs
+`~/.cargo/registry/`, etc.) follow the same shape.
+
+### Added — fleet republish detection (v0.13 server)
+
+`internal/server/store.go` now tracks per-tuple integrity
+observations across the entire fleet. Schema additions:
+
+```
+State.PackageObservations map[string]PackageObservation
+```
+
+keyed by `<ecosystem>/<name>@<version>`. On every
+`IngestFindings` call, the server:
+
+1. Records the first Integrity hash it sees for each tuple
+   (with the reporting agent ID + timestamp).
+2. On a later submission for the same tuple with a DIFFERENT
+   integrity, emits a synthetic `fleet:republish-detected`
+   finding (severity=critical, category=supply-chain-attack)
+   into the store's regular findings stream.
+
+The synthetic finding flows through the dashboard's normal
+query path and shows up alongside agent-reported findings —
+no new endpoint or UI mode needed for first cut.
+
+Catches the supply-chain pattern where a registry serves
+different bytes to different agents during an attack window —
+the per-machine republish-guard can't see this if each agent's
+local cache is independent.
+
+### Added — `inventory.Package.Integrity` field
+
+Every lockfile parser that has content hashes now surfaces them
+on the inventory side. This lets the predictive detector seed
+`gate.PackageRef.Integrity` and lets the fleet republish-detection
+see lockfile-recorded hashes via findings.
+
+Populated by: `npm` (package-lock.json), `yarn` (classic +
+Berry), `pnpm`, `pipfile` (`Pipfile.lock`), `poetry` / `uv`
+(`poetry.lock` / `uv.lock` first sha256), `cargo` (Cargo.lock
+checksum), `go` (`go.sum` h1: via a sibling-file lookup from
+`go.mod`).
+
+### Added — `findings.Finding.Integrity` field
+
+Carried on findings so the server can drive fleet republish-
+detection without requiring agents to send a separate state
+channel. Populated by the predictive detector from
+`inventory.Package.Integrity`. Empty on findings where the
+ecosystem's lockfile doesn't expose a hash.
+
+### Added — detection-side parity push for 4 more ecosystems
+
+Inventory-side parsers with full `Package.Integrity` so the
+predictive detector lights up automatically:
+
+| Lockfile | Ecosystem | Integrity field |
+|---|---|---|
+| `packages.lock.json` | NuGet | `contentHash` (base64-sha512) |
+| `composer.lock` | Packagist | `dist.shasum` (sha1) |
+| `pubspec.lock` | Pub | `description.sha256` |
+| `mix.lock` | Hex | outer sha256 (LAST `"…"` in the tuple) |
+
+Each new ecosystem gets a `inventory.Ecosystem` constant, PURL
+type case, OSV ecosystem mapping (NuGet / Packagist / Pub / Hex
+are all OSV-covered out of the box), and predictive ecosystem
+mapping. Scan dispatcher fires on the lockfile basename — drop a
+project with one of these into `chdora scan` and it inventories
++ predicts immediately.
+
+### Added — lockfile-vs-disk drift for yarn + pnpm
+
+Same three-check pattern as npm (version drift, name drift) but
+adapted to the yarn.lock / pnpm-lock.yaml formats. Mirror-
+lockfile drift (npm's `.package-lock.json` check) doesn't apply
+— yarn and pnpm use different install-metadata layouts. Future
+work to add their equivalents.
+
+Both detectors call the inventory parsers (now exported as
+`ParseYarnLock` / `ParsePnpmLock`) rather than reimplementing
+two more variants of the format-detection logic.
+
+### Added — registry-fetched integrity for rubygems + maven
+
+Inventory packages for these two ecosystems carry no per-package
+integrity from their lockfiles (`Gemfile.lock` has none in the
+standard format; `pom.xml` has none at all). The predictive
+detector now backfills via the existing v0.14 fetchers
+(`EnrichRubyGemsIntegrity` against rubygems.org's v2 API,
+`EnrichMavenIntegrity` against repo1.maven.org `.jar.sha1`)
+before running the checker stack. Same bounded-pool concurrent
+fetch, same graceful-degradation-on-failure semantics.
+
+This closes the predictive republish-guard coverage for the two
+ecosystems where it would otherwise stay silent.
+
+### Added — full-parity push: 22 more inventory parsers
+
+Detection-side coverage now matches prevention-side coverage
+across every v0.14 gate ecosystem that has a parseable lockfile:
+
+| Lockfile / manifest | Ecosystem | Integrity | OSV |
+|---|---|---|---|
+| `Package.resolved` | SwiftURL | git revision | ✓ |
+| `stack.yaml.lock` | Hackage | pantry-tree sha256 | ✓ |
+| `cabal.project.freeze` | Hackage | — | ✓ |
+| `renv.lock` | CRAN | renv `Hash` | ✓ |
+| `Manifest.toml` | Julia | git-tree-sha1 | — |
+| `conda-lock.yml` | Conda | sha256 / md5 | — |
+| `conan.lock` | ConanCenter | recipe revision | ✓ |
+| `vcpkg.json` | vcpkg | builtin-baseline SHA | — |
+| `deno.lock` | npm (`npm:` specifiers) | sha512 | ✓ |
+| `pdm.lock` | PyPI | sha256 | ✓ |
+| `paket.lock` | NuGet | — | ✓ |
+| `Podfile.lock` | CocoaPods | SPEC CHECKSUMS sha1 | — |
+| `Cartfile.resolved` | Carthage | git SHA | — |
+| `cpanfile.snapshot` | CPAN | — | — |
+| `nimble.lock` | Nimble | sha1 / git revision | — |
+| `shard.lock` | Shards | git commit | — |
+| `build.zig.zon` | Zig | Zig content hash | — |
+| `elm.json` | Elm | — | — |
+| `rebar.lock` | Hex (Erlang/rebar3) | sha256 (pkg_hash) | ✓ |
+| `gradle.lockfile` | Maven Central | — | ✓ |
+| `*.opam.lock` | opam | — | — |
+| `*.rockspec` | LuaRocks | — | — |
+
+**Predictive coverage now spans 30+ ecosystems** at the inventory
+layer (up from 10). Ecosystems with `Integrity` populated also fire
+republish-guard via the gate-cache.
+
+### Added — lockfile-vs-disk drift for cargo + go + pip
+
+- `Cargo.lock` ↔ `~/.cargo/registry/src/*/<name>-<version>/`. Reports
+  drift when the cache has versions of a pinned crate but not the
+  pinned version (severity=medium; false positives possible from
+  multi-project caches).
+- `go.sum` ↔ `$GOPATH/pkg/mod/<escaped-module>@<version>/`. Same
+  shape; respects Go's `!Foo` → `!foo` escaping.
+- `Pipfile.lock` ↔ `<project>/.venv/lib/python*/site-packages/<name>-<version>.dist-info/METADATA`.
+  Walks the virtualenv adjacent to the lockfile and compares
+  reported versions.
+
+All three drift checks emit at severity=medium (false-positive risk
+from cache reuse across projects) rather than the npm/yarn/pnpm
+critical (where a per-project node_modules drift is unambiguous).
+
+### Added — publish-cadence anomaly + cohort fresh-install signals
+
+Server-side `IngestFindings` now feeds two additional fleet signals
+beyond the v0.15 republish-detection:
+
+- **`fleet:publish-cadence-anomaly`** (severity=critical). Tracks
+  per-(eco, name) timeline of distinct versions first-seen by the
+  fleet. When 4+ versions are first-published within a trailing
+  24h window, emits a critical alert. Healthy packages don't ship
+  that fast; attackers cleaning up a compromise often do.
+- **`fleet:cohort-fresh-install`** (severity=medium). Tracks per-
+  agent first-sighting of each `name@version`. When a new agent
+  reports a version the fleet's existing cohort has had for 7+ days
+  AND there are 3+ prior reporting agents, emits a medium alert.
+  Surfaces "this dev just suddenly installed a long-stable dep" —
+  the pattern attackers exploit when they pivot to a low-attention
+  package.
+
+Both alerts land in the same `Findings` stream as everything else,
+so the dashboard surfaces them through existing query paths.
+
+### Notes
+
+- Predictive findings show up in scan / audit / ci output by
+  default. Use `--exclude-predictive` to hide them, or
+  `--skip-predictive` to skip the detector entirely.
+- The 5 ecosystems without a clean machine-readable lockfile (bun,
+  brew, sbt, plus advanced opam/luarocks layouts beyond the
+  snapshot/rockspec formats handled here) remain detection-blind.
+- Lockfile-vs-disk drift for cargo/go/pip is best-effort and
+  medium-severity by design — the install caches are shared across
+  projects, so false positives are easy. Use as a heads-up signal,
+  not a hard gate.
+- The fleet signals (republish-detection, cadence anomaly, cohort
+  fresh-install) require v0.13 server mode to be running. They're
+  unit-tested but don't fire without aggregated fleet state.
 
 ## [0.14.0] — 2026-05-16
 

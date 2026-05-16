@@ -46,6 +46,19 @@ const (
 	// action refs, curl|bash in CI, etc. Not yet an attack but
 	// reduces the cost of one happening to you.
 	CategoryConfiguration Category = "configuration"
+
+	// CategoryPredictive (v0.15+) — gate-style behavioral signals
+	// replayed against already-installed packages. Not "known
+	// malicious" (that's CategorySupplyChainAttack) and not "known
+	// vulnerable" (that's CategoryDependencyCVE). Instead: this
+	// installed version looks like an attack-in-progress shape —
+	// published hours ago, publisher just changed, hash has shifted
+	// since the version was last vetted, suspicious cross-version
+	// drift. These are advisory by default (severity=medium) and
+	// don't trip --fail-on=critical,high gates, but escalate to
+	// critical when integrity-based signals fire (republish-guard
+	// detecting a known name@version with different bytes).
+	CategoryPredictive Category = "predictive"
 )
 
 // Finding is the normalized output of any detector. The shape is designed to
@@ -62,6 +75,14 @@ type Finding struct {
 	Severity   Severity            `json:"severity"`
 	References []string            `json:"references,omitempty"`
 	SourcePath string              `json:"source_path,omitempty"`
+	// Integrity is the lockfile-recorded content hash for this
+	// (name, version) pair when one is known. v0.15+. Carried on
+	// findings so the v0.13 fleet server can detect cross-agent
+	// divergence: if agent A reports lodash@4.17.21 with sha512-X
+	// and agent B later reports the same with sha512-Y, the server
+	// emits a fleet-level "republished" alert. Empty when the
+	// originating ecosystem's lockfile doesn't expose it.
+	Integrity string `json:"integrity,omitempty"`
 
 	// FixUpgradeTo, when set, names a known-clean version of Name that the
 	// fix layer should propose pinning to (e.g. "5.6.2" for chalk). Set by
@@ -96,6 +117,8 @@ func DeriveCategory(f Finding) Category {
 		// Defensive — osvioc.go should have set this explicitly,
 		// but if not, fall back to dep-cve which is the common case.
 		return CategoryDependencyCVE
+	case startsWith(f.Detector, "predictive:"):
+		return CategoryPredictive
 	}
 	return ""
 }

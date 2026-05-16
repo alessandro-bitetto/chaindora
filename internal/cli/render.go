@@ -153,6 +153,14 @@ var (
 	ExcludeCVEs        bool
 	ExcludeConfig      bool
 	ExcludeHost        bool
+	// ExcludePredictive hides the v0.15 predictive-detector section
+	// (gate-style behavioral signals replayed against installed
+	// packages — cooldown, publisher-change, maintainer-trust,
+	// version-diff). Default false → predictive findings appear in
+	// their own section. Set true via `--exclude-predictive` when
+	// scanning in noise-sensitive contexts (CI runs where you only
+	// care about critical/high; the predictive defaults are medium).
+	ExcludePredictive bool
 )
 
 func writeText(w io.Writer, fs []findings.Finding) {
@@ -170,7 +178,7 @@ func writeText(w io.Writer, fs []findings.Finding) {
 	// banner lie when those were the only findings ("34 supply-chain
 	// signals!" when it was really 33 unpinned-ref + 1 OneDrive
 	// launchd agent). Splitting by Category produces honest banners.
-	supplyChain, depCVE, config, host := partitionByCategory(rgs)
+	supplyChain, depCVE, config, host, predictive := partitionByCategory(rgs)
 
 	// Top-line summary.
 	totalUnique := len(rgs)
@@ -204,6 +212,11 @@ func writeText(w io.Writer, fs []findings.Finding) {
 		writeCategorySection(w, p, "HOST STATE",
 			"no leaked credentials, no shell-rc tampering, no unexpected persistence",
 			p.bold+p.magenta, host, &idx)
+	}
+	if !ExcludePredictive {
+		writeCategorySection(w, p, "PREDICTIVE SIGNALS",
+			"no behavioral anomalies on installed packages — cooldown, publisher, maintainer, version-diff, republish-guard all clean",
+			p.bold+p.blue, predictive, &idx)
 	}
 }
 
@@ -239,11 +252,11 @@ func writeCategorySection(w io.Writer, p palette, title, emptyMessage, color str
 	}
 }
 
-// partitionByCategory splits findings into the four top-level sections.
+// partitionByCategory splits findings into the five top-level sections.
 // Categories are derived from Finding.Category (set explicitly by some
 // detectors, e.g. osv-ioc for MAL-* vs CVE) or inferred via
 // findings.DeriveCategory from the Detector field.
-func partitionByCategory(rgs []renderGroup) (supplyChain, depCVE, config, host []renderGroup) {
+func partitionByCategory(rgs []renderGroup) (supplyChain, depCVE, config, host, predictive []renderGroup) {
 	for _, g := range rgs {
 		switch findings.DeriveCategory(g.Finding) {
 		case findings.CategorySupplyChainAttack:
@@ -254,6 +267,8 @@ func partitionByCategory(rgs []renderGroup) (supplyChain, depCVE, config, host [
 			config = append(config, g)
 		case findings.CategoryHostForensics:
 			host = append(host, g)
+		case findings.CategoryPredictive:
+			predictive = append(predictive, g)
 		default:
 			// Unclassified — fold into supply-chain so it can't get
 			// lost. This shouldn't happen in normal operation since
@@ -261,7 +276,7 @@ func partitionByCategory(rgs []renderGroup) (supplyChain, depCVE, config, host [
 			supplyChain = append(supplyChain, g)
 		}
 	}
-	return supplyChain, depCVE, config, host
+	return supplyChain, depCVE, config, host, predictive
 }
 
 func summaryBySeverity(rgs []renderGroup) []string {

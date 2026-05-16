@@ -33,6 +33,23 @@ var integrityHTTPClient = &http.Client{
 	Timeout: 8 * time.Second,
 }
 
+// EnrichRubyGemsIntegrity is the exported entry point for callers
+// outside the gate package (the predictive detector uses it to
+// backfill integrity for inventory-side rubygems packages, which
+// have no per-gem hash in Gemfile.lock and so need the registry
+// fetch). Delegates to the unexported impl.
+func EnrichRubyGemsIntegrity(ctx context.Context, refs []PackageRef) []PackageRef {
+	return enrichRubyGemsIntegrity(ctx, refs)
+}
+
+// EnrichMavenIntegrity is the exported entry point for the same
+// purpose, for maven packages whose inventory-side parser doesn't
+// surface integrity (pom.xml carries no hashes; the .sha1 sidecars
+// in repo1.maven.org do).
+func EnrichMavenIntegrity(ctx context.Context, refs []PackageRef) []PackageRef {
+	return enrichMavenIntegrity(ctx, refs)
+}
+
 // enrichRubyGemsIntegrity fetches the published sha256 for each
 // gem ref via rubygems.org's API and stuffs it into Integrity.
 // Modifies refs in place; returns the same slice for convenience.

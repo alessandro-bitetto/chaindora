@@ -8,10 +8,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"time"
+
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/heuristic"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/osvioc"
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/predictive"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
+	"github.com/alessandro-bitetto/chaindora/internal/gate"
 	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 	"github.com/alessandro-bitetto/chaindora/internal/osv"
@@ -32,11 +36,13 @@ var (
 	scanAggressive   bool
 	scanSavePlan     bool
 	scanSkipRegistry bool
-	scanExcludeCVEs    bool
-	scanExcludeSupply  bool
-	scanExcludeConfig  bool
-	scanExcludeHost    bool
-	scanOffline        bool
+	scanExcludeCVEs       bool
+	scanExcludeSupply     bool
+	scanExcludeConfig     bool
+	scanExcludeHost       bool
+	scanExcludePredictive bool
+	scanOffline           bool
+	scanSkipPredictive    bool
 )
 
 var scanCmd = &cobra.Command{
@@ -126,12 +132,32 @@ var scanCmd = &cobra.Command{
 			all = append(all, results...)
 		}
 
+		// Predictive layer: replay gate-style behavioral checks
+		// (cooldown, publisher-change, maintainer-trust, version-
+		// diff, provenance) against installed packages. Default
+		// severity=medium so --fail-on=critical,high stays quiet;
+		// republish-guard (cache-driven) escalates to critical
+		// when an integrity collision is detected.
+		if !scanSkipPredictive && !scanSkipRegistry {
+			tally.Enable("predictive")
+			probes := buildGateProbes()
+			cache := gate.NewCache(gate.DefaultCacheRoot(), 7*24*time.Hour)
+			det := predictive.New(probes, 72*time.Hour, cache)
+			results, err := det.Detect(ctx, inv)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "warn: predictive detector:", err)
+			}
+			tally.AbsorbFindings(results)
+			all = append(all, results...)
+		}
+
 		tally.Print(os.Stderr)
 
 		ExcludeCVEs = scanExcludeCVEs
 		ExcludeSupplyChain = scanExcludeSupply
 		ExcludeConfig = scanExcludeConfig
 		ExcludeHost = scanExcludeHost
+		ExcludePredictive = scanExcludePredictive
 		if err := renderFindings(os.Stdout, all, effectiveFormat(scanFormat, jsonOut)); err != nil {
 			return err
 		}
@@ -189,7 +215,9 @@ func init() {
 	scanCmd.Flags().BoolVar(&scanExcludeSupply, "exclude-supply-chain", false, "hide the supply-chain attack section (incident pack, MAL-*, evidence-based heuristics)")
 	scanCmd.Flags().BoolVar(&scanExcludeConfig, "exclude-config", false, "hide the configuration-risks section (unpinned action refs, curl|bash CI patterns)")
 	scanCmd.Flags().BoolVar(&scanExcludeHost, "exclude-host", false, "hide the host-state section (credential files, shell-rc, persistence)")
+	scanCmd.Flags().BoolVar(&scanExcludePredictive, "exclude-predictive", false, "hide the predictive-signals section (gate-style behavioral checks: cooldown, publisher-change, maintainer-trust, version-diff, republish-guard)")
 	scanCmd.Flags().BoolVar(&scanOffline, "offline", false, "no network calls at all — implies --skip-osv and --skip-registry. Uses only the local incident pack + cached registry data.")
+	scanCmd.Flags().BoolVar(&scanSkipPredictive, "skip-predictive", false, "skip the predictive detector (gate-style behavioral signals replayed against installed packages: cooldown, publisher-change, maintainer-trust, version-diff, republish-guard via cache)")
 	scanCmd.Flags().StringSliceVar(&scanExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated, e.g. --exclude testdata,vendor)")
 	scanCmd.Flags().BoolVar(&scanFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
 	scanCmd.Flags().BoolVar(&scanFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
