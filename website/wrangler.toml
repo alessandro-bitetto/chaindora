@@ -1,0 +1,21 @@
+name = "chaindora"
+compatibility_date = "2025-01-15"
+
+[assets]
+directory = "./dist/browser"
+not_found_handling = "single-page-application"
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1
