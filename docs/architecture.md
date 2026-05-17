@@ -56,6 +56,63 @@ Julia, Conda, Conan, vcpkg, Deno, Paket, CocoaPods, Carthage, CPAN,
 Nimble, Shards, Zig, Elm, Rebar3, Gradle, opam, LuaRocks, PDM).
 Predictive coverage is parity-matched.
 
+**v0.15.1 added shell-rc auto-persist** for `chdora gate install` —
+the original v0.9 design printed an `export PATH=…` line and asked
+users to add it by hand. Real-world experience: nobody did.
+v0.15.1 appends a clearly-marked block (zsh / bash / fish on
+macOS+Linux, PowerShell `$PROFILE` on Windows) so the shim sticks
+across new terminals and reboots. The block carries fence-comment
+markers (`# >>> chdora gate (managed) >>>`) so chdora's own
+`hostforensics:shellrc` scanner recognizes and skips it, and so
+`gate disable` removes it surgically.
+
+**v0.15.2 added four manifest-fallback parsers** for the
+real-world case where the user has only the manifest, not the
+resolved lockfile:
+
+| Manifest | Fires when no sibling | Ecosystem |
+|---|---|---|
+| `.csproj` / `.fsproj` / `.vbproj` | `packages.lock.json` | NuGet |
+| `build.gradle` / `build.gradle.kts` | `gradle.lockfile` | Maven |
+| `composer.json` | `composer.lock` | Packagist |
+| `pyproject.toml` | `poetry.lock` / `uv.lock` / `pdm.lock` / `Pipfile.lock` | PyPI |
+
+These cover the two biggest "lockfile-opt-in" ecosystems (NuGet's
+`<RestorePackagesWithLockFile>` is opt-in; Gradle's
+`dependencyLocking` is opt-in) plus the library-convention case
+(Composer libraries commit only the manifest, not the lock) plus
+in-development projects (Python projects often lack a resolved
+lockfile until `poetry lock` runs). Tradeoff: manifest entries
+carry version constraints, not pins, so OSV-CVE batch lookups
+silently miss for range-versioned packages. OSV-MAL by name still
+works.
+
+**v0.15.2 also tuned predictive severity + the lockdrift check**:
+
+- `provenance` checker no longer fires "regression" when the
+  user's old version predates the publisher's adoption — it now
+  requires the LATEST version to also lack attestation, isolating
+  the real "publisher stopped using sigstore" pattern.
+- `maintainer-trust` raised its single-version-author threshold
+  (3 → 2 versions) so npm's long-tail utilities don't en-masse
+  trip the signal.
+- Per-checker predictive severity: `republish-guard`=Critical,
+  `cooldown`+`version-diff`=Medium, `publisher-change`+
+  `maintainer-trust`+`provenance`=Low. Default
+  `--fail-on=critical,high` CI gates see ZERO advisory predictive
+  findings; users opt in to `--fail-on=…,medium` for the real
+  cooldown+version-diff signals.
+- `integrity:lockfile-vs-disk` walks the EXACT lockfile path per
+  entry instead of always checking top-level `node_modules/<name>`
+  — fixes the v0.15.0 bug that mis-reported every non-hoisted
+  nested-dep entry as drift.
+- `hostforensics:persistence` skips known-vendor auto-update
+  agents (Microsoft Office/OneDrive, Google Chrome, Adobe CC,
+  JetBrains, Docker, Apple, Dropbox, Spotify, Zoom) at the LOW
+  informational level. Suspicious-command checks still run on
+  those files — a vendor plist doing `curl|bash` would still
+  trip HIGH.
+
 ## Top-level commands
 
 Twelve commands at the cobra root:
@@ -285,7 +342,20 @@ internal/
                             typosquat / depconfusion / freshpopular
     trustdrift/             v0.11 — .npmrc / pip.conf / git / CA store /
                             /etc/hosts baseline + drift
+                            v0.15.2 — falls back to UserHomeDir() / TempDir()
+                            when constructor home is empty
     integrity/              v0.13.1 — go.sum vs sumdb verification
+                            v0.15 — lockfile-vs-disk drift (npm/yarn/pnpm
+                            critical; cargo/go/pip medium)
+                            v0.15.2 — npm walks EXACT lockfile path per entry;
+                            yarn/pnpm dedupe by name + check on-disk vs SET of
+                            pinned versions
+    predictive/             v0.15 — gate-checker replay against scan
+                            inventory across 32 ecosystems
+                            v0.15.2 — per-checker severity tuning
+                            (republish-guard=Critical; cooldown+version-diff=
+                            Medium; publisher-change+maintainer-trust+
+                            provenance=Low)
 
   progress/                 stderr status-line for slow walks
 

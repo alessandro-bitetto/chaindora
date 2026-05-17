@@ -63,6 +63,23 @@ func (p *ProvenanceCheck) Check(ctx context.Context, ref PackageRef) CheckResult
 		r.Reason = "no sigstore provenance and --require-provenance is set"
 		return r
 	}
+	// v0.15.2 tuning: don't flag "your old version predates the
+	// publisher's provenance adoption" as a regression. That was
+	// the majority of false positives in scan-time replays — a
+	// user has lodash@4.17.21 (3 years old, no attestation) while
+	// lodash@5.x publishes WITH attestation. Not a regression,
+	// just an outdated install. Real regression = LATEST published
+	// version doesn't have it AND a past version did.
+	if latestProbe, ok := probe.(interface {
+		LatestVersionHasProvenance(context.Context, string) (bool, error)
+	}); ok {
+		latestHas, lerr := latestProbe.LatestVersionHasProvenance(ctx, ref.Name)
+		if lerr == nil && latestHas {
+			r.Verdict = VerdictApprove
+			r.Reason = "no provenance on this version, but the package's latest version has it — outdated install, not a regression"
+			return r
+		}
+	}
 	anyHas, err := probe.AnyVersionHasProvenance(ctx, ref.Name)
 	if err != nil {
 		r.Verdict = VerdictUnknown
@@ -71,7 +88,7 @@ func (p *ProvenanceCheck) Check(ctx context.Context, ref PackageRef) CheckResult
 	}
 	if anyHas {
 		r.Verdict = VerdictWarn
-		r.Reason = "no sigstore provenance on this version, but other versions of this package have it — possible regression / takeover signal"
+		r.Reason = "real regression: latest version of this package no longer has provenance, but past versions did — possible maintainer takeover or pipeline change"
 		return r
 	}
 	r.Verdict = VerdictApprove

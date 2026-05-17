@@ -94,6 +94,16 @@ func scanSystemdUserUnits(home string) []findings.Finding {
 // systemd-style persistence directories. Each matching file → one LOW
 // informational finding, plus HIGH for any file whose contents trip a
 // shellrc malware pattern.
+//
+// v0.15.2: persistence entries from known-vendor auto-updaters
+// (Microsoft Office, OneDrive, Google Chrome, Adobe Creative Cloud,
+// JetBrains Toolbox, etc.) are skipped at the informational LOW
+// level. Every macOS user with Office installed has the same three
+// com.microsoft.* launchd agents on their machine; surfacing them
+// as findings adds nothing actionable and trains users to ignore
+// chdora's persistence output. Suspicious-command checks STILL
+// run on these files — if a vendor plist tripped curl|bash or
+// eval-base64, that HIGH finding still fires.
 func scanPersistenceDir(dirs []string, ext, vulnID, kindLabel, kindForSummary string) []findings.Finding {
 	var out []findings.Finding
 	for _, dir := range dirs {
@@ -110,6 +120,15 @@ func scanPersistenceDir(dirs []string, ext, vulnID, kindLabel, kindForSummary st
 			if err != nil {
 				continue
 			}
+			// Suspicious-command scan ALWAYS runs — even on vendor
+			// plists. If a Microsoft updater is doing curl|bash,
+			// we want to know.
+			out = append(out, checkSuspiciousCommand(string(data), full, kindForSummary)...)
+			// Informational LOW finding suppressed for known-vendor
+			// auto-update agents.
+			if isKnownVendorPersistenceAgent(e.Name()) {
+				continue
+			}
 			out = append(out, findings.Finding{
 				Detector:   "hostforensics:persistence",
 				VulnID:     vulnID,
@@ -117,10 +136,51 @@ func scanPersistenceDir(dirs []string, ext, vulnID, kindLabel, kindForSummary st
 				Severity:   findings.SeverityLow,
 				SourcePath: full,
 			})
-			out = append(out, checkSuspiciousCommand(string(data), full, kindForSummary)...)
 		}
 	}
 	return out
+}
+
+// isKnownVendorPersistenceAgent reports whether a launchd / systemd
+// unit basename matches a well-known auto-update or telemetry agent
+// from a major vendor. These run on essentially every machine with
+// the relevant product installed and aren't a useful signal at
+// LOW informational severity — they only become interesting if
+// they trip the suspicious-command scanner.
+//
+// Bundle-ID prefixes (left-to-right): vendor / product /
+// agent-name. The first two segments alone are enough to identify
+// auto-update agents without false positives — we're not skipping
+// arbitrary com.microsoft.* files, only the .plist names that
+// reliably indicate an updater.
+var knownVendorAgentPrefixes = []string{
+	"com.microsoft.OneDrive",
+	"com.microsoft.update",
+	"com.microsoft.autoupdate",
+	"com.microsoft.errorreporting",
+	"com.microsoft.office.licensing",
+	"com.microsoft.SyncReporter",
+	"com.microsoft.teams",
+	"com.google.keystone",   // Google Chrome / Drive updater
+	"com.google.GoogleUpdater",
+	"com.adobe.AdobeCreativeCloud",
+	"com.adobe.acc",
+	"com.adobe.ARMDC",
+	"com.docker.helper",
+	"com.jetbrains.toolbox",
+	"com.dropbox",
+	"com.apple.",
+	"com.spotify.webhelper",
+	"com.zoom.ZoomDaemon",
+}
+
+func isKnownVendorPersistenceAgent(filename string) bool {
+	for _, prefix := range knownVendorAgentPrefixes {
+		if strings.HasPrefix(filename, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- Windows Scheduled Tasks ----

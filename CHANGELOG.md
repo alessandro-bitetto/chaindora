@@ -13,6 +13,247 @@ v0.16 — AI/ML supply chain (HuggingFace pickle scanner, PyTorch /
 TF / Keras model file scanner, MCP server / agent-framework
 auditor).
 
+## [0.15.2] — 2026-05-17
+
+Bug-fix + coverage-expansion release. v0.15.0's lockfile-vs-disk
+check was over-firing on nested transitive deps (1100+ false
+positives per audit run). v0.15.0 also missed common .NET /
+Gradle / PHP / Python projects that don't generate a lockfile
+by convention. v0.15.2 fixes both issues plus a trustdrift bug
+and adds an executive summary to the audit CLI output.
+
+### Fixed — lockfile-vs-disk false-positive flood
+
+**Symptom**: scanning a real-world npm/yarn/pnpm project produced
+tens to hundreds of bogus `INTEGRITY-DRIFT-VERSION` (critical)
+findings — top offenders were classic transitive deps like
+semver (50 per project), brace-expansion, minimatch, debug,
+lru-cache. A user reported 1108 such findings in a single audit.
+
+**Root cause**: when a lockfile pins multiple versions of the
+same package at different nested install paths (e.g.
+`node_modules/eslint/node_modules/semver@5.7.2` AND
+`node_modules/semver@7.6.0`), v0.15.0 compared EVERY entry
+against the top-level location, mis-reporting every non-hoisted
+nested entry as drift.
+
+**Fix**: walk the EXACT lockfile-recorded install path per entry.
+For npm: `filepath.Join(projectDir, key, "package.json")` where
+`key` is the lockfile's path string. For yarn/pnpm (whose
+inventory parsers don't preserve install paths), dedupe by name
+and check the on-disk version against the SET of pinned versions
+for that name — fires only if the on-disk version matches NONE
+of the pinned versions.
+
+Three new regression tests cover the bug and the fix. Existing
+tests still pass — genuine drift (real version mismatch at the
+correct install path) is still detected critically.
+
+### Added — manifest-fallback parsers for lockfile-less projects
+
+Real-world .NET / Gradle / PHP / Python projects often skip
+lockfile generation:
+
+- **NuGet**: `<RestorePackagesWithLockFile>` is opt-in. Most .NET
+  projects don't enable it.
+- **Gradle**: `dependencyLocking` is opt-in. Most Android / JVM
+  projects don't enable it.
+- **Composer**: library projects (vs applications) typically
+  commit only composer.json, not composer.lock.
+- **pyproject.toml-based Python**: projects in active development
+  often lack the resolved poetry.lock / uv.lock / pdm.lock.
+
+Four new manifest parsers, each fires ONLY when no resolved
+lockfile sibling exists:
+
+| Manifest | Ecosystem | Notes |
+|---|---|---|
+| `.csproj` / `.fsproj` / `.vbproj` | NuGet | XML `<PackageReference Include=… Version=…/>` |
+| `build.gradle` / `build.gradle.kts` | Maven (gradle-resolved) | Regex over `implementation "g:a:v"` (Groovy + Kotlin DSL); skips `$variable` interpolation |
+| `composer.json` | Packagist | `require` + `require-dev` maps; skips `php` + `ext-*` virtual packages |
+| `pyproject.toml` | PyPI | Both PEP 621 `[project].dependencies` array AND Poetry `[tool.poetry.dependencies]` table |
+
+**Tradeoffs** (same for all four manifest fallbacks):
+
+- Pulls in version *constraints*, not resolved pins — so OSV's
+  batch API often can't match (it needs exact versions).
+- Predictive cooldown / publisher-change / maintainer-trust can't
+  fire for range-versioned deps (the probes need a concrete
+  version to query).
+- OSV-MAL by name still works (`MAL-*` is often name-only).
+- Incident-pack name-only entries match fine.
+- Heuristic checks (typosquat, dep-confusion) work at the name
+  level.
+
+**Net effect**: a .NET project with no `packages.lock.json` was
+fully invisible to chdora before v0.15.2. Now its declared
+packages flow through OSV-MAL + incident-pack + predictive's
+provenance check (which is version-independent for known-account
+publishers). A test against a real-world .NET project surfaced
+**CVE-2026-30227 / GHSA-g7hc-96xr-gvvx** on MimeKit 4.14.0 —
+caught by the new csproj parser, would have been invisible
+pre-v0.15.2.
+
+### Fixed — trustdrift "/.chaindora: read-only file system"
+
+`chdora audit` running with `$HOME` unset (e.g. under sudo with
+default-clearing `secure_path`, or `--whole-machine` walking
+into a path with empty home context) would emit a confusing
+`could not write trust-drift baseline: mkdir /.chaindora:
+read-only file system` finding. Root cause: trustdrift's `New`
+constructor took the home directly and didn't fall back when
+empty.
+
+Fix: `trustdrift.New("")` now falls back to `os.UserHomeDir()`,
+then `os.TempDir()` as a last resort. No more attempts to write
+the baseline into `/`.
+
+### Changed — CLI render gets an executive summary
+
+The text-format output now prints a 3-line **executive summary**
+above the per-section findings:
+
+```
+────────────────────────────────────────
+  1129 findings   1108 critical  16 high  4632 medium
+  supply-chain 5 · dependency-cve 60 · configuration 124 · host-state 4 · predictive 4632
+  Focus on the 1124 critical+high findings first.
+────────────────────────────────────────
+```
+
+Surfaces the action-required counts BEFORE the wall of per-
+section findings. Critical / high are colored prominently;
+medium is muted (advisory by design — won't trip the default
+`--fail-on=critical,high` CI gate).
+
+### Changed — predictive section is now condensed when noisy
+
+When predictive has >50 findings (typical for `chdora audit`
+across `$HOME`), the section renders a **top-20 by severity**
+view with a footer pointing at the saved plan for full detail:
+
+```
+PREDICTIVE SIGNALS  (4632 findings — 1129 critical, 3083 medium, 1687 low)  condensed view: showing top 20
+...
+   (4612 more predictive findings hidden — re-run with --no-condense-predictive to see all,
+    or `chdora plans show <id>` to inspect the saved plan in detail)
+```
+
+Old behavior: thousands of medium-severity advisories drowned
+out the few critical signals in adjacent sections. New behavior:
+critical / high predictive findings always render in the top-20
+window so they're visible; the medium-severity tail is paged out.
+
+### Tuned — provenance regression-only fires on real regressions
+
+v0.15.0's provenance check fired Warn whenever the installed
+version lacked attestation AND any version of the package had
+ever had it. Real-world: this hit thousands of packages where
+the user has an older version that predates the publisher's
+provenance adoption — not a regression, just an outdated
+install. Empirically: 982 findings on a typical $HOME audit, most
+noise.
+
+v0.15.2 narrows the regression definition: a real regression
+requires the LATEST published version to also lack attestation
+AND some past version to have had it. That isolates the
+"publisher started using provenance, then stopped" pattern —
+the genuine takeover / pipeline-compromise signal. When the
+latest version still has provenance, the user is just outdated
+and gets Approve.
+
+Added `LatestVersionHasProvenance(name)` to the npm probe (reads
+`dist-tags.latest`). Used opportunistically — ecosystems that
+don't implement the optional interface keep the old "any
+version" semantics.
+
+### Tuned — maintainer-trust threshold + per-checker severity
+
+`maintainer-trust`'s `MinVersionCount` tightened from 3 → 2.
+The old threshold flagged npm's long-tail of single-purpose
+utility packages (`is-array`, `escape-string-regexp`, hundreds
+of "leftpad-class" helpers) en masse. They legitimately exist
+as 1- or 2-version utilities with no security implication.
+Now only packages with `<2` total versions (i.e., truly
+brand-new on the registry) trigger the version-count signal.
+
+### Tuned — per-checker severity in the predictive layer
+
+Behavioral signals split into two severity tiers based on
+real-world signal-to-noise:
+
+| Checker | Severity | Why |
+|---|---|---|
+| `republish-guard` | Critical | Hard tamper signal |
+| `cooldown` | Medium | Time-sensitive: just-published version |
+| `version-diff` | Medium | Cross-version behavioral change |
+| `publisher-change` | Low | Mostly team-rotation noise |
+| `maintainer-trust` | Low | Soft trust signals, easy false positives |
+| `provenance` | Low | Even after the regression-only tuning |
+
+Default `--fail-on=critical,high` CI gates now see ZERO
+advisory predictive findings. Users who want predictive signals
+to break the build add `medium` (catches cooldown + version-
+diff) or `low` (everything).
+
+### Tuned — persistence vendor allowlist
+
+`hostforensics:persistence` previously emitted LOW informational
+findings for every launchd / systemd unit, including standard
+auto-updater plists from Microsoft Office, OneDrive, Google
+Chrome, Adobe Creative Cloud, JetBrains, Dropbox, Apple, etc.
+Every macOS audit produced the same three `com.microsoft.*`
+findings forever. Now those known-vendor entries are
+suppressed at the LOW level — they're not a useful signal.
+
+CRITICAL: the suspicious-command scan still runs on those
+files. If `com.microsoft.OneDriveStandaloneUpdater.plist`
+actually contained `curl … | bash`, that HIGH finding still
+fires. We're only suppressing the informational presence-
+finding, not the malware-pattern check.
+
+Allowlist covers prefixes: `com.microsoft.OneDrive`,
+`com.microsoft.update`, `com.microsoft.autoupdate`,
+`com.microsoft.errorreporting`, `com.microsoft.office.licensing`,
+`com.microsoft.SyncReporter`, `com.microsoft.teams`,
+`com.google.keystone`, `com.google.GoogleUpdater`,
+`com.adobe.AdobeCreativeCloud`, `com.adobe.acc`,
+`com.adobe.ARMDC`, `com.docker.helper`, `com.jetbrains.toolbox`,
+`com.dropbox`, `com.apple.`, `com.spotify.webhelper`,
+`com.zoom.ZoomDaemon`.
+
+### Result — predictive volume drop
+
+Re-running `chdora scan` on a real-world Angular project
+(`chaindora/repo/website`, ~840 packages):
+
+- **Before v0.15.2**: ~thousands of predictive findings, all at
+  Medium, drowning out signal.
+- **After v0.15.2**: 273 findings — 10 Medium (cooldown +
+  version-diff), 263 Low (advisory). Critical/high tier
+  unchanged because real signals were never noise.
+
+A full `chdora audit` across $HOME should see proportional
+drops: the 4632 predictive findings in the user-reported plan
+shrink to ~500–1000 Medium (real cooldown/version-diff signals)
+plus thousands of Low (advisory, filtered out of default
+`--fail-on` gates).
+
+### Notes
+
+- LOCKFILE PRECEDENCE: when both a manifest AND a resolved
+  lockfile exist (e.g. `pyproject.toml` + `poetry.lock`), the
+  lockfile parser wins. The manifest fallback only fires when
+  no recognized lockfile sibling is present.
+- Manifest fallbacks emit at MANIFEST confidence — `Source.Kind`
+  is suffixed with `" (manifest fallback)"` so JSON/SARIF
+  consumers can tell apart resolved-pin entries from declared-
+  range entries.
+- Trustdrift `New("")` fallback to TempDir means the detector
+  silently continues even when the user's audit context has
+  no usable home dir. Baseline-write findings just stop firing
+  in that case.
+
 ## [0.15.1] — 2026-05-16
 
 UX fix: `chdora gate install` now actually persists. v0.15.0 (and

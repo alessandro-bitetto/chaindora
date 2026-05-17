@@ -13,7 +13,7 @@ interface Milestone {
   styleUrls: ['./home.component.scss'],
 })
 export class HomeComponent {
-  readonly version = '0.15.1';
+  readonly version = '0.15.2';
 
   readonly roadmap: Milestone[] = [
     { tag: 'v0.10', state: 'shipped', what: 'SonarQube-grade ci (baseline / suppression / PR comments); yarn + pnpm gate resolvers; PyPI gate; watch daemon; sigstore' },

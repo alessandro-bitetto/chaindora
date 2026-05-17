@@ -252,31 +252,128 @@ is more boring.
 Driven by the framework. Each milestone has a primary threat-model
 target rather than an ecosystem target.
 
-### v0.11 — close the highest-leverage gaps
+### v0.11 — ✅ shipped — close the highest-leverage gaps
 
-Score-ranked items (highest first):
+Score-ranked items shipped:
 
-1. **Git-URL trust evaluator** — applies to `pip install git+...`,
-   `npm install user/repo`, `go get` against unknown hosts, CMake
-   `FetchContent_Declare`. Closes the "no registry" gap. The gate
-   framework extends naturally: trust the URL's host, evaluate git
-   tag age, scan tarball content.
-2. **Build-time + import-time static scan** for Go (`init()`) and
-   Rust (`build.rs`, proc-macros). Cargo `build.rs` is the highest-
-   risk execution moment in the Rust ecosystem; Go init runs on
-   every import. Same scanner architecture as npm postinstall.
-3. **Trust-anchor drift forensics** — detect changes in `.npmrc`
-   `registry=`, `pip.conf` `index-url`, `~/.cargo/config.toml`,
-   `git config insteadOf`, ssh `known_hosts`, system CA store.
-   Baseline at first run, alert on drift.
-4. **RubyGems + crates + Maven**: detection + cooldown + OSV
-   (per original v0.11). Detection-and-cooldown shape, not full
-   gate stack — that takes per-package-manager resolver work.
-5. **PyPI gate parity completion**: publisher-change /
-   maintainer-trust / version-diff using PyPI's project-maintainers
-   API.
+1. ✅ **Git-URL trust evaluator** — `pip install git+...`,
+   `npm install user/repo`, CMake `FetchContent_Declare`,
+   `go get` against unknown hosts. Host-tier + ref-pin +
+   transport-scheme scoring. 40-hex SHA on a well-known host =
+   Approve; branch refs / unknown hosts / `http://` = Block under
+   Strict.
+2. ✅ **Build-time + import-time static scan** for Go `init()` and
+   Rust `build.rs` / proc-macros. Same scanner architecture as npm
+   postinstall.
+3. ✅ **Trust-anchor drift forensics** — baseline at first run,
+   alert on drift across `.npmrc` / `pip.conf` / `~/.cargo/config.toml` /
+   `git config insteadOf` / ssh `known_hosts` / system CA store /
+   `/etc/hosts`.
+4. ✅ **RubyGems + crates + Maven** detection + cooldown + OSV.
+5. ✅ **PyPI gate parity completion** — publisher-change /
+   maintainer-trust / version-diff.
 
-### v0.12 — IaC supply chain
+### v0.13 — ✅ shipped — server mode + multi-machine
+
+JSON-backed `chdora server` with per-agent bearer tokens, embedded
+HTML dashboard at `/`, JSON API at `/api/v1/*`. Bring-your-own TLS.
+`chdora agent enroll` + `chdora watch` for client-side pushing.
+
+### v0.13.1 — ✅ shipped — lockfile-vs-registry integrity
+
+`go.sum` cross-referenced against sum.golang.org transparency log;
+`Cargo.lock` checksums verified against crates.io index. v0.15
+extended this with lockfile-vs-disk drift checks.
+
+### v0.14 — ✅ shipped — ecosystem coverage push (8 → 42 PMs)
+
+The headline release. Gate-side ecosystem coverage expanded from
+8 to 42 package managers. New resolvers for: NuGet, Composer,
+Poetry, uv, Gradle, sbt, CocoaPods, Swift PM, Pub, Mix/Hex, bun,
+deno, conda+mamba+micromamba, brew, Conan, vcpkg, Paket, stack,
+cabal, opam, renv, Pkg.jl (Julia), cpanm, luarocks, Elm, nimble,
+shards, zig.
+
+Also shipped: hash-keyed verdict cache at `~/.chaindora/gate-cache/`
++ republish-attack detector (same `name@version` reappearing with
+different bytes → critical Block). Parallel checker fan-out in
+`gate.Run`. `PMError` typed errors so chdora stays silent when the
+real package manager would have failed anyway.
+
+### v0.15 — ✅ shipped — predictive detection + fleet behavioral
+
+Predictive detector replays the gate's behavioral checkers
+(cooldown, publisher-change, maintainer-trust, version-diff,
+provenance, republish-guard) against the scan inventory across
+32 ecosystems. Findings default to severity medium (advisory).
+
+Three fleet signals on the v0.13 server: `fleet:republish-detected`
+(cross-agent integrity divergence), `fleet:publish-cadence-anomaly`
+(4+ versions in 24h), `fleet:cohort-fresh-install` (new agent
+reports a long-stable version). All require multi-agent state.
+
+Lockfile-vs-disk drift detection: npm/yarn/pnpm (critical),
+cargo/go/pip (medium).
+
+### v0.15.1 — ✅ shipped — `gate install` persists across reboots
+
+The original v0.9 `chdora gate install` printed an `export PATH=…`
+line and asked the user to add it to their shell rc by hand. Most
+users skipped that step, so the gate was effectively off. v0.15.1
+appends a fence-marker block to the user's shell rc directly (zsh /
+bash / fish / PowerShell). `chdora gate disable` removes the block
+surgically.
+
+### v0.15.2 — ✅ shipped — manifest fallbacks + predictive tuning
+
+Four manifest-fallback parsers for the real-world case where a
+project has only the manifest, not the lockfile: `.csproj` /
+`.fsproj` / `.vbproj` (NuGet without `<RestorePackagesWithLockFile>`),
+`build.gradle` / `build.gradle.kts` (Gradle without
+`dependencyLocking`), `composer.json` (libraries committing only
+the manifest), `pyproject.toml` (Poetry/uv/PDM projects mid-
+development).
+
+Critical bug fix: v0.15.0's lockfile-vs-disk check mis-reported
+every non-hoisted nested-dep entry as drift, producing 1100+ false
+positives on real-world projects. Now walks the EXACT lockfile
+path per entry (npm) or dedupes by name + checks against the SET
+of pinned versions (yarn/pnpm).
+
+Predictive severity retuned per checker: `republish-guard`=Critical,
+`cooldown`+`version-diff`=Medium, `publisher-change`+
+`maintainer-trust`+`provenance`=Low. Default `--fail-on=critical,
+high` CI gates see ZERO advisory predictive noise.
+
+Provenance regression-only firing: warn only when the LATEST
+published version of the package also lacks attestation AND a past
+version had it. Isolates the real "publisher stopped using
+sigstore" pattern from the common "your old version predates
+adoption" case.
+
+`hostforensics:persistence` vendor allowlist: Microsoft Office /
+OneDrive, Google Chrome, Adobe CC, JetBrains, Docker, Apple,
+Dropbox, Spotify, Zoom auto-update plists no longer emit
+informational findings (the suspicious-command scanner still
+runs on them — a vendor plist doing `curl|bash` still trips HIGH).
+
+CLI executive summary surfaces critical+high counts above the
+per-section breakdown; predictive section condenses to top-N when
+noisy.
+
+### v0.16 — AI / ML supply chain
+
+The next milestone — what v0.14 was originally slated to cover
+before the 42-PM coverage push reordered priorities:
+
+1. **HuggingFace pickle scanner** — detect `__reduce__` opcodes in
+   model weight files
+2. **PyTorch / TF / Keras model file scanner** — same shape
+3. **MCP server / Claude Code skill auditor** — emerging surface
+4. **Slopsquatting heuristic** — cross-reference LLM-suggested
+   package names against typosquat candidates
+
+### v0.17 — IaC supply chain
 
 1. **Terraform / OpenTofu modules** — `source = ` parser, module
    registry cooldown + OSV
@@ -284,37 +381,14 @@ Score-ranked items (highest first):
    static scan
 3. **Ansible Galaxy** — `requirements.yml` parser, Galaxy API
    cooldown
-4. **Composer / Packagist** — PHP completeness pass
-5. **NuGet** — .NET enterprise completeness pass
 
-### v0.13 — server mode + multi-machine
+### v0.18 — emerging surfaces
 
-Per the original v0.11 spec: scheduled fleet scans, findings DB,
-webhook ingest, multi-machine dashboard. Opt-in by config, not
-default.
-
-### v0.14 — AI / ML supply chain
-
-1. **HuggingFace pickle scanner** — detect `__reduce__` opcodes in
-   model weight files
-2. **PyTorch / TF / Keras model file scanner** — same shape
-3. **MCP server / Claude Code skill auditor** — emerging surface
-4. **Gradle** (separate from Maven detection)
-
-### v0.15 — emerging / completeness
-
-1. **Bun `bun.lockb` binary lockfile parser**
-2. **Deno URL-import map evaluation**
-3. **Devcontainer feature scanner** (`devcontainer.json` features map)
-4. **Slopsquatting heuristic** — cross-reference LLM-suggested
-   package names against typosquat candidates
-5. **JetBrains / Vim / Neovim plugin manager inventory**
-
-### v0.16+ — long tail
-
-CRAN (R), opam (OCaml), Hackage (Haskell), LuaRocks, Julia,
-PlatformIO embedded ecosystems, game-engine asset stores. Driven
-by community incident-pack contributions.
+1. **Bun `bun.lockb` binary lockfile parser** — currently
+   gate-only; needs `bun pm ls` integration for detection side
+2. **Devcontainer feature scanner** (`devcontainer.json` features map)
+3. **JetBrains / Vim / Neovim plugin manager inventory**
+4. **PlatformIO embedded ecosystems**
 
 ### v1.0 — reproducible-build verification
 

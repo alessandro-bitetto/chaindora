@@ -159,6 +159,30 @@ func Scan(root string, opts ...ScanOption) (*Inventory, error) {
 			return nil
 		}
 		base := filepath.Base(path)
+
+		// Suffix-matched manifest fallbacks. Handled BEFORE the
+		// basename switch so we can dispatch on .csproj / .fsproj /
+		// .vbproj (file-suffix patterns, not exact basenames).
+		// These manifest parsers only fire when no resolved
+		// lockfile sibling exists — when the user has the real
+		// lockfile, the lockfile parser is more precise and wins.
+		switch {
+		case strings.HasSuffix(base, ".csproj"),
+			strings.HasSuffix(base, ".fsproj"),
+			strings.HasSuffix(base, ".vbproj"):
+			if hasNuGetLockfileSibling(path) {
+				return nil // real lockfile took precedence
+			}
+			pkgs, perr := parseCsprojManifest(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, base+" "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemNuGet, Kind: base + " (manifest fallback)"})
+			return nil
+		}
+
 		switch base {
 		case "package-lock.json":
 			pkgs, perr := parseNPMPackageLock(path)
@@ -440,6 +464,40 @@ func Scan(root string, opts ...ScanOption) (*Inventory, error) {
 			}
 			inv.Packages = append(inv.Packages, pkgs...)
 			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemMavenCentral, Kind: "gradle.lockfile"})
+		case "build.gradle", "build.gradle.kts":
+			// Manifest fallback — only fires when no gradle.lockfile sibling.
+			if hasGradleLockfileSibling(path) {
+				return nil
+			}
+			pkgs, perr := parseGradleManifest(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, base+" "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemMavenCentral, Kind: base + " (manifest fallback)"})
+		case "composer.json":
+			if hasComposerLockSibling(path) {
+				return nil // composer.lock parser is more precise
+			}
+			pkgs, perr := parseComposerJSONManifest(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "composer.json "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemPackagist, Kind: "composer.json (manifest fallback)"})
+		case "pyproject.toml":
+			if hasPythonLockSibling(path) {
+				return nil // poetry.lock / uv.lock / pdm.lock wins
+			}
+			pkgs, perr := parsePyprojectManifest(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "pyproject.toml "+path+": "+perr.Error())
+				return nil
+			}
+			inv.Packages = append(inv.Packages, pkgs...)
+			inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemPyPI, Kind: "pyproject.toml (manifest fallback)"})
 		case ".gitlab-ci.yml", ".gitlab-ci.yaml":
 			pkgs, perr := parseGitLabCI(path)
 			if perr != nil {

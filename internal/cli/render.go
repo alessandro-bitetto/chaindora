@@ -109,7 +109,7 @@ func groupForRender(fs []findings.Finding) []renderGroup {
 // unset (https://no-color.org/). Empty strings otherwise — the formatting
 // stays correct in pipes / files / CI logs without ANSI noise.
 type palette struct {
-	reset, bold, red, magenta, yellow, blue, gray, cyan string
+	reset, bold, red, magenta, yellow, blue, gray, cyan, green string
 }
 
 func newPalette(w io.Writer) palette {
@@ -125,6 +125,7 @@ func newPalette(w io.Writer) palette {
 		blue:    "\x1b[34m",
 		gray:    "\x1b[90m",
 		cyan:    "\x1b[36m",
+		green:   "\x1b[32m",
 	}
 }
 
@@ -172,24 +173,17 @@ func writeText(w io.Writer, fs []findings.Finding) {
 	p := newPalette(w)
 	rgs := groupForRender(fs)
 
-	// Four-bucket partition (v0.7.1). The previous two-section model
-	// dumped unpinned-ref + curl|bash + host-state findings into the
-	// "SUPPLY-CHAIN ATTACK SIGNALS" bucket, which made the section
-	// banner lie when those were the only findings ("34 supply-chain
-	// signals!" when it was really 33 unpinned-ref + 1 OneDrive
-	// launchd agent). Splitting by Category produces honest banners.
+	// Five-bucket partition (v0.7.1 + v0.15 predictive). Splitting by
+	// Category produces honest section banners — "34 supply-chain
+	// signals!" doesn't get to mean 33 unpinned-ref + 1 launchd agent.
 	supplyChain, depCVE, config, host, predictive := partitionByCategory(rgs)
 
-	// Top-line summary.
-	totalUnique := len(rgs)
-	totalInstances := len(fs)
-	sevParts := summaryBySeverity(rgs)
-	summary := fmt.Sprintf("%s%d findings%s — %s", p.bold, totalUnique, p.reset, strings.Join(sevParts, ", "))
-	if totalInstances > totalUnique {
-		summary += fmt.Sprintf(" %s(deduplicated from %d instances)%s", p.gray, totalInstances, p.reset)
-	}
-	fmt.Fprintln(w, summary)
-	fmt.Fprintln(w)
+	// Executive summary (v0.15.2): severity-first headline that
+	// surfaces action-required counts BEFORE the wall of sections.
+	// When the user has thousands of findings (typical for an
+	// audit), the old single-line summary buried the actually-
+	// urgent count behind every category's expanded output.
+	writeExecutiveSummary(w, p, rgs, supplyChain, depCVE, config, host, predictive)
 
 	idx := 0
 
@@ -214,9 +208,157 @@ func writeText(w io.Writer, fs []findings.Finding) {
 			p.bold+p.magenta, host, &idx)
 	}
 	if !ExcludePredictive {
+		// Predictive section gets condensed rendering when it's
+		// noisy (typical: thousands of medium-severity advisory
+		// signals from an audit walk). Show severity headline + top
+		// N findings + "(K more — rerun without --truncate)" footer.
+		writePredictiveSection(w, p, predictive, &idx)
+	}
+}
+
+// writeExecutiveSummary prints a 3-line action-oriented header
+// surfaced ABOVE the per-section breakdown:
+//
+//   1. Total findings + per-severity counts (critical/high
+//      colored prominently — those are the default --fail-on
+//      threshold and what the user must act on)
+//   2. Per-category one-line tally with subtle color cues
+//
+// Old behavior (pre-v0.15.2): a single inline summary line that
+// got buried below thousands of findings when audits produced
+// large volumes. Users had to scroll up after a long audit run
+// to figure out what the headline numbers actually were.
+func writeExecutiveSummary(w io.Writer, p palette, all []renderGroup,
+	supplyChain, depCVE, config, host, predictive []renderGroup,
+) {
+	totalUnique := len(all)
+	critical := 0
+	high := 0
+	medium := 0
+	for _, g := range all {
+		switch g.Severity {
+		case findings.SeverityCritical:
+			critical++
+		case findings.SeverityHigh:
+			high++
+		case findings.SeverityMedium:
+			medium++
+		}
+	}
+
+	bar := strings.Repeat("─", wrapWidth+4)
+	fmt.Fprintln(w, bar)
+	fmt.Fprintf(w, "  %s%d findings%s   ", p.bold, totalUnique, p.reset)
+	if critical > 0 {
+		fmt.Fprintf(w, "%s%d critical%s  ", p.bold+p.red, critical, p.reset)
+	}
+	if high > 0 {
+		fmt.Fprintf(w, "%s%d high%s  ", p.bold+p.yellow, high, p.reset)
+	}
+	if medium > 0 {
+		fmt.Fprintf(w, "%s%d medium%s", p.gray, medium, p.reset)
+	}
+	fmt.Fprintln(w)
+
+	tallies := []struct {
+		label string
+		group []renderGroup
+		color string
+	}{
+		{"supply-chain", supplyChain, p.red},
+		{"dependency-cve", depCVE, p.cyan},
+		{"configuration", config, p.yellow},
+		{"host-state", host, p.magenta},
+		{"predictive", predictive, p.blue},
+	}
+	var pieces []string
+	for _, t := range tallies {
+		if len(t.group) == 0 {
+			continue
+		}
+		pieces = append(pieces, fmt.Sprintf("%s%s%s %d", t.color, t.label, p.reset, len(t.group)))
+	}
+	if len(pieces) > 0 {
+		fmt.Fprintf(w, "  %s\n", strings.Join(pieces, p.gray+" · "+p.reset))
+	}
+	if critical+high > 0 {
+		fmt.Fprintf(w, "  %sFocus on the %d critical+high finding%s first.%s\n",
+			p.gray, critical+high, pluralSuffix(critical+high), p.reset)
+	}
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w)
+}
+
+// writePredictiveSection renders the predictive section with a
+// condensation strategy: if there are >50 unique findings, show
+// the top 20 by severity-then-detector-name and append a
+// "(K more)" footer. Predictive is advisory by design — the user
+// shouldn't act on individual findings, so flooding the terminal
+// with thousands of entries hides the few that actually matter.
+func writePredictiveSection(w io.Writer, p palette, group []renderGroup, idx *int) {
+	const condenseThreshold = 50
+	const condenseShow = 20
+	if len(group) <= condenseThreshold {
 		writeCategorySection(w, p, "PREDICTIVE SIGNALS",
 			"no behavioral anomalies on installed packages — cooldown, publisher, maintainer, version-diff, republish-guard all clean",
-			p.bold+p.blue, predictive, &idx)
+			p.bold+p.blue, group, idx)
+		return
+	}
+
+	bar := strings.Repeat("=", wrapWidth+4)
+	fmt.Fprintln(w, bar)
+	sevParts := summaryBySeverity(group)
+	fmt.Fprintf(w, "%sPREDICTIVE SIGNALS%s  (%d finding%s — %s) %scondensed view: showing top %d%s\n",
+		p.bold+p.blue, p.reset,
+		len(group), pluralSuffix(len(group)), strings.Join(sevParts, ", "),
+		p.gray, condenseShow, p.reset)
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w)
+
+	// Sort + take top N. Predictive findings sort by severity then
+	// alphabetic package name for stable output.
+	sorted := append([]renderGroup(nil), group...)
+	sortGroupsBySeverityThenName(sorted)
+	if len(sorted) > condenseShow {
+		sorted = sorted[:condenseShow]
+	}
+	grouped := groupAndSort(sorted)
+	for _, sev := range grouped.order {
+		sub := grouped.bySev[sev]
+		if len(sub) == 0 {
+			continue
+		}
+		writeSection(w, p, sev, sub, idx)
+	}
+	remaining := len(group) - condenseShow
+	fmt.Fprintf(w, "%s   (%d more predictive findings hidden — re-run with --no-condense-predictive to see all,%s\n",
+		p.gray, remaining, p.reset)
+	fmt.Fprintf(w, "%s    or `chdora plans show <id>` to inspect the saved plan in detail)%s\n", p.gray, p.reset)
+	fmt.Fprintln(w)
+}
+
+// sortGroupsBySeverityThenName orders renderGroups by severity
+// (critical first) then alphabetically by package name. Used for
+// the predictive condensed view so the "top 20" actually surfaces
+// the highest-severity items first.
+func sortGroupsBySeverityThenName(gs []renderGroup) {
+	sevRank := map[findings.Severity]int{
+		findings.SeverityCritical: 0,
+		findings.SeverityHigh:     1,
+		findings.SeverityMedium:   2,
+		findings.SeverityLow:      3,
+		findings.SeverityUnknown:  4,
+	}
+	for i := 1; i < len(gs); i++ {
+		for j := i; j > 0; j-- {
+			a, b := gs[j-1], gs[j]
+			ar, br := sevRank[a.Severity], sevRank[b.Severity]
+			if ar > br || (ar == br && a.Finding.Name > b.Finding.Name) {
+				gs[j-1], gs[j] = b, a
+				continue
+			}
+			break
+		}
 	}
 }
 

@@ -155,21 +155,31 @@ func (d *Detector) buildCheckerStack() []gate.Checker {
 }
 
 // severityFor maps a CheckResult to a Finding severity for the
-// predictive detector. Behavioral signals (cooldown, publisher
-// churn, maintainer-trust, version drift, provenance) are
-// inherently advisory at scan time — the user has already
-// installed, so the value is "be aware, double-check before
-// trusting" rather than "block this install." They emit at
-// medium so the default --fail-on=critical,high CI gate stays
-// quiet; users who want predictive signals to break the build
-// can add --fail-on=critical,high,medium.
+// predictive detector. v0.15.2: per-checker tuning so the noisier
+// behavioral signals (publisher-change, maintainer-trust,
+// provenance) emit at LOW instead of MEDIUM. They're advisory
+// even at the gate; the scan-time replay produces orders of
+// magnitude more of them — a $HOME audit easily emits thousands
+// from organic team-rotation / single-utility-version noise.
+// Keeping them at Low lets users still see them when hunting
+// incidents while staying out of `--fail-on=medium` CI gates.
 //
-// republish-guard is the one exception. A known name@version
-// reappearing with different bytes is a hard tamper signal
-// regardless of where it fires, so it escalates to critical.
+//   - republish-guard → Critical (hard tamper signal)
+//   - cooldown        → Medium (time-sensitive: freshly published)
+//   - version-diff    → Medium (cross-version behavioral change)
+//   - publisher-change, maintainer-trust, provenance → Low
+//   - Verdict=Unknown → Low (registry probe couldn't run)
 func severityFor(r gate.CheckResult) findings.Severity {
-	if r.Checker == "republish-guard" {
+	switch r.Checker {
+	case "republish-guard":
 		return findings.SeverityCritical
+	case "cooldown", "version-diff":
+		if r.Verdict == gate.VerdictUnknown {
+			return findings.SeverityLow
+		}
+		return findings.SeverityMedium
+	case "publisher-change", "maintainer-trust", "provenance":
+		return findings.SeverityLow
 	}
 	if r.Verdict == gate.VerdictUnknown {
 		return findings.SeverityLow

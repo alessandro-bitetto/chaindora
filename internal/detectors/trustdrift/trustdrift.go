@@ -36,8 +36,21 @@ type Detector struct {
 	UpdateBaseline bool
 }
 
-// New returns a Detector rooted at home.
+// New returns a Detector rooted at home. If home is empty (caller
+// failed to resolve UserHomeDir, audit was run with $HOME unset, or
+// --whole-machine walked into a tree without a usable home), the
+// detector falls back to os.UserHomeDir() and finally to a temp
+// directory — anything to avoid writing the baseline into "/" which
+// would emit a confusing "mkdir /.chaindora: read-only file system"
+// finding (a v0.15.0 bug surfaced by sudo audits).
 func New(home string) *Detector {
+	if home == "" {
+		if h, err := os.UserHomeDir(); err == nil && h != "" {
+			home = h
+		} else {
+			home = os.TempDir()
+		}
+	}
 	return &Detector{
 		Home:         home,
 		BaselinePath: filepath.Join(home, ".chaindora", "trustdrift-baseline.json"),

@@ -32,12 +32,19 @@ type MaintainerTrust struct {
 }
 
 // NewMaintainerTrust returns a MaintainerTrust with default
-// thresholds (30 days, 3 versions, 6 months gap).
+// thresholds (30 days, 2 versions, 6 months gap).
+//
+// v0.15.2: tightened MinVersionCount from 3 → 2. At <3, npm's
+// long-tail of single-purpose utility packages (e.g. is-array,
+// escape-string-regexp, hundreds of "leftpad-class" helpers)
+// trips this signal en masse — they legitimately exist as 1- or
+// 2-version-only utilities with no security implication. <2 is
+// the genuinely-suspicious "just appeared on the registry" shape.
 func NewMaintainerTrust() *MaintainerTrust {
 	return &MaintainerTrust{
 		Probes:          NewProbes(),
 		NewPackageDays:  30,
-		MinVersionCount: 3,
+		MinVersionCount: 2,
 		GapThreshold:    6 * 30 * 24 * time.Hour,
 	}
 }

@@ -15,6 +15,37 @@ designed to make it work as a PR gate rather than a noisy report:
 | **Suppression file** | `.chaindora-ignore.yml` | Per-project ignore list. Each entry MUST have a `reason`. Optional `expires: YYYY-MM-DD` (expired entries still apply but warn). |
 | **PR-comment markdown** | `--format pr-comment` or `--pr-comment <file>` | Sticky-comment-marker output for GitHub PR flows. Severity-colored cards + new-since-baseline section + collapsible suppressed/pre-existing. |
 
+## Predictive findings in CI (v0.15+)
+
+The predictive detector (gate-style behavioral checks replayed
+against installed packages) emits findings at three severity tiers:
+
+| Checker | Severity | Notes |
+|---|---|---|
+| `republish-guard` | Critical | Hard tamper signal — fires when a `name@version` reappears with different bytes |
+| `cooldown` / `version-diff` | Medium | Real time-sensitive / behavioral signals |
+| `publisher-change` / `maintainer-trust` / `provenance` | Low | Advisory — high signal-to-noise per finding, mostly informational |
+
+**Default `--fail-on=critical,high` skips all advisory predictive
+findings.** You only fail the build on real republish-guard hits.
+
+To make predictive `cooldown` + `version-diff` block PRs:
+```sh
+chdora ci . --fail-on critical,high,medium
+```
+
+To skip the predictive detector entirely in CI (saves the registry
+round-trips, halves the scan time):
+```sh
+chdora ci . --skip-predictive
+```
+
+To hide the predictive section from the rendered output without
+disabling the detector (still flows into JSON / SARIF):
+```sh
+chdora ci . --exclude-predictive
+```
+
 ## GitHub Actions
 
 ### Quick start — SARIF + PR annotations

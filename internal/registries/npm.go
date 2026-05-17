@@ -41,6 +41,9 @@ func NewNPM() *NPM {
 type npmPackageDoc struct {
 	Time     map[string]string             `json:"time"` // version → ISO8601 publish date; "created" / "modified" reserved keys
 	Versions map[string]npmVersionMetadata `json:"versions,omitempty"`
+	DistTags struct {
+		Latest string `json:"latest"`
+	} `json:"dist-tags,omitempty"`
 }
 
 // TarballURL returns the registry CDN URL for fetching the
@@ -170,6 +173,39 @@ func (n *NPM) AnyVersionHasProvenance(ctx context.Context, name string) (bool, e
 		}
 	}
 	return false, nil
+}
+
+// LatestVersionHasProvenance reports whether the LATEST published
+// version of the package has provenance. v0.15.2 — used by the
+// provenance checker to suppress the "regression" warn when the
+// user's version is just outdated relative to a still-attested
+// latest release. Real regressions only fire when LATEST also
+// lacks attestation.
+//
+// "Latest" is the version pointed at by the registry's
+// `dist-tags.latest` field (npm's authoritative latest), not a
+// version-string sort — semver-sort isn't reliable across npm's
+// pre-release / version-range conventions.
+func (n *NPM) LatestVersionHasProvenance(ctx context.Context, name string) (bool, error) {
+	status, doc, err := n.fetchPackage(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	if status != http.StatusOK || doc == nil {
+		return false, nil
+	}
+	latest := doc.DistTags.Latest
+	if latest == "" {
+		return false, nil
+	}
+	vm, ok := doc.Versions[latest]
+	if !ok {
+		return false, nil
+	}
+	if vm.Dist == nil || vm.Dist.Attestations == nil {
+		return false, nil
+	}
+	return vm.Dist.Attestations.URL != "", nil
 }
 
 type npmAuthor struct {

@@ -96,14 +96,29 @@ func (d *Detector) checkNPMLockfileVsDisk(ctx context.Context, lockPath string) 
 
 	var out []findings.Finding
 	for key, entry := range lock.Packages {
+		if key == "" {
+			// The root package entry — `""` keys the project itself,
+			// not a dependency. Skip.
+			continue
+		}
 		name := npmKeyToName(key)
 		if name == "" || entry.Version == "" {
 			continue
 		}
 
-		// Walk to the actual directory. `node_modules/<name>` or
-		// `node_modules/<scope>/<name>` for scoped packages.
-		pkgJSON := filepath.Join(nodeModules, name, "package.json")
+		// Walk to the EXACT directory the lockfile records, not just
+		// the top-level node_modules/<name>. v0.15.0 had a bug where
+		// every entry was checked against the hoisted top-level
+		// location, mis-reporting nested-dep entries (e.g. the
+		// lockfile pins semver@5.7.2 at
+		// `node_modules/eslint/node_modules/semver` AND semver@7.6.0
+		// at `node_modules/semver`; the latter is on disk; the v0.15.0
+		// code mis-reported the former as drift because it checked
+		// top-level instead of the nested path).
+		//
+		// The lockfile key IS the install path relative to project
+		// root, so we just join with the project dir.
+		pkgJSON := filepath.Join(projectDir, filepath.FromSlash(key), "package.json")
 		diskData, err := os.ReadFile(pkgJSON)
 		if err == nil {
 			// Check #1 + #2: name + version drift.
@@ -112,6 +127,10 @@ func (d *Detector) checkNPMLockfileVsDisk(ctx context.Context, lockPath string) 
 				Version string `json:"version"`
 			}
 			if json.Unmarshal(diskData, &disk) == nil {
+				// User-facing path: trim the leading "node_modules/"
+				// for less-noisy summaries when the install is in the
+				// top level, keep the full path when nested.
+				displayPath := filepath.ToSlash(key)
 				if disk.Version != "" && disk.Version != entry.Version {
 					out = append(out, findings.Finding{
 						Detector:  "integrity:lockfile-vs-disk-version",
@@ -122,8 +141,8 @@ func (d *Detector) checkNPMLockfileVsDisk(ctx context.Context, lockPath string) 
 						PURL:      inventory.PURL(inventory.EcosystemNPM, name, entry.Version),
 						VulnID:    "INTEGRITY-DRIFT-VERSION",
 						Summary: fmt.Sprintf(
-							"package-lock.json pins %s@%s but node_modules/%s/package.json reports version %q — installed bytes do not match the lockfile",
-							name, entry.Version, name, disk.Version),
+							"package-lock.json pins %s@%s at %s but %s/package.json reports version %q — installed bytes do not match the lockfile",
+							name, entry.Version, displayPath, displayPath, disk.Version),
 						Severity:   findings.SeverityCritical,
 						SourcePath: lockPath,
 					})
@@ -138,8 +157,8 @@ func (d *Detector) checkNPMLockfileVsDisk(ctx context.Context, lockPath string) 
 						PURL:      inventory.PURL(inventory.EcosystemNPM, name, entry.Version),
 						VulnID:    "INTEGRITY-DRIFT-NAME",
 						Summary: fmt.Sprintf(
-							"lockfile records %s@%s but node_modules/%s/package.json identifies as %q — directory replaced or symlinked to a different package",
-							name, entry.Version, name, disk.Name),
+							"lockfile records %s@%s at %s but %s/package.json identifies as %q — directory replaced or symlinked to a different package",
+							name, entry.Version, displayPath, displayPath, disk.Name),
 						Severity:   findings.SeverityCritical,
 						SourcePath: lockPath,
 					})
