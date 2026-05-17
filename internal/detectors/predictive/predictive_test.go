@@ -3,6 +3,7 @@ package predictive
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +129,42 @@ func TestPredictive_NoFindingsWhenPackageIsMature(t *testing.T) {
 		switch f.Detector {
 		case "predictive:cooldown", "predictive:publisher-change":
 			t.Errorf("did not expect %s for mature package: %+v", f.Detector, f)
+		}
+	}
+}
+
+// TestPredictive_SkipsUnknownVerdicts verifies the v0.15.3
+// regression: when a checker returns Verdict=Unknown (typically
+// because no registry probe is registered for the ecosystem —
+// NuGet / Packagist / Pub / Hex / ... as of v0.15.x), the
+// predictive detector silences the finding. Pre-v0.15.3 a typical
+// .NET project produced 22+ "no registry probe for nuget" Low
+// findings that drowned out the real signal.
+func TestPredictive_SkipsUnknownVerdicts(t *testing.T) {
+	// Build a probe table with ONLY npm registered; the inventory
+	// has a NuGet package which will hit "no probe" Unknown for
+	// every NuGet-targeted checker.
+	probes := gate.NewProbes()
+	probes.Register("npm", stubProbe{}) // npm present, nuget absent
+
+	inv := &inventory.Inventory{
+		Packages: []inventory.Package{
+			{
+				Ecosystem:  inventory.EcosystemNuGet,
+				Name:       "AWSSDK.S3",
+				Version:    "4.0.2",
+				SourcePath: "Frameflows.Api.csproj",
+			},
+		},
+	}
+	det := New(probes, 72*time.Hour, nil)
+	out, err := det.Detect(context.Background(), inv)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	for _, f := range out {
+		if strings.Contains(f.Summary, "no registry probe") {
+			t.Errorf("did not expect 'no registry probe' finding to leak through: %+v", f)
 		}
 	}
 }

@@ -66,39 +66,39 @@ auto-rollback applies retroactively.
 ### Pre-built binary (recommended)
 
 Pick the matching archive from the [Releases page](https://github.com/alessandro-bitetto/chaindora/releases/latest),
-extract, place `chdora` on `$PATH`. Replace `0.15.2` with the version you
+extract, place `chdora` on `$PATH`. Replace `0.15.3` with the version you
 want; `latest` works as a redirect for the most recent tag.
 
 ```sh
 # macOS, Apple Silicon
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.2_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_darwin_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # macOS, Intel
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.2_darwin_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_darwin_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, x86_64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.2_linux_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_linux_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, ARM64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.2_linux_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_linux_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Windows, x86_64 (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.2_windows_amd64.zip" -OutFile chdora.zip
+Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_windows_amd64.zip" -OutFile chdora.zip
 Expand-Archive chdora.zip -DestinationPath .
 Move-Item chdora.exe "$env:USERPROFILE\bin\chdora.exe"   # ensure this dir is on PATH
 
 chdora --version
 ```
 
-Each release publishes a `chaindora_0.15.2_checksums.txt`. Verify before running:
+Each release publishes a `chaindora_0.15.3_checksums.txt`. Verify before running:
 
 ```sh
-curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.2_checksums.txt
-shasum -a 256 -c chaindora_0.15.2_checksums.txt
+curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_checksums.txt
+shasum -a 256 -c chaindora_0.15.3_checksums.txt
 ```
 
 ### From source
@@ -115,7 +115,7 @@ Requires Go 1.22+.
 ```sh
 chdora upgrade               # latest tagged release
 chdora upgrade --check       # report only, don't download
-chdora upgrade --version v0.15.2
+chdora upgrade --version v0.15.3
 ```
 
 `upgrade` refuses on Homebrew-managed binaries — use `brew upgrade` there.
@@ -417,7 +417,7 @@ A daily cron (`0 9 * * * chdora update`) is the recommended setup.
 ```sh
 chdora upgrade                 # latest tagged release
 chdora upgrade --check         # what's available
-chdora upgrade --version v0.15.2
+chdora upgrade --version v0.15.3
 ```
 
 Verifies the SHA-256 against the published checksums file before swap.

@@ -108,6 +108,20 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 			if r.Verdict == gate.VerdictApprove {
 				continue
 			}
+			// v0.15.3: skip Unknown verdicts. At scan time, "we
+			// couldn't check this package" isn't actionable —
+			// most often it means "no registry probe for ecosystem
+			// X" (NuGet / Packagist / Pub / Hex / ... lack a
+			// VersionProbe implementation as of v0.15.x; coming
+			// in v0.16). A .NET project with 30 NuGet deps would
+			// otherwise emit 150+ "no registry probe" findings,
+			// drowning the real signal. The gate-side path keeps
+			// fail-closed semantics — Unknown there still blocks
+			// under Strict policy. Only the predictive (scan-side)
+			// replay silences them.
+			if r.Verdict == gate.VerdictUnknown {
+				continue
+			}
 			f := findings.Finding{
 				Detector:   "predictive:" + r.Checker,
 				Category:   findings.CategoryPredictive,

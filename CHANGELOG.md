@@ -11,7 +11,71 @@ Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md). Next milestone is
 v0.16 — AI/ML supply chain (HuggingFace pickle scanner, PyTorch /
 TF / Keras model file scanner, MCP server / agent-framework
-auditor).
+auditor). Plus the v0.15.3 follow-up: per-ecosystem
+`VersionProbe` implementations for NuGet / Packagist / Pub / Hex
+/ Swift / Hackage / CRAN / Conan so predictive's behavioral
+checkers (cooldown / publisher-change / maintainer-trust /
+version-diff) extend beyond the current npm-PyPI-RubyGems-crates-
+Maven-Go six.
+
+## [0.15.3] — 2026-05-17
+
+UX patch: silence the noisy "no registry probe for ecosystem X"
+predictive findings that v0.15.2 still emitted for ecosystems
+lacking a `VersionProbe` implementation (NuGet, Packagist, Pub,
+Hex, Swift, etc.).
+
+### Fixed — `predictive:cooldown` no longer emits one finding per package on probe-less ecosystems
+
+**Symptom**: a typical .NET project (~40 NuGet packages) produced
+22+ Low-severity `predictive:cooldown` findings whose entire
+content was "cooldown: no registry probe for ecosystem nuget".
+Not actionable — just noise.
+
+**Root cause**: when a checker can't run because no registry
+probe is registered for the package's ecosystem, it returns
+`Verdict=Unknown` (per the gate's fail-closed convention).
+v0.15.2's predictive detector emitted findings for all non-
+Approve verdicts, which included these Unknowns.
+
+**Fix**: the predictive detector now skips `Verdict=Unknown`
+results entirely. The gate-side path keeps its fail-closed
+semantics — Unknown at the gate still blocks under Strict policy.
+Only the scan-side (advisory) replay silences them.
+
+Real-world impact: scan against a 40-package .NET project goes
+from 41 findings → 13 findings (1 OSV CVE + 9 unpinned-ref
+configurations + 3 other predictive signals). The 22 NuGet-cooldown
+Unknowns + 6 dedup-collapsed Unknowns disappear.
+
+### Known gap — registry probes still missing for non-OSV ecosystems
+
+The v0.14 push added gate-side coverage for 42 package managers
+(NuGet, Packagist, Pub, Hex, Swift, Hackage, CRAN, Conan, etc.)
+but `internal/cli/gate.go`'s `buildGateProbes()` only wires
+implementations for 6: npm, PyPI, RubyGems, crates.io, Maven,
+Go. So `predictive:cooldown` / `publisher-change` /
+`maintainer-trust` / `version-diff` can't fire for packages in
+the other 36 ecosystems — they return Unknown → now silenced.
+
+The `predictive:republish-guard` check is the exception: it runs
+from the local gate-cache and doesn't need a registry probe.
+It WILL fire for any ecosystem where `Package.Integrity` is
+populated (NuGet via `contentHash`, Composer via `dist.shasum`,
+etc.).
+
+Per-ecosystem `VersionProbe` implementations are queued for
+v0.16 — each registry's API surface is different and needs
+dedicated code. Until then, predictive's behavioral signals
+remain npm / PyPI / RubyGems / crates / Maven / Go only.
+
+### Notes
+
+- `chdora gate exec` is unaffected. Gate-side checks for non-
+  probed ecosystems still return Unknown, which Strict policy
+  blocks — fail-closed semantics are intact.
+- One new regression test (`TestPredictive_SkipsUnknownVerdicts`)
+  pins the new behavior.
 
 ## [0.15.2] — 2026-05-17
 
