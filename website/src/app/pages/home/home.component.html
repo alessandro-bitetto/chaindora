@@ -30,7 +30,7 @@
 </section>
 
 <!-- Two modes -->
-<section class="container modes-section">
+<section class="container modes-section section-shaded">
   <h2 class="brand-display modes-title">
     Before install. <span class="accent">After install.</span>
   </h2>
@@ -112,15 +112,35 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
         <div class="catches-stamp">Before install only</div>
         <div class="catches-sub"><code>chdora gate</code></div>
       </header>
-      <ul>
-        <li>Versions published less than 72 h ago — <strong>cooldown</strong></li>
-        <li>Account takeover — publisher changed since the last release</li>
-        <li>Sleeper patterns — obfuscation, install-script payloads, <code>eval</code>-of-dynamic, base64-encoded URLs</li>
-        <li>Suspicious change between version bumps — new <code>postinstall</code>, new <code>child_process</code> import</li>
-        <li>Brand-new packages, single-version maintainers, dormancy-gap accounts</li>
-        <li>Unsigned packages — missing sigstore / sumdb / GPG attestation</li>
-        <li>Git-URL deps with mutable refs (no registry, no signing)</li>
-        <li><strong>Republished versions with different bytes</strong> — known <code>name&#64;version</code> reappearing with a changed content hash (maintainer-account takeover signal)</li>
+      <ul class="catches-list">
+        <li>
+          <strong>Cooldown</strong>
+          <span class="cd-desc">Versions published less than 72 h ago.</span>
+        </li>
+        <li>
+          <strong>Account takeover or anomaly</strong>
+          <span class="cd-desc">Publisher changed since the last release, brand-new accounts, single-version maintainers, multi-year dormancy gaps.</span>
+        </li>
+        <li>
+          <strong>Sleeper patterns</strong>
+          <span class="cd-desc">Obfuscation, install-script payloads, <code>eval</code>-of-dynamic, base64-encoded URLs.</span>
+        </li>
+        <li>
+          <strong>Suspicious version-bump diff</strong>
+          <span class="cd-desc">New <code>postinstall</code>, new <code>child_process</code> import, new outbound URL.</span>
+        </li>
+        <li>
+          <strong>Unsigned packages</strong>
+          <span class="cd-desc">Missing sigstore / sumdb / GPG attestation.</span>
+        </li>
+        <li>
+          <strong>Mutable Git-URL deps</strong>
+          <span class="cd-desc">No registry, no signing — branch refs over <code>http://</code>.</span>
+        </li>
+        <li>
+          <strong>Republished bytes</strong>
+          <span class="cd-desc">Known <code>name&#64;version</code> reappearing with a changed content hash — maintainer-account takeover signal.</span>
+        </li>
       </ul>
     </article>
 
@@ -129,13 +149,35 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
         <div class="catches-stamp">After install only</div>
         <div class="catches-sub"><code>chdora scan / audit / forensics / ci</code></div>
       </header>
-      <ul>
-        <li>Compromised CI components — unpinned actions, curl-pipe-shell in scripts</li>
-        <li>Host-state compromise — leaked tokens, shell rc tampering, worm artifacts on disk</li>
-        <li>Trust-anchor drift — <code>.npmrc</code> / <code>pip.conf</code> / <code>git insteadOf</code> / <code>/etc/hosts</code> / CA store</li>
-        <li>Post-compromise persistence — cron, launchd, systemd, Scheduled Tasks</li>
-        <li>Browser / VS Code / IDE extension takeovers</li>
-        <li>Lockfile MITM — <code>go.sum</code> vs sumdb mismatch</li>
+      <ul class="catches-list">
+        <li>
+          <strong>Compromised CI components</strong>
+          <span class="cd-desc">Unpinned actions, curl-pipe-shell in scripts.</span>
+        </li>
+        <li>
+          <strong>Host-state compromise</strong>
+          <span class="cd-desc">Leaked tokens, shell-rc tampering, worm artifacts on disk.</span>
+        </li>
+        <li>
+          <strong>Trust-anchor drift</strong>
+          <span class="cd-desc"><code>.npmrc</code>, <code>pip.conf</code>, <code>git insteadOf</code>, <code>/etc/hosts</code>, CA store.</span>
+        </li>
+        <li>
+          <strong>Post-compromise persistence</strong>
+          <span class="cd-desc">cron, launchd, systemd, Scheduled Tasks.</span>
+        </li>
+        <li>
+          <strong>Extension takeovers</strong>
+          <span class="cd-desc">Browser, VS Code, IDE extensions installed without your knowledge.</span>
+        </li>
+        <li>
+          <strong>Lockfile-vs-disk drift</strong>
+          <span class="cd-desc">Code in <code>node_modules/&lt;pkg&gt;</code> doesn't match the lockfile-recorded hash.</span>
+        </li>
+        <li>
+          <strong>Lockfile MITM</strong>
+          <span class="cd-desc"><code>go.sum</code> vs sumdb mismatch, <code>Cargo.lock</code> checksum drift.</span>
+        </li>
       </ul>
     </article>
   </div>
@@ -149,7 +191,7 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
 </section>
 
 <!-- Install -->
-<section class="container install-section" id="install">
+<section class="container install-section section-shaded" id="install">
   <h2 class="brand-display">Install in 60 seconds</h2>
   <p class="muted section-lede">
     Three steps. No daemons, no background agents, no telemetry to opt out of.
@@ -200,85 +242,163 @@ chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
   <h2 class="brand-display">Ecosystem coverage</h2>
   <p class="muted section-lede">
     Coverage depth depends on what each registry's public API actually exposes.
-    chaindora doesn't fake signals it can't verify. Two badges set
-    expectations: <code>tested</code> marks ecosystems exercised on
-    real-world projects; <code>stable</code> is reserved for those that
-    pass a structured test suite — that infrastructure is coming, so the
-    badge is currently unapplied. Everything else ships the same code,
-    awaiting field-testing.
+    chaindora doesn't fake signals it can't verify.
   </p>
 
-  <div class="coverage-tier coverage-tier-full">
-    <div class="coverage-tier-head">
-      <div class="coverage-stamp">Full coverage</div>
-      <div class="coverage-sub">install-time gate · OSV vulns · content-hash republish-guard</div>
+  <!-- Maturity stats at a glance -->
+  <div class="coverage-stats">
+    <div class="cstat">
+      <div class="cstat-num">42</div>
+      <div class="cstat-label">Package managers</div>
+      <div class="cstat-sub">code shipped</div>
     </div>
-    <div class="coverage-eco-grid">
-      <div class="eco">npm / yarn / pnpm / bun / deno <span class="eco-tested">tested</span></div>
-      <div class="eco">PyPI <span class="eco-note">pip / poetry / uv / pipenv / pdm</span> <span class="eco-tested">tested</span></div>
-      <div class="eco">Java / JVM <span class="eco-note">mvn / gradle / sbt</span></div>
-      <div class="eco">.NET <span class="eco-note">dotnet (NuGet) / paket</span> <span class="eco-tested">tested</span></div>
-      <div class="eco">Ruby <span class="eco-note">bundle / gem</span></div>
-      <div class="eco">PHP <span class="eco-note">composer (Packagist)</span></div>
-      <div class="eco">Rust <span class="eco-note">cargo</span></div>
-      <div class="eco">Go modules <span class="eco-note">sumdb provenance</span> <span class="eco-tested">tested</span></div>
-      <div class="eco">Mobile (Apple) <span class="eco-note">pod / swift / carthage</span></div>
-      <div class="eco">Dart / Flutter <span class="eco-note">dart / flutter (pub)</span></div>
-      <div class="eco">Elixir / Erlang <span class="eco-note">mix / rebar3 (Hex)</span></div>
-      <div class="eco">Haskell <span class="eco-note">stack / cabal (Hackage)</span></div>
-      <div class="eco">R <span class="eco-note">renv (CRAN)</span></div>
+    <div class="cstat cstat-tested">
+      <div class="cstat-num">4</div>
+      <div class="cstat-label">Battle-tested</div>
+      <div class="cstat-sub">npm · PyPI · Go · .NET</div>
+    </div>
+    <div class="cstat cstat-stable">
+      <div class="cstat-num">0</div>
+      <div class="cstat-label">Stable</div>
+      <div class="cstat-sub">test infrastructure coming</div>
     </div>
   </div>
 
-  <div class="coverage-tier">
-    <div class="coverage-tier-head">
-      <div class="coverage-stamp">Gated · no OSV</div>
-      <div class="coverage-sub">signal from cooldown / republish-guard / static-pattern</div>
+  <!-- Legend explaining the pill colors -->
+  <div class="coverage-legend">
+    <div class="legend-item">
+      <span class="legend-dot legend-dot-full"></span>
+      <strong>Full coverage</strong>
+      <span class="legend-desc">install-time gate · OSV vulns · content-hash republish-guard</span>
     </div>
-    <div class="coverage-eco-grid">
-      <div class="eco">Conda <span class="eco-note">conda / mamba / micromamba</span></div>
-      <div class="eco">C / C++ <span class="eco-note">conan / vcpkg</span></div>
-      <div class="eco">macOS dev <span class="eco-note">brew (Homebrew)</span></div>
-      <div class="eco">OCaml <span class="eco-note">opam</span></div>
-      <div class="eco">Julia <span class="eco-note">Pkg.jl</span></div>
-      <div class="eco">Perl <span class="eco-note">cpanm</span></div>
-      <div class="eco">Lua <span class="eco-note">luarocks</span></div>
-      <div class="eco">Niche <span class="eco-note">elm · nimble · shards · zig</span></div>
+    <div class="legend-item">
+      <span class="legend-dot legend-dot-gated"></span>
+      <strong>Gated · no OSV</strong>
+      <span class="legend-desc">cooldown · republish-guard · static-pattern only</span>
     </div>
-  </div>
-
-  <div class="coverage-tier">
-    <div class="coverage-tier-head">
-      <div class="coverage-stamp coverage-stamp-dark">Detection only</div>
-      <div class="coverage-sub">no registry boundary to gate at</div>
-    </div>
-    <div class="coverage-eco-grid">
-      <div class="eco">GitHub / Gitea Actions</div>
-      <div class="eco">GitLab CI · Bitbucket · CircleCI · Azure</div>
-      <div class="eco">Browser / VS Code extensions</div>
-    </div>
-    <p class="coverage-note">
-      <code>chdora ci</code> also auto-detects Jenkins, Drone and Woodpecker
-      from environment variables — pipelines run there benefit from the same
-      gating and SARIF output, even without a dedicated pipeline-file parser.
-    </p>
-  </div>
-
-  <div class="coverage-tier">
-    <div class="coverage-tier-head">
-      <div class="coverage-stamp coverage-stamp-muted">Partial / out-of-scope</div>
-      <div class="coverage-sub">different threat model</div>
-    </div>
-    <div class="coverage-eco-grid">
-      <div class="eco">Docker / OCI</div>
-      <div class="eco">OS packages <span class="eco-note">apt / dnf / apk / winget — detection only, gate intentionally out of scope</span></div>
+    <div class="legend-item">
+      <span class="legend-dot legend-dot-detection"></span>
+      <strong>Detection only</strong>
+      <span class="legend-desc">no registry boundary to gate at</span>
     </div>
   </div>
 
-  <p class="muted small">
-    chaindora's
-    <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/docs/threat-model.md" target="_blank" rel="noopener">threat model</a>
-    documents every coverage gap and the registry-API reason behind it.
+  <!-- Pill grid: every ecosystem, color-coded by tier -->
+  <div class="coverage-pills">
+    <!-- Tier 1: Full coverage (13) -->
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">npm</span>
+      <span class="eco-pill-tools">yarn · pnpm · bun · deno</span>
+      <span class="eco-tested">tested</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">PyPI</span>
+      <span class="eco-pill-tools">pip · poetry · uv · pipenv · pdm</span>
+      <span class="eco-tested">tested</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">.NET</span>
+      <span class="eco-pill-tools">dotnet (NuGet) · paket</span>
+      <span class="eco-tested">tested</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">Go modules</span>
+      <span class="eco-pill-tools">sumdb provenance</span>
+      <span class="eco-tested">tested</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">Java / JVM</span>
+      <span class="eco-pill-tools">mvn · gradle · sbt</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">Ruby</span>
+      <span class="eco-pill-tools">bundle · gem</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">PHP</span>
+      <span class="eco-pill-tools">composer (Packagist)</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">Rust</span>
+      <span class="eco-pill-tools">cargo</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">Mobile (Apple)</span>
+      <span class="eco-pill-tools">pod · swift · carthage</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">Dart / Flutter</span>
+      <span class="eco-pill-tools">dart · flutter (pub)</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">Elixir / Erlang</span>
+      <span class="eco-pill-tools">mix · rebar3 (Hex)</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">Haskell</span>
+      <span class="eco-pill-tools">stack · cabal (Hackage)</span>
+    </div>
+    <div class="eco-pill eco-pill-full">
+      <span class="eco-pill-name">R</span>
+      <span class="eco-pill-tools">renv (CRAN)</span>
+    </div>
+
+    <!-- Tier 2: Gated (8) -->
+    <div class="eco-pill eco-pill-gated">
+      <span class="eco-pill-name">Conda</span>
+      <span class="eco-pill-tools">conda · mamba · micromamba</span>
+    </div>
+    <div class="eco-pill eco-pill-gated">
+      <span class="eco-pill-name">C / C++</span>
+      <span class="eco-pill-tools">conan · vcpkg</span>
+    </div>
+    <div class="eco-pill eco-pill-gated">
+      <span class="eco-pill-name">macOS dev</span>
+      <span class="eco-pill-tools">brew (Homebrew)</span>
+    </div>
+    <div class="eco-pill eco-pill-gated">
+      <span class="eco-pill-name">OCaml</span>
+      <span class="eco-pill-tools">opam</span>
+    </div>
+    <div class="eco-pill eco-pill-gated">
+      <span class="eco-pill-name">Julia</span>
+      <span class="eco-pill-tools">Pkg.jl</span>
+    </div>
+    <div class="eco-pill eco-pill-gated">
+      <span class="eco-pill-name">Perl</span>
+      <span class="eco-pill-tools">cpanm</span>
+    </div>
+    <div class="eco-pill eco-pill-gated">
+      <span class="eco-pill-name">Lua</span>
+      <span class="eco-pill-tools">luarocks</span>
+    </div>
+    <div class="eco-pill eco-pill-gated">
+      <span class="eco-pill-name">Niche</span>
+      <span class="eco-pill-tools">elm · nimble · shards · zig</span>
+    </div>
+
+    <!-- Tier 3: Detection only (3) -->
+    <div class="eco-pill eco-pill-detection">
+      <span class="eco-pill-name">GitHub Actions</span>
+      <span class="eco-pill-tools">includes Gitea</span>
+    </div>
+    <div class="eco-pill eco-pill-detection">
+      <span class="eco-pill-name">CI platforms</span>
+      <span class="eco-pill-tools">GitLab · Bitbucket · CircleCI · Azure</span>
+    </div>
+    <div class="eco-pill eco-pill-detection">
+      <span class="eco-pill-name">Extensions</span>
+      <span class="eco-pill-tools">browser · VS Code · JetBrains</span>
+    </div>
+  </div>
+
+  <p class="muted small coverage-foot">
+    <code>chdora ci</code> additionally auto-detects Jenkins, Drone and
+    Woodpecker from environment variables. Docker / OCI and OS packages
+    (apt / dnf / apk / winget) are intentionally out of scope — different
+    threat model.
+    See the <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/docs/threat-model.md" target="_blank" rel="noopener">threat model</a>
+    for every coverage gap and the registry-API reason behind it.
   </p>
 </section>
 
@@ -318,30 +438,36 @@ chdora watch --interval 1h</code></pre>
 </section>
 
 <!-- Roadmap -->
-<section class="container roadmap-section">
-  <h2 class="brand-display">Roadmap</h2>
+<section class="container roadmap-section section-shaded">
+  <h2 class="brand-display">What's next</h2>
   <p class="muted section-lede">
     Driven by the
-    <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/docs/threat-model.md" target="_blank" rel="noopener">threat model</a>,
-    not by an ecosystem checklist. Each milestone targets a specific attack-surface gap.
+    <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/docs/threat-model.md" target="_blank" rel="noopener">threat model</a>
+    and by what real users find broken. Three phases, in order. No specific
+    version numbers attached — they ship when they're stable, not when
+    a tag is due.
   </p>
 
-  <ol class="roadmap-timeline">
-    @for (m of roadmap; track m.tag) {
-      <li class="rm-item" [class.rm-shipped]="m.state === 'shipped'" [class.rm-planned]="m.state === 'planned'">
-        <div class="rm-marker">
-          <div class="rm-dot"></div>
-        </div>
-        <div class="rm-content">
-          <div class="rm-meta">
-            <span class="rm-version">{{ m.tag }}</span>
-            <span class="rm-state" [class.rm-state-shipped]="m.state === 'shipped'" [class.rm-state-planned]="m.state === 'planned'">{{ m.state }}</span>
-          </div>
-          <p class="rm-what">{{ m.what }}</p>
-        </div>
-      </li>
+  <div class="phases">
+    @for (phase of roadmap; track phase.label) {
+      <article class="phase" [class.phase-now]="phase.state === 'now'"
+                            [class.phase-next]="phase.state === 'next'"
+                            [class.phase-later]="phase.state === 'later'">
+        <header class="phase-head">
+          <span class="phase-label">{{ phase.label }}</span>
+          <h3 class="phase-headline brand-display">{{ phase.headline }}</h3>
+        </header>
+        <ul class="phase-items">
+          @for (item of phase.items; track item.title) {
+            <li>
+              <strong>{{ item.title }}</strong>
+              <span class="phase-desc">{{ item.desc }}</span>
+            </li>
+          }
+        </ul>
+      </article>
     }
-  </ol>
+  </div>
 </section>
 
 <!-- Closing CTA -->

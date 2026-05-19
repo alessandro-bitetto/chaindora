@@ -143,10 +143,16 @@
   }
 }
 
+// CSS subgrid syncs every row across the two columns — header
+// stamp, sub-label, and each of the 7 list items align row-by-row
+// even when their text wraps at different lines. Same approach
+// as .modes; both columns now ship 7 items so the row count
+// matches.
 .catches-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  grid-template-rows: auto auto repeat(7, auto);
+  gap: 14px 20px;
 }
 
 .catches-col {
@@ -159,10 +165,19 @@
   border-left: 4px solid #000000;
   border-radius: var(--cd-radius-lg);
   padding: 24px 24px 22px;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 9;
+  row-gap: 8px;
 
   .catches-head {
-    margin-bottom: 14px;
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: 1 / span 2;
+    margin-bottom: 8px;
   }
+  .catches-stamp { grid-row: 1; }
+  .catches-sub   { grid-row: 2; }
 
   .catches-stamp {
     display: inline-block;
@@ -190,16 +205,26 @@
     }
   }
 
-  ul {
+  // "Catches" list — each item is a small feature row with a
+  // bold title and a muted one-line description. The bullet on
+  // the left is a flat colored square, intentionally chunkier
+  // than a default disc — anchors the title visually without
+  // adding chrome.
+  //
+  // Subgrid template inherited from the .catches-grid parent so
+  // each `<li>` aligns with its peer in the opposite column.
+  .catches-list {
     margin: 0;
     padding: 0;
     list-style: none;
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: 3 / span 7;
+    row-gap: 0;
 
     li {
       position: relative;
-      padding: 6px 0 6px 18px;
-      font-size: 14px;
-      line-height: 1.5;
+      padding: 12px 0 12px 22px;
       border-bottom: 1px solid var(--cd-border);
 
       &:last-child { border-bottom: none; }
@@ -208,30 +233,40 @@
         content: "";
         position: absolute;
         left: 0;
-        top: 14px;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: #000000;
+        top: 18px;
+        width: 8px;
+        height: 8px;
+        background: var(--cd-accent);
+        border-radius: 2px;
       }
 
       strong {
+        display: block;
         font-family: var(--cd-mono);
         font-weight: 600;
-        color: var(--cd-accent);
+        font-size: 14px;
+        color: var(--cd-fg);
+        margin-bottom: 2px;
+      }
+
+      .cd-desc {
+        display: block;
+        font-size: 13.5px;
+        line-height: 1.5;
+        color: var(--cd-fg-muted);
+
+        code {
+          font-size: 12.5px;
+        }
       }
     }
   }
 
-  &.catches-col-detection {
-    border-left-color: var(--cd-accent);
-
-    .catches-stamp {
-      background: var(--cd-accent);
-    }
-    ul li::before {
-      background: var(--cd-accent);
-    }
+  // The "after install" column carries a red stamp to signal
+  // detection, but borders / bullets stay neutral — the
+  // hierarchy is "which flow", not "which side matters more".
+  &.catches-col-detection .catches-stamp {
+    background: var(--cd-accent);
   }
 }
 
@@ -251,10 +286,17 @@
   .accent { color: var(--cd-accent); }
 }
 
+// CSS subgrid keeps the two mode-cards visually parallel: h3,
+// description, terminal, and footer each occupy the same row
+// across both cards. Without subgrid, the two cards each have
+// their own flex stack — content-length differences make the
+// terminal start and end at different Y positions, which reads
+// as asymmetric even when the cards' outer heights match.
 .modes {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 14px 20px;
   margin-top: 32px;
 }
 
@@ -265,8 +307,10 @@
   border: 1px solid #000000;
   border-radius: var(--cd-radius-lg);
   padding: 32px 28px 28px;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 4;
+  row-gap: 14px;
 
   .mode-stamp {
     position: absolute;
@@ -284,41 +328,56 @@
     border-radius: 4px;
   }
 
+  // Each direct child below is placed into a specific subgrid row
+  // so the layout aligns cross-card: h3 row 1, description row 2,
+  // terminal row 3 (the `1fr` flex row), footer row 4.
   h3 {
-    margin: 0 0 14px;
+    grid-row: 1;
+    margin: 0;
     font-size: 22px;
     font-family: var(--cd-mono);
     word-break: break-word;
+    align-self: end;
   }
 
   > p {
+    grid-row: 2;
     font-size: 14.5px;
     line-height: 1.55;
-    margin: 0 0 16px;
+    margin: 0;
+    align-self: start;
   }
 
   pre {
     // Inherits the dark terminal chrome from styles.scss `pre`.
-    // Mode-card pre is slightly tighter and uses pure black bg
-    // for stronger contrast against the white card background.
+    // Subgrid row 3 is `1fr` so both terminals stretch to the
+    // same height regardless of content length. The shorter
+    // terminal gets blank black space below its last line —
+    // reads as a terminal prompt waiting for input.
+    grid-row: 3;
     background: #000000;
     border-color: #000000;
     color: #ffffff;
     font-size: 12.5px;
     padding: 34px 16px 14px;
-    margin: 0 0 14px;
+    margin: 0;
     border-radius: var(--cd-radius);
 
     code { color: inherit; }
   }
 
   .small {
-    margin: auto 0 0;
+    grid-row: 4;
+    margin: 0;
     font-size: 12.5px;
     line-height: 1.5;
   }
 }
 
+// Mode-card-detection only differentiates by stamp color — the
+// red stamp signals "this card describes the detection flow".
+// Border, terminal, and layout stay identical to the gate card
+// to keep the two flows visually peer-level.
 .mode-card-detection .mode-stamp {
   background: var(--cd-accent);
 }
@@ -372,7 +431,14 @@
       font-family: var(--cd-mono);
     }
     > p { margin: 0 0 12px; font-size: 14.5px; }
-    .small { margin: 10px 0 0; font-size: 12.5px; }
+    .small {
+      // Generous breathing room between the terminal block and the
+      // "From source instead:" footnote — the 10px gap previously
+      // here read as cramped against the dark chrome above.
+      margin: 22px 0 0;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
     pre { font-size: 12.5px; }
   }
 }
@@ -382,17 +448,180 @@
   margin-top: 64px;
 }
 
-.coverage-tier {
+// Ecosystem coverage section — restructured into a stats banner
+// at the top + a legend + a pill grid for every ecosystem,
+// color-coded by maturity tier. Replaces the previous 3-tier
+// wall-of-cards layout, which read as repetitive and static.
+
+// Stats banner: 3 large numbers explaining the maturity ladder.
+.coverage-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 32px 0 28px;
+}
+
+.cstat {
   background: #ffffff;
   border: 1px solid var(--cd-border-strong);
   border-radius: var(--cd-radius-lg);
-  padding: 22px 24px;
-  margin-bottom: 16px;
+  padding: 22px 20px 18px;
+  text-align: center;
+  position: relative;
 
-  &.coverage-tier-full {
-    border-color: #000000;
-    border-left: 4px solid var(--cd-accent);
+  // Top color band matches the legend dot color for that tier.
+  &::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: -1px;
+    right: -1px;
+    height: 4px;
+    border-radius: var(--cd-radius-lg) var(--cd-radius-lg) 0 0;
+    background: var(--cd-border-strong);
   }
+  &.cstat-tested::before { background: var(--cd-accent); }
+  &.cstat-stable::before { background: #16a34a; }
+}
+
+.cstat-num {
+  font-family: var(--cd-display);
+  font-size: 56px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--cd-fg);
+  margin-bottom: 6px;
+}
+.cstat-tested .cstat-num { color: var(--cd-accent); }
+.cstat-stable .cstat-num { color: #16a34a; }
+
+.cstat-label {
+  font-family: var(--cd-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--cd-fg);
+  margin-bottom: 4px;
+}
+
+.cstat-sub {
+  font-size: 12px;
+  color: var(--cd-fg-muted);
+}
+
+// Legend: maps colors to tier semantics. Three rows on desktop,
+// stack on mobile.
+.coverage-legend {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 24px;
+  padding: 16px 18px;
+  background: #ffffff;
+  border: 1px solid var(--cd-border);
+  border-radius: var(--cd-radius);
+}
+.legend-item {
+  font-size: 13px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  strong {
+    font-family: var(--cd-mono);
+    font-weight: 600;
+    color: var(--cd-fg);
+  }
+  .legend-desc {
+    display: block;
+    width: 100%;
+    color: var(--cd-fg-muted);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+}
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+  transform: translateY(1px);
+}
+.legend-dot-full      { background: var(--cd-accent); }
+.legend-dot-gated     { background: var(--cd-border-strong); }
+.legend-dot-detection { background: #000000; }
+
+// Pill grid: every ecosystem as a compact card. Three columns on
+// desktop, two on tablet, one on mobile.
+.coverage-pills {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.eco-pill {
+  position: relative;
+  background: #ffffff;
+  border: 1px solid var(--cd-border);
+  border-left: 4px solid var(--cd-border-strong);
+  border-radius: var(--cd-radius);
+  padding: 12px 14px 12px 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+
+  // Slight hover lift — signals these are content units, not links
+  // (no href), but they feel responsive.
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  }
+}
+.eco-pill-full      { border-left-color: var(--cd-accent); }
+.eco-pill-gated     { border-left-color: var(--cd-border-strong); }
+.eco-pill-detection { border-left-color: #000000; }
+
+.eco-pill-name {
+  font-family: var(--cd-mono);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--cd-fg);
+  flex: 0 0 auto;
+}
+.eco-pill-tools {
+  font-size: 12px;
+  color: var(--cd-fg-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+// Override the `tested` badge sizing inside pills so it stays
+// proportional to the smaller pill chrome.
+.eco-pill .eco-tested {
+  flex: 0 0 auto;
+  font-size: 9px;
+  padding: 1px 6px;
+  margin-left: 0;
+}
+
+.coverage-foot {
+  margin-top: 24px;
+  line-height: 1.55;
+}
+
+@media (max-width: 900px) {
+  .coverage-stats     { grid-template-columns: 1fr; }
+  .coverage-legend    { grid-template-columns: 1fr; }
+  .coverage-pills     { grid-template-columns: repeat(2, 1fr); }
+  .cstat-num          { font-size: 44px; }
+}
+@media (max-width: 560px) {
+  .coverage-pills     { grid-template-columns: 1fr; }
 }
 
 .coverage-tier-head {
@@ -585,94 +814,131 @@
   margin-top: 64px;
 }
 
-.roadmap-timeline {
-  list-style: none;
-  margin: 32px 0 0;
-  padding: 0;
-  position: relative;
+// Roadmap, goal-oriented: three phases as horizontal cards on
+// desktop, stacked on mobile. Each phase has a label (Now / Next /
+// After), a one-line headline, and three concrete items. No
+// version numbers — those attach as work ships.
+//
+// CSS subgrid syncs every row across the three columns: label
+// (row 1), headline (row 2), and each of the three items
+// (rows 3-5). All cards line up regardless of headline wrap or
+// item description length.
+.phases {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: auto auto repeat(3, auto);
+  gap: 16px 20px;
+  margin-top: 32px;
+}
 
-  &::before {
-    content: "";
-    position: absolute;
-    left: 15px;
-    top: 8px;
-    bottom: 8px;
-    width: 2px;
-    background: var(--cd-border-strong);
+.phase {
+  position: relative;
+  background: #ffffff;
+  border: 1px solid var(--cd-border-strong);
+  border-radius: var(--cd-radius-lg);
+  padding: 28px 24px 24px;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 5;
+  row-gap: 8px;
+}
+
+// Each phase carries its own accent color band on the top edge.
+// 'now' is the active phase — solid red. 'next' is the
+// committed-but-pending — black. 'later' is intentionally
+// muted — light gray, signals "we'll get there".
+.phase::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  height: 4px;
+  border-radius: var(--cd-radius-lg) var(--cd-radius-lg) 0 0;
+}
+.phase-now::before   { background: var(--cd-accent); }
+.phase-next::before  { background: #000000; }
+.phase-later::before { background: var(--cd-border-strong); }
+
+.phase-head {
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: 1 / span 2;
+  row-gap: 10px;
+  margin-bottom: 8px;
+}
+
+.phase-label {
+  grid-row: 1;
+  align-self: start;
+  justify-self: start;
+  display: inline-block;
+  padding: 3px 10px;
+  font-family: var(--cd-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 4px;
+}
+.phase-now   .phase-label { background: var(--cd-accent); color: #ffffff; }
+.phase-next  .phase-label { background: #000000;          color: #ffffff; }
+.phase-later .phase-label { background: var(--cd-bg-elevated); color: var(--cd-fg-muted); border: 1px solid var(--cd-border-strong); }
+
+.phase-headline {
+  grid-row: 2;
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: 400;
+  color: var(--cd-fg);
+}
+.phase-later .phase-headline { color: var(--cd-fg-muted); }
+
+.phase-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: 3 / span 3;
+  row-gap: 0;
+
+  li {
+    padding: 12px 0 12px 22px;
+    position: relative;
+    border-top: 1px solid var(--cd-border);
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 17px;
+      width: 8px;
+      height: 8px;
+      border-radius: 2px;
+    }
+
+    strong {
+      display: block;
+      font-family: var(--cd-mono);
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--cd-fg);
+      margin-bottom: 3px;
+    }
+
+    .phase-desc {
+      display: block;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--cd-fg-muted);
+    }
   }
 }
-
-.rm-item {
-  display: grid;
-  grid-template-columns: 32px 1fr;
-  gap: 20px;
-  padding: 14px 0;
-}
-
-.rm-marker {
-  position: relative;
-  display: flex;
-  justify-content: center;
-}
-
-.rm-dot {
-  position: relative;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #ffffff;
-  border: 3px solid var(--cd-border-strong);
-  margin-top: 6px;
-  z-index: 1;
-}
-
-.rm-content {
-  min-width: 0;
-}
-
-.rm-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 4px;
-}
-
-.rm-version {
-  font-family: var(--cd-mono);
-  font-weight: 700;
-  font-size: 17px;
-  color: #000000;
-}
-
-.rm-state {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  background: var(--cd-bg-elevated);
-  color: var(--cd-fg-muted);
-  border: 1px solid var(--cd-border-strong);
-}
-
-.rm-what {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--cd-fg-muted);
-}
-
-.rm-item.rm-shipped {
-  .rm-dot { background: #000000; border-color: #000000; }
-  .rm-state-shipped { background: #000000; color: #ffffff; border-color: #000000; }
-  .rm-what { color: var(--cd-fg); }
-}
-
-.rm-item.rm-planned {
-  .rm-dot { background: #ffffff; border-color: var(--cd-border-strong); }
-}
+.phase-now   .phase-items li::before { background: var(--cd-accent); }
+.phase-next  .phase-items li::before { background: #000000; }
+.phase-later .phase-items li::before { background: var(--cd-border-strong); }
 
 .closing {
   margin-top: 80px;
@@ -755,9 +1021,35 @@
   .hero .lede { font-size: 16px; }
   .hero .cta { flex-wrap: wrap; }
   .modes-title, .fleet-h { font-size: 28px; }
-  .modes { grid-template-columns: 1fr; }
-  .mode-card { padding: 28px 20px 20px; }
-  .catches-grid { grid-template-columns: 1fr; }
+  // Stacked single-column at mobile: drop subgrid (it's a 2-column
+  // sync feature) and revert to plain flex column for the card.
+  // Subgrid would still work but synchronizing rows down a stack
+  // is pointless.
+  .modes {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+  .mode-card {
+    display: flex;
+    flex-direction: column;
+    grid-row: auto;
+    padding: 28px 20px 20px;
+  }
+  .mode-card > * { grid-row: auto !important; }
+  .mode-card .small { margin-top: auto; }
+  // Drop subgrid sync at mobile — stacked single column doesn't
+  // benefit from row alignment between (nonexistent) peers.
+  .catches-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+  .catches-col,
+  .catches-head,
+  .catches-list {
+    display: block;
+    grid-row: auto;
+  }
+  .catches-list li { grid-row: auto; }
   .catches-shared {
     flex-direction: column;
     align-items: flex-start;
@@ -779,6 +1071,20 @@
   .closing-card { padding: 36px 20px; }
   .closing-card .closing-h { font-size: 28px; }
   .closing-card .cta { flex-wrap: wrap; justify-content: center; }
+  // Drop subgrid sync at mobile (same reason as catches above).
+  .phases {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+  .phase,
+  .phase-head,
+  .phase-items {
+    display: block;
+    grid-row: auto;
+  }
+  .phase-label, .phase-headline { grid-row: auto; }
+  .phase { padding: 24px 20px 20px; }
+  .phase-headline { font-size: 22px; }
 }
 
 @media (max-width: 380px) {
