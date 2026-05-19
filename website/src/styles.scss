@@ -82,18 +82,58 @@ code {
 pre {
   font-family: var(--cd-mono);
   font-size: 0.88em;
-  background: var(--cd-bg-elevated);
-  border: 1px solid var(--cd-border);
+  background: #0f0f0f;
+  border: 1px solid #0f0f0f;
   border-radius: var(--cd-radius);
-  padding: 16px 20px;
+  padding: 36px 20px 16px;
   overflow-x: auto;
   line-height: 1.55;
   margin: 0;
+  color: #e6e6e6;
+  position: relative;
+  // macOS-style terminal chrome: three dots in the top bar.
+  // The first dot is the red ::before; the other two are
+  // painted via box-shadow to keep the markup unchanged.
+  &::before {
+    content: '';
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #ff5f57;
+    box-shadow:
+      18px 0 0 #febc2e,
+      36px 0 0 #28c840;
+  }
+  &::after {
+    content: '';
+    position: absolute;
+    top: 33px;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+  }
 
   code {
     background: transparent;
     border: none;
     padding: 0;
+    color: inherit;
+  }
+
+  // Token classes used inline inside <pre><code>…</code></pre>.
+  // Kept on the global pre so install-step / fleet-mode blocks
+  // can use them too, not just the mode-card terminals.
+  .cd-blocked,
+  .cd-critical {
+    color: #ff6b6b;
+    font-weight: 700;
+  }
+  .cd-comment {
+    color: rgba(255, 255, 255, 0.42);
   }
 }
 

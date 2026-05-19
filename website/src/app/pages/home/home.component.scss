@@ -19,6 +19,25 @@
     width: 220px;
     height: auto;
     margin: 0 auto 28px;
+    position: relative;
+    z-index: 1;
+    // Soft red halo behind the logo — picks up the brand accent
+    // and gives the silhouette some depth on the white hero bg.
+    filter: drop-shadow(0 10px 30px rgba(218, 47, 47, 0.18))
+            drop-shadow(0 4px 8px rgba(0, 0, 0, 0.08));
+    // Slow up/down float so the ninja doesn't sit completely still.
+    // 6s loop, eased — barely perceptible but adds life.
+    animation: chd-hero-float 6s ease-in-out infinite;
+  }
+
+  @keyframes chd-hero-float {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-6px); }
+  }
+
+  // Respect users who've opted out of motion.
+  @media (prefers-reduced-motion: reduce) {
+    .hero-logo { animation: none; }
   }
 
   h1 {
@@ -279,17 +298,18 @@
   }
 
   pre {
+    // Inherits the dark terminal chrome from styles.scss `pre`.
+    // Mode-card pre is slightly tighter and uses pure black bg
+    // for stronger contrast against the white card background.
     background: #000000;
     border-color: #000000;
     color: #ffffff;
     font-size: 12.5px;
-    padding: 14px 16px;
+    padding: 34px 16px 14px;
     margin: 0 0 14px;
     border-radius: var(--cd-radius);
 
     code { color: inherit; }
-    .cd-blocked  { color: var(--cd-accent); font-weight: 700; }
-    .cd-critical { color: var(--cd-accent); font-weight: 700; }
   }
 
   .small {
@@ -552,7 +572,7 @@
   border-color: #000000;
   color: #ffffff;
   font-size: 12.5px;
-  padding: 16px 18px;
+  padding: 36px 18px 16px;
   margin: 0;
   border-radius: var(--cd-radius);
 
@@ -664,6 +684,25 @@
   border-radius: var(--cd-radius-lg);
   padding: 56px 48px;
   text-align: center;
+
+  // Small ninja mascot watching over the closing CTA. The black
+  // silhouette would vanish against the card's black bg, so it
+  // sits inside a white circular medallion — gives it presence
+  // and reads as an intentional "stamp" rather than a glitch.
+  // Soft red halo behind the medallion ties it to the brand
+  // accent without competing with the CTA buttons.
+  .closing-mascot {
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 20px;
+    display: block;
+    padding: 10px;
+    background: #ffffff;
+    border-radius: 50%;
+    box-shadow:
+      0 0 0 6px rgba(218, 47, 47, 0.10),
+      0 12px 28px rgba(218, 47, 47, 0.28);
+  }
 
   .closing-h {
     margin-top: 0;
