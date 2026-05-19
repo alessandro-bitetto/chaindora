@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
@@ -84,5 +85,68 @@ func TestFixFromFileBuildsPlans(t *testing.T) {
 	}
 	if applied != 0 || skipped != 0 {
 		t.Errorf("plan-only should leave counters at zero, got applied=%d skipped=%d", applied, skipped)
+	}
+}
+
+// TestBuildAllFixPlansDropsNonCriticalPredictive guards the v0.16+ behavior
+// where soft-signal predictive findings (publisher-change, maintainer-trust
+// dormancy, version-diff) no longer produce stub "Manual review required"
+// entries in the fix plan. They're advisory — already condensed by the
+// renderer's writePredictiveSection — and were drowning real fixes (one
+// audit of a multi-project workspace produced 2500+ such stubs).
+// Critical predictive findings (republish-guard) are kept and get a real
+// instruction step.
+func TestBuildAllFixPlansDropsNonCriticalPredictive(t *testing.T) {
+	fs := []findings.Finding{
+		// Should be dropped: low-severity advisory predictive.
+		{Detector: "predictive:publisher-change", Severity: findings.SeverityLow, Summary: "publisher changed"},
+		{Detector: "predictive:maintainer-trust", Severity: findings.SeverityLow, Summary: "dormancy"},
+		{Detector: "predictive:version-diff", Severity: findings.SeverityMedium, Summary: "pattern delta"},
+		// Should be kept: critical predictive (republish-guard hard tamper signal).
+		{
+			Detector: "predictive:republish-guard",
+			Severity: findings.SeverityCritical,
+			Name:     "lodash",
+			Version:  "4.17.21",
+			Summary:  "integrity mismatch on republish",
+			VulnID:   "REPUBLISH-GUARD",
+		},
+		// Should be kept: integrity drift gets an actionable npm-ci step.
+		{
+			Detector:   "integrity:lockfile-vs-disk-version",
+			Severity:   findings.SeverityCritical,
+			Name:       "react",
+			Version:    "19.2.4",
+			Summary:    "version mismatch",
+			VulnID:     "INTEGRITY-DRIFT-VERSION",
+			SourcePath: "/proj/package-lock.json",
+		},
+	}
+	plans := buildAllFixPlans(fs)
+	if len(plans) != 2 {
+		t.Fatalf("expected 2 plans (republish-guard + integrity-drift), got %d: %+v", len(plans), plans)
+	}
+
+	var foundRepublish, foundIntegrity bool
+	for _, p := range plans {
+		switch p.Detector {
+		case "predictive:republish-guard":
+			foundRepublish = true
+			if len(p.ManualSteps) < 2 {
+				t.Errorf("republish-guard plan should have multiple manual steps, got %v", p.ManualSteps)
+			}
+		case "integrity:lockfile-vs-disk-version":
+			foundIntegrity = true
+			joined := strings.Join(p.ManualSteps, "\n")
+			if !strings.Contains(joined, "npm ci") {
+				t.Errorf("integrity-drift plan should reference `npm ci` recovery, got steps:\n%s", joined)
+			}
+		}
+	}
+	if !foundRepublish {
+		t.Errorf("predictive:republish-guard plan was filtered out — only non-critical predictive should drop")
+	}
+	if !foundIntegrity {
+		t.Errorf("integrity:lockfile-vs-disk-version plan missing")
 	}
 }

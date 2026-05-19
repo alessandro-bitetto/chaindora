@@ -136,9 +136,20 @@ Each detector can be individually disabled with its --skip-X flag.`,
 		forensicsSavePlan = auditSavePlan
 
 		// Single-root case: identical to before, one full flow.
+		// Exception: when the root is "/" (only injected via
+		// --whole-machine without explicit --root), don't conflate
+		// the walk root with the host-state home — that would point
+		// trustdrift / hostforensics at "/" and produce
+		// "mkdir /.chaindora: read-only file system" baseline-write
+		// failures instead of writing to $HOME/.chaindora/.
 		if len(roots) == 1 {
 			r := roots[0]
-			forensicsHome = r
+			if r == "/" {
+				home, _ := os.UserHomeDir()
+				forensicsHome = home
+			} else {
+				forensicsHome = r
+			}
 			forensicsHunt = r
 			forensicsScanProjects = r
 			return runForensicsFlow(context.Background())

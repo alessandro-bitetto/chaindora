@@ -20,6 +20,19 @@ import (
 func buildAllFixPlans(fs []findings.Finding) []findings.FixPlan {
 	plans := make([]findings.FixPlan, 0, len(fs))
 	for _, f := range fs {
+		// Predictive findings (maintainer-trust dormancy, publisher-
+		// change, provenance regression, version-diff) are advisory
+		// behavioral signals — there's no command to run, and the
+		// renderer already condenses them via writePredictiveSection.
+		// Wrapping each one in a "Manual review required" FixPlan
+		// produces thousands of entries that drown the actually-
+		// fixable items in `chdora fix`. Drop them here below
+		// Critical. Critical predictive findings (republish-guard:
+		// same name@version with different integrity — hard tamper
+		// signal) keep their slot and get a real instruction below.
+		if strings.HasPrefix(f.Detector, "predictive:") && f.Severity != findings.SeverityCritical {
+			continue
+		}
 		var plan *findings.FixPlan
 		var ok bool
 		switch f.Detector {
@@ -70,6 +83,30 @@ func manualPlanFromFinding(f findings.Finding) *findings.FixPlan {
 		steps = []string{
 			"This is a behavioral signal, not a confirmed compromise — manual triage required.",
 			fmt.Sprintf("Source: %s", f.SourcePath),
+		}
+	case strings.HasPrefix(f.Detector, "integrity:lockfile-vs-disk"),
+		f.Detector == "integrity:lockfile-mirror-drift":
+		// Installed bytes diverge from the lockfile pin. Most common
+		// cause is a stale `npm install <pkg>` against an existing
+		// lockfile; the malicious case is a tampered node_modules
+		// directory. Re-running from the lockfile restores the
+		// pinned state regardless of cause, and surfaces tampering
+		// if the integrity hash still fails after re-install.
+		steps = []string{
+			fmt.Sprintf("Inspect %s — confirm the package directory hasn't been replaced or symlinked.", f.SourcePath),
+			"From the project root: delete node_modules/ and re-run the lockfile-strict install (`npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable`).",
+			"If the install fails on integrity afterwards, the upstream tarball or the lockfile entry was tampered with — investigate before re-pinning.",
+		}
+	case f.Detector == "hostforensics:trustdrift":
+		steps = []string{
+			fmt.Sprintf("Diff %s against your last-known-good baseline.", f.SourcePath),
+			"If the change is unexpected, restore the file from version control / a clean machine and re-baseline (`chdora forensics --trust-drift-update-baseline`).",
+		}
+	case f.Detector == "predictive:republish-guard":
+		steps = []string{
+			fmt.Sprintf("HARD TAMPER SIGNAL: same %s@%s observed with a different integrity hash than the cached entry.", f.Name, f.Version),
+			"Do not reinstall until verified: check the registry's published-versions list and the maintainer's release notes for a legitimate republish.",
+			"If unverified, clear the gate cache (`chdora gate cache clear`) only after confirming the new integrity is the intended one.",
 		}
 	default:
 		steps = []string{
