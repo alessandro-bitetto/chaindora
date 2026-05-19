@@ -129,7 +129,7 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 				Name:       invPkg.Name,
 				Version:    invPkg.Version,
 				PURL:       invPkg.PURL,
-				Summary:    r.Reason,
+				Summary:    summaryWithDetail(r),
 				Severity:   severityFor(r),
 				SourcePath: sources[pc.Package.String()],
 				// Carry the lockfile-recorded integrity so the
@@ -166,6 +166,26 @@ func (d *Detector) buildCheckerStack() []gate.Checker {
 	vd.Probes = d.probes
 
 	return []gate.Checker{cooldown, pub, maint, prov, vd}
+}
+
+// summaryWithDetail folds the CheckResult's Detail lines into the
+// Finding summary so the renderer (which has no Detail field of its
+// own) can still surface the actionable bits. Without this,
+// maintainer-trust renders as a bare "1 soft trust signal(s)" — the
+// underlying "190-day dormancy before this bump" lives only in
+// Detail and never reaches the user at scan time.
+func summaryWithDetail(r gate.CheckResult) string {
+	detail := strings.TrimSpace(r.Detail)
+	if detail == "" {
+		return r.Reason
+	}
+	// Detail is multi-line bulleted in maintainer-trust; collapse
+	// into a single line so the scan renderer (one-line summary
+	// per finding) keeps a tidy layout.
+	detail = strings.ReplaceAll(detail, "\n", "; ")
+	detail = strings.TrimPrefix(detail, "- ")
+	detail = strings.TrimPrefix(detail, "  - ")
+	return r.Reason + " — " + detail
 }
 
 // severityFor maps a CheckResult to a Finding severity for the

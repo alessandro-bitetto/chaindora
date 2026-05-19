@@ -37,6 +37,20 @@ so the default `--fail-on=critical,high` CI gate stays quiet.
 Republish-guard escalates to critical (hard tamper signal). See
 [docs/architecture.md](./docs/architecture.md) for the data flow.
 
+**v0.16 closed the predictive-coverage gap** with nine new
+`registries.VersionProbe` implementations — NuGet, Packagist,
+Pub, Hex, Hackage, CRAN, CocoaPods, Conda, CPAN — wired into
+`buildGateProbes()`. Cooldown / publisher-change / maintainer-
+trust / version-diff now fire for .NET / PHP / Dart /
+Erlang-Elixir / Haskell / R / iOS / Conda-Python / Perl, in
+addition to the v0.15.x npm-PyPI-RubyGems-crates-Maven-Go six.
+The v0.16 release also fixed a `priorVersion` bug that
+cross-pollinated parallel LTS release lines (Angular 18.x vs
+19.x, React-LTS, Babel beta/main): the picker now prefers the
+most recent same-major sibling and falls back to chronological
+only on true major bumps. Real impact: chaindora self-scan
+dropped from 10 MEDIUM `version-diff` false positives to 0.
+
 **Fleet behavioral signals** (v0.15+, server-side) — three checks
 that fire only with `chdora server` aggregating multi-agent state:
 `fleet:republish-detected` (cross-agent integrity divergence),

@@ -361,10 +361,32 @@ CLI executive summary surfaces critical+high counts above the
 per-section breakdown; predictive section condenses to top-N when
 noisy.
 
-### v0.16 — AI / ML supply chain
+### v0.16 — ✅ shipped — predictive parity push
 
-The next milestone — what v0.14 was originally slated to cover
-before the 42-PM coverage push reordered priorities:
+Nine new per-ecosystem `VersionProbe` implementations close the
+gap between gate-side coverage (42 ecosystems shipped in v0.14)
+and predictive-side coverage (6 in v0.15.x, now 15):
+
+- **NuGet** — `api.nuget.org/v3-flatcontainer` + registration5
+- **Packagist** — `repo.packagist.org/p2/<vendor>/<name>.json`
+- **Pub** — `pub.dev/api/packages/<name>` + `/publisher`
+- **Hex** — `hex.pm/api/packages/<name>` + `/releases/<v>`
+- **Hackage** — `hackage.haskell.org/package/<name>.json`
+- **CRAN** — `crandb.r-pkg.org/<name>/all`
+- **CocoaPods** — `trunk.cocoapods.org/api/v1/pods/<name>`
+- **Conda** — `api.anaconda.org/package/<channel>/<name>`
+- **CPAN** — `fastapi.metacpan.org/v1/release/_search`
+
+Cooldown / publisher-change / maintainer-trust / version-diff
+now fire across .NET, PHP, Dart, Erlang-Elixir, Haskell, R, iOS
+(CocoaPods), Conda-Python, and Perl projects in addition to the
+v0.15.x npm-PyPI-RubyGems-crates-Maven-Go six. Skipped: Conan,
+vcpkg, Opam, LuaRocks, Nimble, Shards, Zig, Elm — no public
+per-version metadata API. Skipped: Swift PM, Carthage —
+git-anchored, no centralized registry. Aliases (no separate
+probe): Paket → NuGet, Bun → npm, Deno → npm.
+
+### v0.17 — AI / ML supply chain
 
 1. **HuggingFace pickle scanner** — detect `__reduce__` opcodes in
    model weight files
@@ -373,7 +395,7 @@ before the 42-PM coverage push reordered priorities:
 4. **Slopsquatting heuristic** — cross-reference LLM-suggested
    package names against typosquat candidates
 
-### v0.17 — IaC supply chain
+### v0.18 — IaC supply chain
 
 1. **Terraform / OpenTofu modules** — `source = ` parser, module
    registry cooldown + OSV
@@ -382,7 +404,7 @@ before the 42-PM coverage push reordered priorities:
 3. **Ansible Galaxy** — `requirements.yml` parser, Galaxy API
    cooldown
 
-### v0.18 — emerging surfaces
+### v0.19 — emerging surfaces
 
 1. **Bun `bun.lockb` binary lockfile parser** — currently
    gate-only; needs `bun pm ls` integration for detection side

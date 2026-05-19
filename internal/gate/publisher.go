@@ -3,6 +3,7 @@ package gate
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
@@ -103,9 +104,23 @@ func (p *PublisherChange) Check(ctx context.Context, ref PackageRef) CheckResult
 	return r
 }
 
-// priorVersion finds the version immediately preceding `target`
-// on the chronologically-sorted versions list. Returns nil if
-// target is the first-ever version or not present in the list.
+// priorVersion finds the most recent version published before `target`
+// in the same major release line. Returns nil if target is the
+// first-ever version or not present in the list.
+//
+// Packages routinely maintain parallel LTS branches — Angular 18.x and
+// 19.x, React 17.x and 18.x, Node.js LTS, Babel betas — where the
+// chronologically-adjacent version often belongs to a different
+// release line and has no semantic relationship to `target`. A purely
+// chronological prior would systematically surface spurious
+// "publisher changed" / "new patterns" signals every time an LTS
+// release happens between two current-branch releases.
+//
+// Scoping to the same major fixes this. When no same-major prior
+// exists (a legitimate major-version bump like 5.0.0 after 4.20.0),
+// we fall back to the chronologically-preceding version so the
+// publisher-change / version-diff signals still cover real
+// maintainer transitions across majors.
 func priorVersion(versions []registries.VersionInfo, target string) *registries.VersionInfo {
 	idx := -1
 	for i, v := range versions {
@@ -117,5 +132,58 @@ func priorVersion(versions []registries.VersionInfo, target string) *registries.
 	if idx <= 0 {
 		return nil
 	}
+	if key := majorKey(target); key != "" {
+		for i := idx - 1; i >= 0; i-- {
+			if majorKey(versions[i].Version) == key {
+				return &versions[i]
+			}
+		}
+	}
 	return &versions[idx-1]
+}
+
+// majorKey returns a coarse "release line" identifier from a version
+// string. Used to scope priorVersion to same-major comparisons.
+//
+//	"1.2.3"        → "1"
+//	"18.2.14"      → "18"
+//	"1.0.0-rc.1"   → "1"
+//	"v1.2.3"       → "1"      (Go module style)
+//	"0.5.2"        → "0.5"    (semver: 0.minor bumps are breaking,
+//	                           so 0.5.x and 0.6.x are different lines)
+//
+// Returns "" for versions that don't start with a numeric major
+// segment; the caller then falls back to the chronological prior.
+func majorKey(v string) string {
+	if v == "" {
+		return ""
+	}
+	parts := strings.SplitN(v, ".", 3)
+	head := strings.TrimPrefix(parts[0], "v")
+	if !isASCIIDigits(head) {
+		return ""
+	}
+	if head == "0" && len(parts) >= 2 {
+		next := parts[1]
+		end := 0
+		for end < len(next) && next[end] >= '0' && next[end] <= '9' {
+			end++
+		}
+		if end > 0 {
+			return "0." + next[:end]
+		}
+	}
+	return head
+}
+
+func isASCIIDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }

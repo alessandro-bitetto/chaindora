@@ -20,6 +20,8 @@ import (
 // implementation, and every gate checker picks it up.
 func buildGateProbes() *gate.Probes {
 	p := gate.NewProbes()
+	// v0.9–v0.14 ecosystems (publisher metadata + sigstore-grade
+	// provenance where available).
 	p.Register("npm", registries.NewNPM())
 	p.Register("pypi", registries.NewPyPI())
 	p.Register("rubygems", registries.NewRubyGems())
@@ -32,6 +34,22 @@ func buildGateProbes() *gate.Probes {
 	p.RegisterProvenance("maven", registries.NewMavenCentral())
 	p.RegisterProvenance("rubygems", registries.NewRubyGems())
 	p.RegisterProvenance("crates", registries.NewCrates())
+
+	// v0.16 ecosystems — version-only probes (publish time +
+	// publisher, no sigstore-grade provenance). Adding these gives
+	// cooldown / publisher-change / maintainer-trust coverage to
+	// .NET / PHP / Dart / Erlang / Haskell / R / iOS / Python-via-
+	// Conda / Perl, eliminating the bulk of pre-v0.16 "no registry
+	// probe" Unknowns silenced by predictive's v0.15.3 filter.
+	p.Register("nuget", registries.NewNuGet())
+	p.Register("packagist", registries.NewPackagist())
+	p.Register("pub", registries.NewPub())
+	p.Register("hex", registries.NewHex())
+	p.Register("hackage", registries.NewHackage())
+	p.Register("cran", registries.NewCRAN())
+	p.Register("cocoapods", registries.NewCocoaPods())
+	p.Register("conda", registries.NewConda())
+	p.Register("cpan", registries.NewCPAN())
 	return p
 }
 
@@ -166,16 +184,92 @@ Examples:
 }
 
 // parsePackageArg accepts:
-//   "name@version"      → PackageRef{Name: name, Version: version}
-//   "@scope/name@ver"   → PackageRef{Name: @scope/name, Version: ver}
-//   "name"              → error (gate needs a resolved version)
+//
+//	"name@version"             → PackageRef{Name: name, Version: version}
+//	"@scope/name@ver"          → PackageRef{Name: @scope/name, Version: ver}
+//	"pkg:<eco>/<name>@<ver>"   → PURL syntax; ecosystem derived from <eco>
+//	"<eco>:<name>@<ver>"       → short ecosystem-prefixed form (e.g. "npm:lodash@4.17.21")
+//
+// Returns an error on:
+//   - empty input
+//   - missing @version
+//   - a non-scoped name containing '/' (e.g. "npm/express@1.0.0" — a
+//     common typo that previously fell through to the registry as a
+//     literal name and produced HTTP 405)
 func parsePackageArg(arg, ecosystem string) (gate.PackageRef, error) {
 	if arg == "" {
 		return gate.PackageRef{}, fmt.Errorf("empty package spec")
 	}
+
+	// PURL: pkg:<ecosystem>/<name>@<version>. In PURL syntax the
+	// npm scope's '@' and '/' separators are URL-encoded as %40
+	// and %2F. We only decode those two characters — full
+	// url.QueryUnescape would decode '%40' inside a version too,
+	// which would confuse the @version split below.
+	if strings.HasPrefix(arg, "pkg:") {
+		rest := strings.TrimPrefix(arg, "pkg:")
+		slash := strings.Index(rest, "/")
+		if slash <= 0 {
+			return gate.PackageRef{}, fmt.Errorf("malformed PURL %q: expected pkg:<ecosystem>/<name>@<version>", arg)
+		}
+		ecosystem = rest[:slash]
+		arg = rest[slash+1:]
+		if at := strings.LastIndex(arg, "@"); at > 0 {
+			name, version := arg[:at], arg[at+1:]
+			name = strings.ReplaceAll(name, "%2F", "/")
+			name = strings.ReplaceAll(name, "%2f", "/")
+			name = strings.ReplaceAll(name, "%40", "@")
+			arg = name + "@" + version
+		}
+	} else if colon := strings.Index(arg, ":"); colon > 0 {
+		// Short form: "<ecosystem>:<name>@<version>". Only accepted
+		// when the prefix matches a known ecosystem keyword — keeps
+		// real names containing colons (rare but legal in some
+		// registries) from being mis-parsed.
+		prefix := arg[:colon]
+		if isKnownGateEcosystem(prefix) {
+			ecosystem = prefix
+			arg = arg[colon+1:]
+		}
+	}
+
 	if ecosystem == "" {
 		ecosystem = "npm"
 	}
+
+	// After prefix-stripping, the only legitimate way for a name to
+	// contain '/' is the npm scope syntax (@scope/name). Anything
+	// else with a slash before the @version is almost certainly a
+	// typo (e.g. "npm/express@1.0.0") that previously slipped through
+	// to the registry as a literal name and returned HTTP 405.
+	namePart := arg
+	if at := strings.Index(arg, "@"); at >= 0 {
+		if strings.HasPrefix(arg, "@") {
+			if i := strings.Index(arg[1:], "@"); i >= 0 {
+				namePart = arg[:i+1]
+			}
+		} else {
+			namePart = arg[:at]
+		}
+	}
+	if !strings.HasPrefix(namePart, "@") && strings.Contains(namePart, "/") {
+		// The common shape of this typo is "<eco>/<name>@<ver>" —
+		// suggest "<eco>:<name>@<ver>" which is the supported short
+		// form. If the first segment isn't a known ecosystem the
+		// caller probably meant a literal scoped name; we still
+		// reject (npm scopes start with '@'), but the hint is less
+		// confident.
+		suggestion := ""
+		if i := strings.Index(namePart, "/"); i >= 0 {
+			firstSegment := namePart[:i]
+			if isKnownGateEcosystem(firstSegment) {
+				suggestion = fmt.Sprintf(`; did you mean "%s:%s"?`, firstSegment, arg[i+1:])
+			}
+		}
+		return gate.PackageRef{}, fmt.Errorf(
+			"package name %q contains '/' but is not a scoped name%s", namePart, suggestion)
+	}
+
 	// Find the version @ — skip the leading scope @ if present.
 	atIdx := -1
 	if strings.HasPrefix(arg, "@") {
@@ -195,6 +289,20 @@ func parsePackageArg(arg, ecosystem string) (gate.PackageRef, error) {
 		Direct:    true,
 	}, nil
 }
+
+// isKnownGateEcosystem reports whether s matches one of the ecosystem
+// keys registered in buildGateProbes. Keep in sync with the Register
+// calls there; adding a new ecosystem requires touching both places.
+func isKnownGateEcosystem(s string) bool {
+	switch s {
+	case "npm", "pypi", "go", "rubygems", "crates", "maven",
+		"nuget", "packagist", "pub", "hex", "hackage", "cran",
+		"cocoapods", "conda", "cpan":
+		return true
+	}
+	return false
+}
+
 
 func renderGateCheck(w *os.File, pc gate.PackageCheck, explain bool) {
 	fmt.Fprintf(w, "\nchdora gate check: %s\n", pc.Package)
@@ -219,7 +327,7 @@ func renderGateCheck(w *os.File, pc gate.PackageCheck, explain bool) {
 }
 
 func init() {
-	gateCheckCmd.Flags().StringVar(&gateCheckEcosystem, "ecosystem", "npm", "ecosystem of the package: npm|pypi|go|rubygems|crates|maven")
+	gateCheckCmd.Flags().StringVar(&gateCheckEcosystem, "ecosystem", "npm", "ecosystem of the package: npm|pypi|go|rubygems|crates|maven|nuget|packagist|pub|hex|hackage|cran|cocoapods|conda|cpan")
 	gateCheckCmd.Flags().DurationVar(&gateCheckCooldown, "cooldown", 0, "minimum age a version must have before install is allowed (default: 72h, overridable in chaindora.yml)")
 	gateCheckCmd.Flags().BoolVar(&gateCheckLenient, "lenient", false, "treat Warn verdicts as approve (still block Block)")
 	gateCheckCmd.Flags().BoolVar(&gateCheckOffline, "allow-offline", false, "treat Unknown verdicts (registry unreachable) as approve — disables fail-closed posture")

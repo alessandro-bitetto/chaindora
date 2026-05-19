@@ -9,14 +9,167 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Future work tracked in [README's Roadmap section](./README.md#roadmap)
 and the [threat model](./docs/threat-model.md). Next milestone is
-v0.16 — AI/ML supply chain (HuggingFace pickle scanner, PyTorch /
+v0.17 — AI/ML supply chain (HuggingFace pickle scanner, PyTorch /
 TF / Keras model file scanner, MCP server / agent-framework
-auditor). Plus the v0.15.3 follow-up: per-ecosystem
-`VersionProbe` implementations for NuGet / Packagist / Pub / Hex
-/ Swift / Hackage / CRAN / Conan so predictive's behavioral
-checkers (cooldown / publisher-change / maintainer-trust /
-version-diff) extend beyond the current npm-PyPI-RubyGems-crates-
-Maven-Go six.
+auditor).
+
+## [0.16.0] — 2026-05-19
+
+Predictive-detector parity push: nine new per-ecosystem
+`VersionProbe` implementations close the gap between gate
+coverage (42 ecosystems as of v0.14) and predictive coverage
+(was 6 in v0.15.x, now 15). Cooldown / publisher-change /
+maintainer-trust / version-diff now fire for the vast majority
+of real-world .NET / PHP / Dart / Erlang-Elixir / Haskell / R /
+iOS / Conda / Perl projects — not just npm-PyPI-RubyGems-crates-
+Maven-Go anymore.
+
+This release also fixes four bugs surfaced by running v0.16.0
+against real `$HOME` projects (a 672-package NestJS backend and
+the chaindora self-scan):
+
+### Fixed
+
+- **`priorVersion` now prefers same-major when picking the
+  "version before this one"** for the publisher-change /
+  maintainer-trust / version-diff checkers. The previous
+  purely-chronological selection cross-pollinated parallel LTS
+  branches: `@angular/animations@18.2.14` (Sep 10 18:48 UTC)
+  picked `19.2.15` (Sep 10 18:08 UTC, different branch, 40 min
+  earlier) as its prior and produced systematic version-diff
+  false positives on every Angular / React-LTS / Babel-beta /
+  Node-LTS package. New logic: walk back through the
+  time-sorted timeline preferring same-major; fall back to
+  chronological prior only when no same-major exists
+  (legitimate major-version bump). Fix in
+  `internal/gate/publisher.go` plus a new `majorKey` helper.
+  Real impact measured on the chaindora self-scan (Angular
+  website dependencies): 10 MEDIUM `version-diff` findings → 0.
+- **`gate check` accepts PURL syntax and the short
+  `<ecosystem>:<name>@<version>` form.** Previously
+  `chdora gate check pkg:npm/express@5.0.0` and
+  `chdora gate check npm:lodash@4.17.21` both got their
+  ecosystem-prefix prepended a second time, hit the registry
+  as a literal name, and silently returned Verdict=Unknown
+  (which the default Strict policy maps to Block). The parser
+  now strips `pkg:<eco>/` and `<eco>:` prefixes correctly, and
+  rejects malformed `<eco>/<name>@<ver>` typos with a "did you
+  mean `<eco>:<name>@<ver>`?" hint instead of a 405.
+- **Predictive findings carry their `CheckResult.Detail` text
+  into the rendered summary.** Maintainer-trust findings used
+  to render as a bare `"1 soft trust signal(s)"` in scan
+  output — the underlying dormancy / publish-count / age
+  signal lived only in `Detail` and never reached the user at
+  scan time. Now:
+  `"1 soft trust signal(s) — 1000-day dormancy before this
+  bump (prior 0.6.3, threshold 180d)"`. The
+  `gate check --explain` UX is unchanged.
+- **`chdora ci` no longer calls `maybePromptSavePlan`.** The
+  TTY check in `saveplan.go` protected most CI runners, but
+  the `ci` subcommand is non-interactive by intent — wrappers
+  that allocate a TTY (some `docker run -it` setups,
+  self-hosted runners) could trigger a blocking prompt.
+  Removed unconditionally.
+
+### Added — tests
+
+- `internal/gate/publisher_test.go`: LTS cross-branch scenario
+  (18.2.13 / 19.2.15 / 18.2.14 timeline), major-bump fallback,
+  0.x semver convention (0.5.x and 0.6.x are separate lines),
+  `majorKey` truth table.
+- `internal/cli/gate_test.go`: 10 cases covering plain,
+  scoped, PURL, short-prefix, malformed inputs.
+
+### Added — nine new `VersionProbe` implementations
+
+Each probe implements the five `gate.VersionProbe` methods —
+`PublishedAtVersion`, `PublisherOfVersion`, `AllVersions`,
+`TarballURL`, `FetchTarball` — wired against the upstream
+registry's public REST API. Disk-cached + bounded-pool
+concurrency via the existing cache layer.
+
+| Ecosystem  | Probe              | Backing API                                               |
+|------------|--------------------|-----------------------------------------------------------|
+| NuGet      | `registries.NuGet` | `api.nuget.org/v3-flatcontainer` + `registration5-semver1` |
+| Packagist  | `Packagist`        | `repo.packagist.org/p2/<vendor>/<name>.json`              |
+| Pub        | `Pub`              | `pub.dev/api/packages/<name>` + `/publisher`              |
+| Hex        | `Hex`              | `hex.pm/api/packages/<name>` + `/releases/<v>`            |
+| Hackage    | `Hackage`          | `hackage.haskell.org/package/<name>.json`                 |
+| CRAN       | `CRAN`             | `crandb.r-pkg.org/<name>/all`                             |
+| CocoaPods  | `CocoaPods`        | `trunk.cocoapods.org/api/v1/pods/<name>`                  |
+| Conda      | `Conda`            | `api.anaconda.org/package/<channel>/<name>`               |
+| CPAN       | `CPAN`             | `fastapi.metacpan.org/v1/release/_search`                 |
+
+Per-ecosystem publisher-key choices (stable across versions
+matters for the publisher-change checker):
+
+- NuGet → first `authors` entry (no real account-bound publisher
+  field exists in the v3 API)
+- Packagist → first author's email (display names get edited,
+  emails rotate less often)
+- Pub → package-level `publisherId` via `/publisher`
+  (domain-verified — strongest signal of the nine); per-version
+  `pubspec.publisher` hint takes precedence when set
+- Hex → release-level `publisher.username` from
+  `/releases/<v>` (per-release, account-bound)
+- Hackage → uploader account from `/uploaders` text endpoint
+- CRAN → email parsed out of `Maintainer: "Name <email>"`
+  DESCRIPTION field
+- CocoaPods → first owner email from package-level `owners` list
+- Conda → per-file uploader, with package-owner fallback
+- CPAN → PAUSE author ID (uppercase, account-bound)
+
+### Wired into `buildGateProbes()`
+
+`internal/cli/gate.go`'s `buildGateProbes()` registers all nine
+under their canonical ecosystem keys (`nuget`, `packagist`,
+`pub`, `hex`, `hackage`, `cran`, `cocoapods`, `conda`, `cpan`).
+The predictive detector's `inventoryToGateEcosystem()` already
+maps these inventory ecosystems to the matching gate keys, so
+no detector-side wiring is needed.
+
+### Tests
+
+`internal/registries/v016probes_test.go` — one httptest fixture
+per probe exercising `PublishedAtVersion` /
+`PublisherOfVersion` / `AllVersions` against representative
+upstream response shapes. Plus compile-time interface-shape
+checks for all 9 probes to catch signature drift at `go build`.
+
+### Provenance status
+
+None of the nine ecosystems expose sigstore-grade publish
+provenance today. The probes deliberately do NOT register
+`ProvenanceProbe` — the gate's provenance checker degrades to
+"no probe" → Approve for these (the v0.15.2 regression-only
+logic still applies to npm / PyPI / Maven / crates / Go /
+RubyGems which DO have provenance).
+
+### Real-world impact
+
+A typical .NET project that emitted 41 findings in v0.15.3
+(after the Unknown-silencing fix) now emits the same 13 +
+whatever real cooldown / publisher-change / maintainer-trust
+signals the upstream NuGet timeline reveals. No more silent
+gaps for these ecosystems — predictive's behavioral surface
+is now functionally at parity with the gate's resolver
+coverage for the 15 highest-traffic public registries.
+
+### Notes
+
+- Skipped ecosystems (no public per-version metadata API):
+  Conan, vcpkg, Opam, LuaRocks, Nimble, Shards, Zig, Elm.
+  Their gate-side resolvers still produce inventory entries
+  for OSV-IOC / heuristic / integrity detection; only the
+  behavioral predictive checkers go silent for them
+  (Verdict=Unknown → suppressed since v0.15.3).
+- Skipped ecosystems (git-anchored, no centralized registry):
+  Swift Package Manager, Carthage. The git-url checker covers
+  the gate-side install path; behavioral signals against git
+  refs need a different shape (commit-signature, force-push
+  detection) and are out of scope for v0.16.
+- Aliases (no new probe needed): Paket → NuGet, Bun → npm,
+  Deno → npm.
 
 ## [0.15.3] — 2026-05-17
 

@@ -309,12 +309,10 @@ continuous-integration use:
 		}
 		saved := ciSavePlan && savedID != ""
 		fixRequested := ciFixPlan || ciFix
-		if !saved && !fixRequested {
-			if id := maybePromptSavePlan(os.Stdin, os.Stderr, plans, len(all), root, saved, fixRequested); id != "" {
-				saved = true
-				savedID = id
-			}
-		}
+		// `chdora ci` is non-interactive by intent — the prompt
+		// helper used by `scan` / `forensics` is intentionally
+		// omitted here. The end-of-run footer still tells the user
+		// how to save a plan if they want one.
 		emitEndOfRunFooter(os.Stderr, plans, saved, savedID, fixRequested)
 
 		// Update baseline AFTER all rendering so the file's

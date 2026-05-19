@@ -66,39 +66,39 @@ auto-rollback applies retroactively.
 ### Pre-built binary (recommended)
 
 Pick the matching archive from the [Releases page](https://github.com/alessandro-bitetto/chaindora/releases/latest),
-extract, place `chdora` on `$PATH`. Replace `0.15.3` with the version you
+extract, place `chdora` on `$PATH`. Replace `0.16.0` with the version you
 want; `latest` works as a redirect for the most recent tag.
 
 ```sh
 # macOS, Apple Silicon
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_darwin_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.16.0_darwin_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # macOS, Intel
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_darwin_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.16.0_darwin_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, x86_64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_linux_amd64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.16.0_linux_amd64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Linux, ARM64
-curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_linux_arm64.tar.gz | tar xz
+curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.16.0_linux_arm64.tar.gz | tar xz
 sudo mv chdora /usr/local/bin/
 
 # Windows, x86_64 (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_windows_amd64.zip" -OutFile chdora.zip
+Invoke-WebRequest -Uri "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.16.0_windows_amd64.zip" -OutFile chdora.zip
 Expand-Archive chdora.zip -DestinationPath .
 Move-Item chdora.exe "$env:USERPROFILE\bin\chdora.exe"   # ensure this dir is on PATH
 
 chdora --version
 ```
 
-Each release publishes a `chaindora_0.15.3_checksums.txt`. Verify before running:
+Each release publishes a `chaindora_0.16.0_checksums.txt`. Verify before running:
 
 ```sh
-curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.15.3_checksums.txt
-shasum -a 256 -c chaindora_0.15.3_checksums.txt
+curl -LO https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.16.0_checksums.txt
+shasum -a 256 -c chaindora_0.16.0_checksums.txt
 ```
 
 ### From source
@@ -115,7 +115,7 @@ Requires Go 1.22+.
 ```sh
 chdora upgrade               # latest tagged release
 chdora upgrade --check       # report only, don't download
-chdora upgrade --version v0.15.3
+chdora upgrade --version v0.16.0
 ```
 
 `upgrade` refuses on Homebrew-managed binaries — use `brew upgrade` there.
@@ -417,7 +417,7 @@ A daily cron (`0 9 * * * chdora update`) is the recommended setup.
 ```sh
 chdora upgrade                 # latest tagged release
 chdora upgrade --check         # what's available
-chdora upgrade --version v0.15.3
+chdora upgrade --version v0.16.0
 ```
 
 Verifies the SHA-256 against the published checksums file before swap.
@@ -565,12 +565,20 @@ surface gap identified there.
   **42 package managers in total.** Hash-keyed verdict cache at
   `~/.chaindora/gate-cache/` doubles as a republish-attack detector
   (same `name@version` reappearing with different bytes → Block).
-- **v0.15** — AI / ML supply chain: HuggingFace pickle scanner,
+- **v0.16** ✅ shipped — predictive-detector parity push. Nine
+  new per-ecosystem `VersionProbe` implementations (NuGet,
+  Packagist, Pub, Hex, Hackage, CRAN, CocoaPods, Conda, CPAN)
+  close the gap between v0.14's 42-PM gate-side coverage and
+  the v0.15.x's 6-ecosystem predictive coverage. Cooldown,
+  publisher-change, maintainer-trust and version-diff now fire
+  across .NET, PHP, Dart, Erlang/Elixir, Haskell, R, iOS, Conda-
+  Python and Perl projects (15 ecosystems total, up from 6).
+- **v0.17** — AI / ML supply chain: HuggingFace pickle scanner,
   PyTorch / TF / Keras model file scanner, MCP server / Claude
   Code skill auditor.
-- **v0.16** — IaC supply chain: Terraform / OpenTofu modules +
+- **v0.18** — IaC supply chain: Terraform / OpenTofu modules +
   providers, Helm charts (deps + hooks), Ansible Galaxy.
-- **v0.17** — Emerging surfaces: devcontainer feature scanner,
+- **v0.19** — Emerging surfaces: devcontainer feature scanner,
   slopsquatting heuristic (LLM-hallucinated typosquats), Vim /
   Neovim / JetBrains plugin-manager inventory; PlatformIO; game-
   engine asset stores — community-driven.

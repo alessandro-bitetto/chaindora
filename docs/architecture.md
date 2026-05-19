@@ -113,6 +113,61 @@ works.
   those files — a vendor plist doing `curl|bash` would still
   trip HIGH.
 
+**v0.16 closes the predictive-coverage gap** — nine new
+`registries.VersionProbe` implementations (NuGet, Packagist,
+Pub, Hex, Hackage, CRAN, CocoaPods, Conda, CPAN) wired into
+`buildGateProbes()`. Same five-method probe interface as the
+v0.13-and-earlier six: `PublishedAtVersion`,
+`PublisherOfVersion`, `AllVersions`, `TarballURL`,
+`FetchTarball`. Cooldown / publisher-change / maintainer-trust
+/ version-diff now produce real findings for .NET, PHP, Dart,
+Erlang-Elixir, Haskell, R, iOS (CocoaPods), Conda-Python, and
+Perl projects in addition to the v0.15.x npm-PyPI-RubyGems-
+crates-Maven-Go six. Skipped: Conan, vcpkg, Opam, LuaRocks,
+Nimble, Shards, Zig, Elm — no public per-version metadata API.
+Skipped: Swift PM and Carthage — git-anchored, no centralized
+registry; the existing `git-url` checker covers them at install
+time. Aliases (no separate probe): Paket → NuGet, Bun → npm,
+Deno → npm.
+
+**v0.16 also reshapes `priorVersion`**: parallel-LTS release
+trains (Angular 18.x and 19.x publishing same-day, Babel
+beta/main, React LTS, Node.js LTS) routinely interleave
+chronologically. The pre-v0.16 picker walked the time-sorted
+timeline and returned `versions[idx-1]` — so `@angular/
+animations@18.2.14` (Sep 10 18:48) picked `19.2.15` (Sep 10
+18:08) as its "prior" version, comparing across release lines.
+Three checkers (publisher-change, maintainer-trust, version-
+diff) emitted a stream of false positives any time the two
+lines used different release-bot publishers. v0.16's
+`priorVersion` walks backward from `idx-1` looking for a
+same-major sibling first; falls back to chronological adjacency
+only when no same-major sibling exists (legitimate major
+bump). The helper `majorKey` treats `0.minor.patch` as its own
+line per SemVer convention (`0.5.x` and `0.6.x` are separate
+trains).
+
+**v0.16 surface fixes for the gate-check CLI and predictive
+output**:
+
+- `chdora gate check` now accepts PURL syntax
+  (`pkg:npm/express@5.0.0`) and the short
+  `<ecosystem>:<name>@<version>` form (`npm:lodash@4.17.21`).
+  Previously the parser prepended the default ecosystem
+  unconditionally, producing
+  `https://registry.npmjs.org/pkg:npm/express` lookups that
+  returned 405 and ended at Verdict=Unknown (which the
+  default Strict policy maps to Block).
+- Predictive findings carry their `CheckResult.Detail` text
+  into the rendered scan summary. Maintainer-trust used to
+  render as a bare `"1 soft trust signal(s)"` — the actual
+  dormancy / publish-count / age detail was dropped on the
+  scan path even though `gate check --explain` already
+  surfaced it.
+- `chdora ci` removed the `maybePromptSavePlan` call.
+  The TTY-check guard protected most CI runners, but `ci` is
+  non-interactive by intent.
+
 ## Top-level commands
 
 Twelve commands at the cobra root:
