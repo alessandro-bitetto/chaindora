@@ -1,6 +1,6 @@
 {
   "name": "chaindora-website",
-  "version": "0.13.2",
+  "version": "0.16.0",
   "description": "Landing page for chaindora — supply-chain attack prevention and detection",
   "private": true,
   "scripts": {
@@ -31,6 +31,7 @@
   },
   "overrides": {
     "chokidar": "^4.0.3",
-    "readdirp": "^4.1.2"
+    "readdirp": "^4.1.2",
+    "esbuild": "0.23.0"
   }
 }
