@@ -200,9 +200,12 @@ chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
   <h2 class="brand-display">Ecosystem coverage</h2>
   <p class="muted section-lede">
     Coverage depth depends on what each registry's public API actually exposes.
-    chaindora doesn't fake signals it can't verify. The <code>tested</code>
-    badge marks ecosystems already exercised on real-world projects — the
-    rest ship the same code, awaiting field-testing.
+    chaindora doesn't fake signals it can't verify. Two badges set
+    expectations: <code>tested</code> marks ecosystems exercised on
+    real-world projects; <code>stable</code> is reserved for those that
+    pass a structured test suite — that infrastructure is coming, so the
+    badge is currently unapplied. Everything else ships the same code,
+    awaiting field-testing.
   </p>
 
   <div class="coverage-tier coverage-tier-full">
