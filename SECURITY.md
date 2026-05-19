@@ -27,8 +27,8 @@ window.
 
 | Version | Supported |
 |---|---|
-| `0.1.x` | yes |
-| `< 0.1` | no |
+| `0.16.x` | yes |
+| `< 0.16` | no |
 
 ## Out of scope
 

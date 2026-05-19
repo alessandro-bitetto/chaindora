@@ -49,12 +49,20 @@ multi-agent state:
 All three emit through the regular `Findings` stream so the dashboard
 surfaces them through existing query paths.
 
-**Inventory parser coverage now spans 32 ecosystems** at the
+**Inventory parser coverage spans 32 ecosystems** at the
 inventory layer (the v0.13-and-earlier 12 plus 20 added in v0.15:
 NuGet, Composer, Pub, Hex, Swift, Hackage stack+cabal, CRAN/renv,
 Julia, Conda, Conan, vcpkg, Deno, Paket, CocoaPods, Carthage, CPAN,
 Nimble, Shards, Zig, Elm, Rebar3, Gradle, opam, LuaRocks, PDM).
-Predictive coverage is parity-matched.
+The behavioral-signal layer (cooldown / publisher-change /
+maintainer-trust / version-diff) needs per-ecosystem
+`VersionProbe` implementations *on top of* the inventory — v0.15
+had 6, v0.16 added 9 more (NuGet, Packagist, Pub, Hex, Hackage,
+CRAN, CocoaPods, Conda, CPAN), so 15 of those 32 ecosystems now
+have full behavioral coverage. The remaining 17 still feed
+OSV-IOC / heuristic / integrity detection from the inventory;
+only the behavioral predictive checkers stay quiet for them
+(Verdict=Unknown → suppressed since v0.15.3).
 
 **v0.15.1 added shell-rc auto-persist** for `chdora gate install` —
 the original v0.9 design printed an `export PATH=…` line and asked

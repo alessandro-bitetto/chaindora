@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.13.1_linux_amd64.tar.gz | tar xz
+          curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_0.16.0_linux_amd64.tar.gz | tar xz
           sudo mv chdora /usr/local/bin/
       - run: chdora ci . --sarif chaindora.sarif
       - uses: github/codeql-action/upload-sarif@v3

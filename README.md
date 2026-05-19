@@ -30,6 +30,14 @@ the same finding format. They are complementary: prevention catches new
 attacks at the install boundary; detection catches sleepers, late-discovered
 malware, and the inventory you already installed before chaindora existed.
 
+> **Coverage maturity.** chaindora ships code for 42 package managers, but
+> only 4 — **npm, PyPI, Go modules, .NET** — have been stress-tested on
+> real-world projects. The other 38 are code-shipped and awaiting
+> field-testing. See the `tested` / `stable` badges on
+> [chaindora.dev](https://chaindora.dev) for the per-ecosystem breakdown.
+> If you run any of the untested ones, real-world feedback is the fastest
+> path to closing the gap.
+
 ---
 
 ## What it catches
