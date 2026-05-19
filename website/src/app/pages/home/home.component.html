@@ -200,7 +200,9 @@ chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
   <h2 class="brand-display">Ecosystem coverage</h2>
   <p class="muted section-lede">
     Coverage depth depends on what each registry's public API actually exposes.
-    chaindora doesn't fake signals it can't verify.
+    chaindora doesn't fake signals it can't verify. The <code>tested</code>
+    badge marks ecosystems already exercised on real-world projects — the
+    rest ship the same code, awaiting field-testing.
   </p>
 
   <div class="coverage-tier coverage-tier-full">
@@ -209,14 +211,14 @@ chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
       <div class="coverage-sub">install-time gate · OSV vulns · content-hash republish-guard</div>
     </div>
     <div class="coverage-eco-grid">
-      <div class="eco">npm / yarn / pnpm / bun / deno</div>
-      <div class="eco">PyPI <span class="eco-note">pip / poetry / uv / pipenv / pdm</span></div>
+      <div class="eco">npm / yarn / pnpm / bun / deno <span class="eco-tested">tested</span></div>
+      <div class="eco">PyPI <span class="eco-note">pip / poetry / uv / pipenv / pdm</span> <span class="eco-tested">tested</span></div>
       <div class="eco">Java / JVM <span class="eco-note">mvn / gradle / sbt</span></div>
-      <div class="eco">.NET <span class="eco-note">dotnet (NuGet) / paket</span></div>
+      <div class="eco">.NET <span class="eco-note">dotnet (NuGet) / paket</span> <span class="eco-tested">tested</span></div>
       <div class="eco">Ruby <span class="eco-note">bundle / gem</span></div>
       <div class="eco">PHP <span class="eco-note">composer (Packagist)</span></div>
       <div class="eco">Rust <span class="eco-note">cargo</span></div>
-      <div class="eco">Go modules <span class="eco-note">sumdb provenance</span></div>
+      <div class="eco">Go modules <span class="eco-note">sumdb provenance</span> <span class="eco-tested">tested</span></div>
       <div class="eco">Mobile (Apple) <span class="eco-note">pod / swift / carthage</span></div>
       <div class="eco">Dart / Flutter <span class="eco-note">dart / flutter (pub)</span></div>
       <div class="eco">Elixir / Erlang <span class="eco-note">mix / rebar3 (Hex)</span></div>

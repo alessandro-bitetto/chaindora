@@ -424,6 +424,21 @@
     padding: 6px 0;
     border-top: 1px solid var(--cd-border);
 
+    .eco-tested {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 1px 7px;
+      background: var(--cd-accent);
+      color: #ffffff;
+      font-family: var(--cd-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border-radius: 3px;
+      vertical-align: 1px;
+    }
+
     .eco-note {
       display: inline-block;
       margin-left: 8px;
