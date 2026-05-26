@@ -203,7 +203,9 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
       <div class="step-body">
         <h3>Get the binary</h3>
         <p>Pre-built archives for macOS / Linux / Windows on every release.</p>
-<pre><code>curl -L https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_{{ version }}_$(uname -s | tr A-Z a-z)_amd64.tar.gz | tar xz
+<pre><code>OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m); case "$ARCH" in x86_64|amd64) ARCH=x86_64 ;; arm64|aarch64) ARCH=arm64 ;; esac
+curl -L "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_{{ version }}_${OS}_${ARCH}.tar.gz" | tar xz
 sudo mv chdora /usr/local/bin/</code></pre>
         <p class="muted small">
           From source instead: <code>go install github.com/alessandro-bitetto/chaindora/cmd/chdora&#64;latest</code>
