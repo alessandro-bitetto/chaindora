@@ -605,18 +605,26 @@
 // Battle-tested card accent; "not tested" uses the neutral baseline
 // ("Package managers" / code-shipped) treatment. There is no "stable"
 // badge — 0 ecosystems are stable today.
+// Pinned to the top-right corner of the pill and nudged slightly outside,
+// like a notification-bell count — a small "sushi-mark" tag. Absolute
+// positioning keeps every badge in the exact same spot regardless of the
+// pill's name/tools width (they were misaligned as inline flex items).
 .eco-pill .eco-tested,
 .eco-pill .eco-not-tested {
-  flex: 0 0 auto;
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 1;
   font-family: var(--cd-mono);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 1px 6px;
-  margin-left: 0;
-  border-radius: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
   white-space: nowrap;
+  line-height: 1.4;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
 }
 .eco-pill .eco-tested {
   background: var(--cd-accent);
@@ -626,6 +634,42 @@
   background: var(--cd-bg-elevated);
   color: var(--cd-fg-muted);
   border: 1px solid var(--cd-border-strong);
+}
+
+// Copy-to-clipboard button overlaid on install code blocks.
+.code-block {
+  position: relative;
+}
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-family: var(--cd-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--cd-border-strong);
+  background: var(--cd-bg-elevated);
+  color: var(--cd-fg-muted);
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    background 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+    color: var(--cd-fg);
+    border-color: var(--cd-fg-muted);
+  }
+  &.copied {
+    color: #ffffff;
+    background: var(--cd-accent);
+    border-color: var(--cd-accent);
+    opacity: 1;
+  }
 }
 
 .coverage-foot {

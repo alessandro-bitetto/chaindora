@@ -204,9 +204,15 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
         <h3>Get the binary</h3>
         <p>Pre-built archives for macOS / Linux / Windows on every release — these always pull the latest.</p>
         <p class="muted small install-os">macOS / Linux</p>
-<pre><code>{{ unixInstall }}</code></pre>
+        <div class="code-block">
+          <pre #cbUnix><code>{{ unixInstall }}</code></pre>
+          <button type="button" class="copy-btn" (click)="copy(cbUnix.innerText, $event)" aria-label="Copy command">Copy</button>
+        </div>
         <p class="muted small install-os">Windows (PowerShell)</p>
-<pre><code>{{ windowsInstall }}</code></pre>
+        <div class="code-block">
+          <pre #cbWin><code>{{ windowsInstall }}</code></pre>
+          <button type="button" class="copy-btn" (click)="copy(cbWin.innerText, $event)" aria-label="Copy command">Copy</button>
+        </div>
         <p class="muted small">
           Any platform with Go: <code>go install github.com/alessandro-bitetto/chaindora/cmd/chdora&#64;latest</code>
         </p>
@@ -218,8 +224,11 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
       <div class="step-body">
         <h3>Activate prevention</h3>
         <p>Drops a shim ahead of 42 package managers — npm / yarn / pnpm / bun / deno, pip / poetry / uv / pipenv / pdm / conda, mvn / gradle / sbt, dotnet / paket, composer, cargo, go, bundle / gem, pod / swift / dart / flutter, mix / rebar3, stack / cabal, brew, conan, vcpkg, opam, julia, R, and more.</p>
-<pre><code>chdora gate install
+        <div class="code-block">
+          <pre #cbGate><code>chdora gate install
 export PATH="$HOME/.chaindora/bin:$PATH"  # add to your shell rc</code></pre>
+          <button type="button" class="copy-btn" (click)="copy(cbGate.innerText, $event)" aria-label="Copy command">Copy</button>
+        </div>
         <p class="muted small">
           Every package-manager install resolves through chaindora's checkers from here on.
         </p>
@@ -231,9 +240,12 @@ export PATH="$HOME/.chaindora/bin:$PATH"  # add to your shell rc</code></pre>
       <div class="step-body">
         <h3>Run detection</h3>
         <p>One project, the whole host, or a CI gate — pick the surface you care about.</p>
-<pre><code>chdora scan .                                  # one project
+        <div class="code-block">
+          <pre #cbRun><code>chdora scan .                                  # one project
 chdora audit --whole-machine                   # everything under $HOME + host state
 chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
+          <button type="button" class="copy-btn" (click)="copy(cbRun.innerText, $event)" aria-label="Copy command">Copy</button>
+        </div>
       </div>
     </article>
   </div>

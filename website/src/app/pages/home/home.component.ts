@@ -46,6 +46,23 @@ export class HomeComponent implements OnInit {
 
   constructor(private readonly http: HttpClient) {}
 
+  // Copy an install snippet to the clipboard and flash "Copied" on the button.
+  copy(text: string, ev: Event): void {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+    }
+    const btn = ev.currentTarget as HTMLButtonElement | null;
+    if (!btn) {
+      return;
+    }
+    btn.textContent = 'Copied';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, 1500);
+  }
+
   ngOnInit(): void {
     this.http
       .get<{ tag_name?: string }>(
