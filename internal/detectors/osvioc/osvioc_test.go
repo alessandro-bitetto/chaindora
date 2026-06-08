@@ -1,6 +1,7 @@
 package osvioc
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -215,8 +216,11 @@ func TestPlanFix_LockfileFixWithKnownVersion(t *testing.T) {
 	if plan.PackageName != "lodash" || plan.RequiredVersion != "4.17.21" {
 		t.Errorf("dedup keys wrong: pkg=%q ver=%q", plan.PackageName, plan.RequiredVersion)
 	}
-	if plan.ProjectDir != "/proj" {
-		t.Errorf("ProjectDir wrong: %q", plan.ProjectDir)
+	// ProjectDir comes from filepath.Dir(SourcePath), which is OS-native:
+	// "/proj" on Unix, "\proj" on Windows. Compare portably.
+	wantDir := filepath.FromSlash("/proj")
+	if plan.ProjectDir != wantDir {
+		t.Errorf("ProjectDir wrong: %q (want %q)", plan.ProjectDir, wantDir)
 	}
 	if plan.Command == "" {
 		t.Error("expected non-empty command for npm lockfile fix")
