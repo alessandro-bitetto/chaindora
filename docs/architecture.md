@@ -312,6 +312,47 @@ fix-plan integration) live alongside.
                                       recent findings)
 ```
 
+### Server mode: design scope
+
+**Server mode is deliberately small.** The single-file JSON store
+(`~/.chaindora/server/state.json`) is sized for fleets in the
+**low-tens-of-agents** range — appropriate for a small team, a
+startup, or a single-org R&D group. Past roughly **50 active
+agents**, the load pattern shifts: write contention on the JSON
+state file, per-request rebuild of fleet aggregates in the dashboard,
+and a single-binary HTTP server doing TLS termination + auth + storage
+in one process all become real bottlenecks.
+
+**No SQL backend is planned.** Earlier roadmap entries hinted at a
+v0.13.x SQL backend; that work has been deliberately dropped to keep
+the maintenance surface small. Above the ~50-agent ceiling, the
+recommended pattern is **JSONL → external aggregator**:
+
+```sh
+# Per-agent: ship findings to whatever aggregator the org already runs.
+chdora audit --format jsonl >> /var/log/chdora.jsonl   # rotated by syslog/logrotate
+# or pipe directly to a log forwarder:
+chdora audit --format jsonl | fluent-bit ...
+chdora audit --format jsonl | vector ...
+```
+
+Why this is the right call:
+
+- Splunk, Loki, Datadog, Elastic, and friends already solve the hard
+  problems (replication, query, retention, RBAC, dashboards). chaindora
+  would never beat them at this.
+- The `Finding` JSON shape is the public wire contract
+  (`docs/schema/v1/finding.schema.json`). Any aggregator that accepts
+  JSON ingest is a working backend.
+- Operationally, security teams already have aggregation. They want a
+  Go binary that produces correct findings, not another service to run.
+- Bus-factor: a single-author OSS project running stateful HTTP services
+  for someone else's prod fleet is a support obligation we can't honor.
+
+**Above ~50 agents, use server mode only for the dashboard view of
+small subsets** (one team's machines, a CI cohort) and route the
+authoritative inventory through the org's existing log pipeline.
+
 ## Internal package layout
 
 ```

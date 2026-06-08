@@ -131,6 +131,7 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 				PURL:       invPkg.PURL,
 				Summary:    summaryWithDetail(r),
 				Severity:   severityFor(r),
+				Confidence: confidenceFor(r, &invPkg),
 				SourcePath: sources[pc.Package.String()],
 				// Carry the lockfile-recorded integrity so the
 				// fleet server can detect cross-agent republishes
@@ -219,6 +220,43 @@ func severityFor(r gate.CheckResult) findings.Severity {
 		return findings.SeverityLow
 	}
 	return findings.SeverityMedium
+}
+
+// confidenceFor reports the detector's certainty for a predictive
+// finding. The mapping mirrors severityFor's logic:
+//
+//   - republish-guard with a non-empty integrity → High. Same
+//     (name, version) reappearing with different bytes is a hard
+//     tamper signal; the evidence is the hash divergence itself.
+//   - cooldown / version-diff → Medium. The behavioral signal is
+//     concrete (registry timestamps, scored pattern delta) but
+//     interpretation depends on context (a brand-new package vs
+//     a maintainer's normal cadence).
+//   - publisher-change / maintainer-trust / provenance → Low. These
+//     are soft signals — high false-positive rate from organic
+//     maintainer churn — and emit at Low severity for the same
+//     reason. Surfaced for hunting, not gating.
+//   - Verdict=Unknown → Low. Anything the probe couldn't actually
+//     check shouldn't claim certainty.
+//
+// Empty Integrity downgrades republish-guard to Medium since we
+// don't have the canonical evidence to back the claim.
+func confidenceFor(r gate.CheckResult, pkg *inventory.Package) findings.Confidence {
+	if r.Verdict == gate.VerdictUnknown {
+		return findings.ConfidenceLow
+	}
+	switch r.Checker {
+	case "republish-guard":
+		if pkg != nil && pkg.Integrity != "" {
+			return findings.ConfidenceHigh
+		}
+		return findings.ConfidenceMedium
+	case "cooldown", "version-diff":
+		return findings.ConfidenceMedium
+	case "publisher-change", "maintainer-trust", "provenance":
+		return findings.ConfidenceLow
+	}
+	return findings.ConfidenceMedium
 }
 
 // inventoryToGateEcosystem maps the inventory's ecosystem strings

@@ -93,6 +93,20 @@ func (p *PublisherChange) Check(ctx context.Context, ref PackageRef) CheckResult
 		return r
 	}
 	if prior.Publisher != currentPublisher {
+		// A change TO a trusted-publishing automation identity (e.g.
+		// "GitHub Actions") that is backed by sigstore provenance is a
+		// benign migration to OIDC trusted publishing — Babel, eslint,
+		// semver, tailwind-merge et al. all did exactly this. The
+		// provenance attestation cryptographically ties the release to
+		// the project's CI, so a hijacker can't fake it by renaming an
+		// account. Requiring provenance (not just the name) keeps the
+		// guard from being spoofable. Don't cry takeover in that case.
+		if isTrustedPublisherIdentity(currentPublisher) && p.versionHasProvenance(ctx, ref) {
+			r.Verdict = VerdictApprove
+			r.Reason = fmt.Sprintf("publisher changed: %s (prior %s) → %s (this %s), but the new version carries sigstore provenance — migration to trusted publishing, not a takeover",
+				prior.Publisher, prior.Version, currentPublisher, ref.Version)
+			return r
+		}
 		r.Verdict = VerdictWarn
 		r.Reason = fmt.Sprintf("publisher changed: %s (prior %s) → %s (this %s)",
 			prior.Publisher, prior.Version, currentPublisher, ref.Version)
@@ -186,4 +200,33 @@ func isASCIIDigits(s string) bool {
 		}
 	}
 	return true
+}
+
+// trustedPublisherIdentities are the automation principals registries
+// report as the "publisher" when a release is cut through OIDC trusted
+// publishing rather than a human account. npm surfaces "GitHub Actions"
+// for trusted-publishing releases. A change TO one of these is a
+// migration to trusted publishing — but only treat it as benign when
+// it's also provenance-backed (see Check), so the name alone can't be
+// spoofed.
+var trustedPublisherIdentities = map[string]bool{
+	"github actions": true,
+	"gitlab ci":      true,
+}
+
+func isTrustedPublisherIdentity(publisher string) bool {
+	return trustedPublisherIdentities[strings.ToLower(strings.TrimSpace(publisher))]
+}
+
+// versionHasProvenance reports whether (name, version) carries a
+// sigstore provenance attestation, via the ecosystem's provenance probe.
+// A missing probe or a lookup error returns false, so the caller falls
+// through to the normal publisher-change Warn (fail safe, not silent).
+func (p *PublisherChange) versionHasProvenance(ctx context.Context, ref PackageRef) bool {
+	probe, ok := p.Probes.provenanceProbeFor(ref.Ecosystem)
+	if !ok {
+		return false
+	}
+	has, err := probe.HasProvenance(ctx, ref.Name, ref.Version)
+	return err == nil && has
 }

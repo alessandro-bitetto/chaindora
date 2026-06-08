@@ -191,7 +191,14 @@ var agentPushCmd = &cobra.Command{
 		if err := json.Unmarshal(data, &fs); err != nil {
 			return fmt.Errorf("parse findings JSON: %w", err)
 		}
-		scanID, err := pushFindingsToServer(c, fs, strings.Join(os.Args, " "))
+		// agent push is uploading findings the user already
+		// produced on disk; the run that generated them is in the
+		// past and presumed complete (the user wouldn't be
+		// running `agent push` on a half-written file). Construct
+		// a complete-status summary so the server can tell us
+		// apart from older agents that send no summary at all.
+		summary := findings.NewCompleteSummary(time.Now().UTC(), len(fs), strings.Join(os.Args, " "), Version)
+		scanID, err := pushFindingsToServer(c, fs, strings.Join(os.Args, " "), &summary)
 		if err != nil {
 			return err
 		}
@@ -201,8 +208,13 @@ var agentPushCmd = &cobra.Command{
 }
 
 // pushFindingsToServer is the shared upload helper used by both
-// `chdora agent push` and the in-process watch integration.
-func pushFindingsToServer(c *agentConfig, fs []findings.Finding, command string) (string, error) {
+// `chdora agent push` and the in-process watch integration. summary is
+// optional: nil signals "this push happened but we don't have an
+// explicit summary record" and the server treats it as complete for
+// back-compat with v0.16-and-earlier agents. Callers that DO know the
+// run completed cleanly should pass a non-nil summary so the server
+// can distinguish them from partial/error runs going forward.
+func pushFindingsToServer(c *agentConfig, fs []findings.Finding, command string, summary *findings.ScanSummary) (string, error) {
 	if c == nil || c.ServerURL == "" || c.AgentID == "" || c.APIKey == "" {
 		return "", errors.New("agent config missing server_url / agent_id / api_key")
 	}
@@ -210,6 +222,9 @@ func pushFindingsToServer(c *agentConfig, fs []findings.Finding, command string)
 		"command":        command,
 		"chdora_version": Version,
 		"findings":       fs,
+	}
+	if summary != nil {
+		body["summary"] = summary
 	}
 	buf, _ := json.Marshal(body)
 	url := fmt.Sprintf("%s/api/v1/agents/%s/scan",

@@ -89,6 +89,10 @@ func PURL(eco Ecosystem, name, version string) string {
 		typ = "zig"
 	case EcosystemElm:
 		typ = "elm"
+	case EcosystemMCP:
+		// Non-standard PURL type for MCP servers; chaindora-local
+		// until/unless the purl-spec adopts an MCP type.
+		typ = "mcp"
 	default:
 		typ = strings.ToLower(string(eco))
 	}

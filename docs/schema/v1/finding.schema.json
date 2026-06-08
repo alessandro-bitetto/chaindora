@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alessandro-bitetto/chaindora/docs/schema/v1/finding.schema.json",
+  "title": "chaindora finding",
+  "description": "The public wire shape of a chaindora finding. Emitted by --format=json, --format=jsonl, the agent push payload, and the server-side store. Field rename or removal is a breaking change and requires bumping the schema version (docs/schema/v2/...).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "detector",
+    "purl",
+    "ecosystem",
+    "name",
+    "version",
+    "vuln_id",
+    "summary",
+    "severity"
+  ],
+  "properties": {
+    "detector": {
+      "type": "string",
+      "description": "Detector class that produced the finding. Examples: 'osv-ioc', 'incident-pack', 'heuristic:typosquat', 'predictive:cooldown', 'hostforensics:tokens', 'trustdrift:npmrc'."
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "supply-chain-attack",
+        "dependency-cve",
+        "host-forensics",
+        "configuration",
+        "predictive"
+      ],
+      "description": "Coarse partition of finding kinds. Determines which section of the renderer surfaces the finding and which --exclude-<category> flag filters it."
+    },
+    "purl": {
+      "type": "string",
+      "description": "Package URL per the purl-spec (https://github.com/package-url/purl-spec). May be empty for findings that aren't about a package (host-forensics, configuration)."
+    },
+    "ecosystem": {
+      "type": "string",
+      "description": "Ecosystem identifier matching OSV.dev names where applicable. 'npm', 'PyPI', 'Go', 'RubyGems', 'crates.io', 'Maven Central', 'NuGet', 'Packagist', 'Pub', 'Hex', 'SwiftURL', 'Hackage', 'CRAN', 'Julia', 'Conda', 'ConanCenter', 'vcpkg', 'opam', 'CocoaPods', 'Carthage', 'CPAN', 'LuaRocks', 'Nimble', 'Shards', 'Zig', 'Elm', plus CI/host categories ('GitHub Actions', 'GitLab CI', 'Bitbucket Pipes', 'CircleCI Orbs', 'Azure Pipelines', 'Docker', 'Homebrew', 'Debian', 'Browser Extension', 'IDE Extension')."
+    },
+    "name": { "type": "string" },
+    "version": { "type": "string" },
+    "vuln_id": {
+      "type": "string",
+      "description": "Advisory or pattern identifier. OSV IDs ('CVE-2024-...', 'GHSA-...', 'MAL-...', 'PYSEC-...'), incident-pack slugs, heuristic names. Empty for findings that aren't tied to a specific advisory."
+    },
+    "summary": {
+      "type": "string",
+      "description": "One-line user-facing description. The renderer surfaces this verbatim."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"],
+      "description": "Impact severity. Severity gates --fail-on=<level> in CI mode."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "Detector's self-reported certainty that the finding is real. Distinct from severity. Empty/omitted means the detector hasn't been migrated to emit one yet; consumers should treat empty as 'medium' for ranking. Added v0.17."
+    },
+    "references": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri" },
+      "description": "Authoritative source URLs (advisory pages, write-ups, vendor bulletins)."
+    },
+    "source_path": {
+      "type": "string",
+      "description": "Filesystem path where the evidence lives — typically the lockfile or manifest path that introduced the package."
+    },
+    "integrity": {
+      "type": "string",
+      "description": "Lockfile-recorded content hash for this (name, version) pair when one is known. Format is ecosystem-specific: 'sha512-<base64>' for npm/yarn/pnpm, bare sha256 hex for cargo, 'h1:<base64>' for go. Empty when the originating ecosystem's lockfile doesn't expose one. Carried so fleet-level republish detection can compare the same tuple across agents. Added v0.15."
+    },
+    "fix_upgrade_to": {
+      "type": "string",
+      "description": "Known-clean version of name that the fix layer should propose pinning to (e.g. '5.6.2' for the chalk Shai-Hulud incident). Set by the incident-pack detector from packages[].safe_version."
+    },
+    "post_compromise": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Manual-step instructions the detector wants surfaced at fix time — typically credential-rotation actions the user must take by hand. Set by the incident-pack detector from top-level post_compromise."
+    }
+  }
+}

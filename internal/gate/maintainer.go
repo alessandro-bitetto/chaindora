@@ -31,6 +31,12 @@ type MaintainerTrust struct {
 	GapThreshold    time.Duration // gap of this long before bump → Warn
 }
 
+// minSoftSignalsToWarn is how many independent soft trust signals must
+// fire before maintainer-trust escalates to Warn. Kept at 2 so a lone
+// signal (most commonly long dormancy on a mature package) is treated
+// as noise rather than a finding; real risk shows up as a combination.
+const minSoftSignalsToWarn = 2
+
 // NewMaintainerTrust returns a MaintainerTrust with default
 // thresholds (30 days, 2 versions, 6 months gap).
 //
@@ -108,10 +114,23 @@ func (m *MaintainerTrust) Check(ctx context.Context, ref PackageRef) CheckResult
 		}
 	}
 
-	if len(signals) == 0 {
+	// A single soft signal is too weak to surface: mature, stable
+	// packages legitimately go dormant for >6 months, and plenty of
+	// useful utilities ship very few versions. Only a COMPOSITE — e.g.
+	// brand-new + few-versions, or few-versions + dormancy (the
+	// sleeper-revival shape) — is worth a Warn. A lone signal stays
+	// Approve (recorded in the reason, not raised as a finding), which
+	// removes the bulk of the dormancy noise without losing the
+	// genuinely-suspicious combinations.
+	if len(signals) < minSoftSignalsToWarn {
 		r.Verdict = VerdictApprove
-		r.Reason = fmt.Sprintf("maintainer trust ok (%d versions, first publish %s ago)",
-			len(versions), humanDuration(now.Sub(firstPublish)))
+		if len(signals) == 1 {
+			r.Reason = fmt.Sprintf("1 soft trust signal (below Warn threshold of %d): %s",
+				minSoftSignalsToWarn, signals[0])
+		} else {
+			r.Reason = fmt.Sprintf("maintainer trust ok (%d versions, first publish %s ago)",
+				len(versions), humanDuration(now.Sub(firstPublish)))
+		}
 		return r
 	}
 	r.Verdict = VerdictWarn

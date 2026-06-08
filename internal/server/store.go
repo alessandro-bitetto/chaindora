@@ -49,12 +49,23 @@ type Agent struct {
 
 // Scan is one delivery of findings from an agent.
 type Scan struct {
-	ID            string    `json:"id"`
-	AgentID       string    `json:"agent_id"`
-	ReceivedAt    time.Time `json:"received_at"`
-	Command       string    `json:"command,omitempty"`
-	ChdoraVer     string    `json:"chdora_version,omitempty"`
-	FindingCount  int       `json:"finding_count"`
+	ID           string    `json:"id"`
+	AgentID      string    `json:"agent_id"`
+	ReceivedAt   time.Time `json:"received_at"`
+	Command      string    `json:"command,omitempty"`
+	ChdoraVer    string    `json:"chdora_version,omitempty"`
+	FindingCount int       `json:"finding_count"`
+	// Status records whether the agent reported a completed run, a
+	// partial run, or an error. Empty value (older agents that
+	// don't send a summary) is treated as "complete" for
+	// back-compat. Partial / error scans should NOT have their
+	// findings promoted to current state by downstream consumers
+	// — the inventory is incomplete and would falsely look like
+	// packages were uninstalled. v0.17+.
+	Status findings.ScanStatus `json:"status,omitempty"`
+	// ErrorMessage carries the agent's explanation when Status is
+	// not "complete". Empty otherwise.
+	ErrorMessage string `json:"error_message,omitempty"`
 }
 
 // FindingRecord pairs a Finding with its delivery context.
@@ -280,11 +291,29 @@ func (s *Store) AuthenticateAgent(agentID, rawToken string) (Agent, error) {
 // store alongside the user's submissions so the dashboard surfaces
 // them in the same query path.
 func (s *Store) IngestFindings(agentID, command, chdoraVer string, fs []findings.Finding) (Scan, error) {
+	return s.IngestFindingsWithSummary(agentID, command, chdoraVer, fs, nil)
+}
+
+// IngestFindingsWithSummary is the v0.17+ entry point that accepts an
+// optional ScanSummary from the agent. A non-nil summary with Status
+// != "complete" tags the resulting Scan as partial/error so the
+// dashboard can render it distinctly and so consumers that compute
+// per-agent "current state" can skip non-complete runs. nil summary
+// is treated as a complete run (back-compat with older agents).
+func (s *Store) IngestFindingsWithSummary(agentID, command, chdoraVer string, fs []findings.Finding, summary *findings.ScanSummary) (Scan, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a, ok := s.state.Agents[agentID]
 	if !ok {
 		return Scan{}, errors.New("unknown agent")
+	}
+	status := findings.ScanStatusComplete
+	errMsg := ""
+	if summary != nil {
+		if summary.Status != "" {
+			status = summary.Status
+		}
+		errMsg = summary.ErrorMessage
 	}
 	scan := Scan{
 		ID:           newID(),
@@ -293,6 +322,8 @@ func (s *Store) IngestFindings(agentID, command, chdoraVer string, fs []findings
 		Command:      command,
 		ChdoraVer:    chdoraVer,
 		FindingCount: len(fs),
+		Status:       status,
+		ErrorMessage: errMsg,
 	}
 	s.state.Scans = append(s.state.Scans, scan)
 	if s.state.PackageObservations == nil {

@@ -284,7 +284,7 @@ Examples:
 			refs, err = resolveUpdateAll(ctx, realBin, cwd)
 			if err != nil {
 				if pmErr := asPMError(err); pmErr != nil {
-					surfacePMError(pmErr)
+					return surfacePMError(pmErr)
 				}
 				return fmt.Errorf("resolve update-all tree: %w", err)
 			}
@@ -319,7 +319,7 @@ Examples:
 			refs, err = resolve(ctx, realBin, installArgs)
 			if err != nil {
 				if pmErr := asPMError(err); pmErr != nil {
-					surfacePMError(pmErr)
+					return surfacePMError(pmErr)
 				}
 				return fmt.Errorf("resolve tree: %w", err)
 			}
@@ -771,149 +771,153 @@ const (
 	gateRefuseUpdateAll
 )
 
+// pmClassifier is the per-PM logic the dispatcher needs. Each PM
+// registers one entry in the pmClassifiers table below; the dispatcher
+// becomes a thin wrapper around the table. Replaces the 153-line
+// switch that grew per-ecosystem in v0.14+.
+//
+// install / update each receive the FULL args slice (not just verb)
+// because some PMs (dotnet, swift, dart) use multi-token verbs that
+// need to peek at args[1]. Returning bool lets the predicate use any
+// shape it likes (single-verb switch, regex, prefix scan).
+type pmClassifier struct {
+	// install is true when args describes an install request that
+	// fetches new packages (or, for cwd-only PMs, runs a resolving
+	// task against the project's manifest). nil for PMs that have
+	// no install path.
+	install func(args []string) bool
+	// update is true when args describes an update / upgrade
+	// request. Set only for PMs that distinguish update from
+	// install (npm/yarn/pnpm/cargo/bundle/gem/composer/poetry/uv).
+	// nil for PMs where update is folded into install (pip --upgrade,
+	// brew upgrade).
+	update func(args []string) bool
+}
+
+// pmClassifiers is the verb table. Each row replaces a case of the
+// former giant switch. Adding a new PM means appending a row plus
+// updating isGatedPM and shimManagers.
+var pmClassifiers = map[string]pmClassifier{
+	"npm":         {install: oneArgVerbFn(isNPMInstallVerb), update: oneArgVerbFn(isNPMUpdateVerb)},
+	"yarn":        {install: oneArgVerbFn(isYarnInstallVerb), update: oneArgVerbFn(isYarnUpdateVerb)},
+	"pnpm":        {install: oneArgVerbFn(isPnpmInstallVerb), update: oneArgVerbFn(isPnpmUpdateVerb)},
+	"pip":         {install: oneArgVerbFn(isPipInstallVerb)},
+	"pip3":        {install: oneArgVerbFn(isPipInstallVerb)},
+	"cargo":       {install: oneArgVerbFn(isCargoInstallVerb), update: oneArgVerbFn(isCargoUpdateVerb)},
+	"bundle":      {install: oneArgVerbFn(isBundleInstallVerb), update: oneArgVerbFn(isBundleUpdateVerb)},
+	"gem":         {install: oneArgVerbFn(isGemInstallVerb), update: oneArgVerbFn(isGemUpdateVerb)},
+	"mvn":         {install: oneArgVerbFn(isMavenInstallVerb)},
+	"go":          {install: oneArgVerbFn(isGoInstallVerb)},
+	"composer":    {install: oneArgVerbFn(isComposerInstallVerb), update: oneArgVerbFn(isComposerUpdateVerb)},
+	"poetry":      {install: oneArgVerbFn(isPoetryInstallVerb), update: oneArgVerbFn(isPoetryUpdateVerb)},
+	"uv":          {install: oneArgVerbFn(isUVInstallVerb), update: oneArgVerbFn(isUVUpdateVerb)},
+	"gradle":      {install: oneArgVerbFn(isGradleResolvingVerb)},
+	"pod":         {install: oneArgVerbFn(isCocoaPodsResolvingVerb)},
+	"mix":         {install: oneArgVerbFn(isHexResolvingVerb)},
+	"bun":         {install: oneArgVerbFn(isBunInstallVerb)},
+	"conda":       {install: oneArgVerbFn(isCondaInstallVerb)},
+	"mamba":       {install: oneArgVerbFn(isCondaInstallVerb)},
+	"micromamba":  {install: oneArgVerbFn(isCondaInstallVerb)},
+	"brew":        {install: oneArgVerbFn(isBrewInstallVerb)},
+	"conan":       {install: oneArgVerbFn(isConanInstallVerb)},
+	"vcpkg":       {install: oneArgVerbFn(isVcpkgInstallVerb)},
+	"pipenv":      {install: oneArgVerbFn(isPipenvInstallVerb)},
+	"pdm":         {install: oneArgVerbFn(isPDMInstallVerb)},
+	"deno":        {install: oneArgVerbFn(isDenoResolvingVerb)},
+	"stack":       {install: oneArgVerbFn(isStackResolvingVerb)},
+	"cabal":       {install: oneArgVerbFn(isCabalResolvingVerb)},
+	"sbt":         {install: oneArgVerbFn(isSBTResolvingVerb)},
+	"opam":        {install: oneArgVerbFn(isOpamInstallVerb)},
+	"rebar3":      {install: oneArgVerbFn(isRebar3ResolvingVerb)},
+	"paket":       {install: oneArgVerbFn(isPaketResolvingVerb)},
+	"cpanm":       {install: isCpanmInstallArg},
+	"luarocks":    {install: oneArgVerbFn(isLuaRocksInstallVerb)},
+	"carthage":    {install: oneArgVerbFn(isCarthageResolvingVerb)},
+	"elm":         {install: oneArgVerbFn(isElmInstallVerb)},
+	"nimble":      {install: oneArgVerbFn(isNimbleInstallVerb)},
+	"shards":      {install: oneArgVerbFn(isShardsResolvingVerb)},
+	"zig":         {install: oneArgVerbFn(isZigResolvingVerb)},
+	"julia":       {install: alwaysInstall}, // REPL-driven, cwd-only resolver decides
+	"R":           {install: alwaysInstall}, // renv likewise
+	"Rscript":     {install: alwaysInstall},
+
+	// Multi-token verbs — encapsulated in install so the dispatcher
+	// stays uniform. Each predicate inspects args[0..N].
+	"dotnet": {install: isDotnetAddPackage},
+	"swift":  {install: isSwiftPackageResolveOrUpdate},
+	"dart":   {install: isDartPubAddGetOrUpgrade},
+	"flutter": {install: isDartPubAddGetOrUpgrade},
+}
+
+// oneArgVerbFn adapts an existing `is<X>Verb(string) bool` predicate
+// (operating on args[0]) into the args-slice shape pmClassifier expects.
+// Most PMs use this; multi-token PMs (dotnet/swift/dart) write their own.
+func oneArgVerbFn(p func(string) bool) func([]string) bool {
+	return func(args []string) bool {
+		if len(args) == 0 {
+			return false
+		}
+		return p(args[0])
+	}
+}
+
+// alwaysInstall returns true regardless of args — used by REPL-driven
+// PMs (julia / R / Rscript) where the cwd-only resolver makes its own
+// "is there a project here?" decision.
+func alwaysInstall(args []string) bool { return true }
+
+// isDotnetAddPackage matches `dotnet add package <id>`. Other forms of
+// `dotnet add ...` (reference, project) manipulate the project graph
+// without fetching from a registry — passthrough.
+func isDotnetAddPackage(args []string) bool {
+	return len(args) >= 2 && args[0] == "add" && args[1] == "package"
+}
+
+// isSwiftPackageResolveOrUpdate matches `swift package resolve` and
+// `swift package update`. Other `swift package ...` subcommands (init,
+// dump-package, show-dependencies) don't fetch.
+func isSwiftPackageResolveOrUpdate(args []string) bool {
+	if len(args) < 2 || args[0] != "package" {
+		return false
+	}
+	return args[1] == "resolve" || args[1] == "update"
+}
+
+// isDartPubAddGetOrUpgrade matches `dart pub add <pkg>` (explicit add),
+// `dart pub get` (cwd-based lockfile fetch), and `dart pub upgrade`.
+// Used for both `dart` and `flutter`.
+func isDartPubAddGetOrUpgrade(args []string) bool {
+	if len(args) < 2 || args[0] != "pub" {
+		return false
+	}
+	switch args[1] {
+	case "add", "get", "upgrade":
+		return true
+	}
+	return false
+}
+
 // classifyGateArgs decides what the dispatcher should do for a
 // package manager invocation. Centralizes the install-vs-update,
 // lockfile-restore-vs-update-all, and gated-vs-passthrough logic
 // so the switch in gateExecCmd stays uniform per package manager.
+//
+// v0.17: refactored from a 153-line switch to a verb table
+// (pmClassifiers). Each PM is one row in the table; the dispatcher is
+// a uniform shape that reads from the table. Adding a new PM is now
+// "append a row" instead of "add a case." Behavior is preserved
+// exactly — see TestClassifyGateArgs in gate_exec_test.go for the
+// characterization-test sweep that gated the refactor.
 func classifyGateArgs(pm string, args []string) gateDecision {
+	c, ok := pmClassifiers[pm]
+	if !ok {
+		return gatePassthrough
+	}
 	if len(args) == 0 {
 		return gatePassthrough
 	}
-	verb := args[0]
-	isInstall, isUpdate := false, false
-	switch pm {
-	case "npm":
-		isInstall, isUpdate = isNPMInstallVerb(verb), isNPMUpdateVerb(verb)
-	case "yarn":
-		isInstall, isUpdate = isYarnInstallVerb(verb), isYarnUpdateVerb(verb)
-	case "pnpm":
-		isInstall, isUpdate = isPnpmInstallVerb(verb), isPnpmUpdateVerb(verb)
-	case "pip", "pip3":
-		isInstall = isPipInstallVerb(verb)
-	case "cargo":
-		isInstall, isUpdate = isCargoInstallVerb(verb), isCargoUpdateVerb(verb)
-	case "bundle":
-		isInstall, isUpdate = isBundleInstallVerb(verb), isBundleUpdateVerb(verb)
-	case "gem":
-		isInstall, isUpdate = isGemInstallVerb(verb), isGemUpdateVerb(verb)
-	case "mvn":
-		isInstall = isMavenInstallVerb(verb)
-	case "go":
-		isInstall = isGoInstallVerb(verb)
-	case "dotnet":
-		// dotnet's install verb is two tokens: `dotnet add package <id>`.
-		// `dotnet add reference / project / ...` are different subcommands
-		// (project-graph manipulation, no registry fetch) — passthrough.
-		if len(args) >= 2 && args[0] == "add" && args[1] == "package" {
-			isInstall = true
-		}
-	case "composer":
-		isInstall, isUpdate = isComposerInstallVerb(verb), isComposerUpdateVerb(verb)
-	case "poetry":
-		isInstall, isUpdate = isPoetryInstallVerb(verb), isPoetryUpdateVerb(verb)
-	case "uv":
-		isInstall, isUpdate = isUVInstallVerb(verb), isUVUpdateVerb(verb)
-	case "gradle":
-		// Gradle has no install-args verb; we gate on tasks that
-		// trigger resolution. classifyGateArgs returns gateProceed
-		// for these even though args[0] is just the task name.
-		if isGradleResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "pod":
-		if isCocoaPodsResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "swift":
-		// `swift package resolve` / `swift package update` — two-token
-		// verbs. Other `swift package ...` subcommands (init, dump-package,
-		// show-dependencies) don't fetch.
-		if len(args) >= 2 && args[0] == "package" {
-			switch args[1] {
-			case "resolve", "update":
-				isInstall = true
-			}
-		}
-	case "dart", "flutter":
-		// `dart pub add <pkg>` (with packages → install).
-		// `dart pub get` / `upgrade` (cwd-based — also install).
-		if len(args) >= 2 && args[0] == "pub" {
-			switch args[1] {
-			case "add", "get", "upgrade":
-				isInstall = true
-			}
-		}
-	case "mix":
-		if isHexResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "bun":
-		isInstall = isBunInstallVerb(verb)
-	case "conda", "mamba", "micromamba":
-		isInstall = isCondaInstallVerb(verb)
-	case "brew":
-		isInstall = isBrewInstallVerb(verb)
-	case "conan":
-		isInstall = isConanInstallVerb(verb)
-	case "vcpkg":
-		isInstall = isVcpkgInstallVerb(verb)
-	case "pipenv":
-		isInstall = isPipenvInstallVerb(verb)
-	case "pdm":
-		isInstall = isPDMInstallVerb(verb)
-	case "deno":
-		isInstall = isDenoResolvingVerb(verb)
-	case "stack":
-		if isStackResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "cabal":
-		if isCabalResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "sbt":
-		if isSBTResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "opam":
-		isInstall = isOpamInstallVerb(verb)
-	case "rebar3":
-		if isRebar3ResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "paket":
-		if isPaketResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "cpanm":
-		isInstall = isCpanmInstallArg(args)
-	case "luarocks":
-		isInstall = isLuaRocksInstallVerb(verb)
-	case "carthage":
-		if isCarthageResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "elm":
-		isInstall = isElmInstallVerb(verb)
-	case "nimble":
-		isInstall = isNimbleInstallVerb(verb)
-	case "shards":
-		if isShardsResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "zig":
-		if isZigResolvingVerb(verb) {
-			isInstall = true
-		}
-	case "julia", "R", "Rscript":
-		// Pkg.jl and renv are REPL-driven; no clean install verb
-		// to hook into at runtime. Gate every invocation that has
-		// a project file in cwd — the cwd-only resolver will read
-		// Manifest.toml / renv.lock and emit refs, otherwise no-op.
-		isInstall = true
-	default:
-		return gatePassthrough
-	}
+	isInstall := c.install != nil && c.install(args)
+	isUpdate := c.update != nil && c.update(args)
 	if !isInstall && !isUpdate {
 		return gatePassthrough
 	}
@@ -1023,15 +1027,18 @@ func asPMError(err error) *gate.PMError {
 }
 
 // surfacePMError prints the package manager's captured output
-// verbatim to stderr and exits with the PM's exit code. Used when
-// the resolver step failed because the underlying PM rejected the
-// command (typo'd package, 404, peer-dep conflict, malformed
-// lockfile, ...). The install would have failed regardless of
-// chdora, so the gate stays out of the way — no chdora prefix, no
-// extra wrapping, no second invocation of the PM.
+// verbatim to stderr and returns an *ExitError carrying the PM's
+// original exit code. Used when the resolver step failed because the
+// underlying PM rejected the command (typo'd package, 404, peer-dep
+// conflict, malformed lockfile, ...). The install would have failed
+// regardless of chdora, so the gate stays out of the way — no chdora
+// prefix, no extra wrapping, no second invocation of the PM.
 //
-// Never returns.
-func surfacePMError(pmErr *gate.PMError) {
+// v0.17: returns an error instead of calling os.Exit directly, so
+// the RunE handler stays the single source of exit semantics and the
+// function becomes testable. Callers must `return surfacePMError(pmErr)`
+// instead of relying on a "never returns" contract.
+func surfacePMError(pmErr *gate.PMError) error {
 	if len(pmErr.Output) > 0 {
 		os.Stderr.Write(pmErr.Output)
 		if pmErr.Output[len(pmErr.Output)-1] != '\n' {
@@ -1042,7 +1049,7 @@ func surfacePMError(pmErr *gate.PMError) {
 	if code == 0 {
 		code = 1
 	}
-	os.Exit(code)
+	return SilentExit(code)
 }
 
 // isGatedPM reports whether the given package manager name is one
@@ -1090,11 +1097,13 @@ func execReal(bin string, args []string) error {
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			// Propagate the real process's exit code.
+			// Propagate the real process's exit code via the
+			// typed ExitError so root.Execute does the os.Exit
+			// — not us. v0.17.
 			if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-				os.Exit(ws.ExitStatus())
+				return SilentExit(ws.ExitStatus())
 			}
-			os.Exit(1)
+			return SilentExit(1)
 		}
 		return err
 	}

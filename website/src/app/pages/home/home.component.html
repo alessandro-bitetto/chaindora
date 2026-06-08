@@ -202,13 +202,13 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
       <div class="step-num">1</div>
       <div class="step-body">
         <h3>Get the binary</h3>
-        <p>Pre-built archives for macOS / Linux / Windows on every release.</p>
-<pre><code>OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-ARCH=$(uname -m); case "$ARCH" in x86_64|amd64) ARCH=x86_64 ;; arm64|aarch64) ARCH=arm64 ;; esac
-curl -L "https://github.com/alessandro-bitetto/chaindora/releases/latest/download/chaindora_{{ version }}_${OS}_${ARCH}.tar.gz" | tar xz
-sudo mv chdora /usr/local/bin/</code></pre>
+        <p>Pre-built archives for macOS / Linux / Windows on every release — these always pull the latest.</p>
+        <p class="muted small install-os">macOS / Linux</p>
+<pre><code>{{ unixInstall }}</code></pre>
+        <p class="muted small install-os">Windows (PowerShell)</p>
+<pre><code>{{ windowsInstall }}</code></pre>
         <p class="muted small">
-          From source instead: <code>go install github.com/alessandro-bitetto/chaindora/cmd/chdora&#64;latest</code>
+          Any platform with Go: <code>go install github.com/alessandro-bitetto/chaindora/cmd/chdora&#64;latest</code>
         </p>
       </div>
     </article>
@@ -311,86 +311,106 @@ chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
     <div class="eco-pill eco-pill-full">
       <span class="eco-pill-name">Java / JVM</span>
       <span class="eco-pill-tools">mvn · gradle · sbt</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-full">
       <span class="eco-pill-name">Ruby</span>
       <span class="eco-pill-tools">bundle · gem</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-full">
       <span class="eco-pill-name">PHP</span>
       <span class="eco-pill-tools">composer (Packagist)</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-full">
       <span class="eco-pill-name">Rust</span>
       <span class="eco-pill-tools">cargo</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-full">
       <span class="eco-pill-name">Mobile (Apple)</span>
       <span class="eco-pill-tools">pod · swift · carthage</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-full">
       <span class="eco-pill-name">Dart / Flutter</span>
       <span class="eco-pill-tools">dart · flutter (pub)</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-full">
       <span class="eco-pill-name">Elixir / Erlang</span>
       <span class="eco-pill-tools">mix · rebar3 (Hex)</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-full">
       <span class="eco-pill-name">Haskell</span>
       <span class="eco-pill-tools">stack · cabal (Hackage)</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-full">
       <span class="eco-pill-name">R</span>
       <span class="eco-pill-tools">renv (CRAN)</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
 
     <!-- Tier 2: Gated (8) -->
     <div class="eco-pill eco-pill-gated">
       <span class="eco-pill-name">Conda</span>
       <span class="eco-pill-tools">conda · mamba · micromamba</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-gated">
       <span class="eco-pill-name">C / C++</span>
       <span class="eco-pill-tools">conan · vcpkg</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-gated">
       <span class="eco-pill-name">macOS dev</span>
       <span class="eco-pill-tools">brew (Homebrew)</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-gated">
       <span class="eco-pill-name">OCaml</span>
       <span class="eco-pill-tools">opam</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-gated">
       <span class="eco-pill-name">Julia</span>
       <span class="eco-pill-tools">Pkg.jl</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-gated">
       <span class="eco-pill-name">Perl</span>
       <span class="eco-pill-tools">cpanm</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-gated">
       <span class="eco-pill-name">Lua</span>
       <span class="eco-pill-tools">luarocks</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-gated">
       <span class="eco-pill-name">Niche</span>
       <span class="eco-pill-tools">elm · nimble · shards · zig</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
 
     <!-- Tier 3: Detection only (3) -->
     <div class="eco-pill eco-pill-detection">
       <span class="eco-pill-name">GitHub Actions</span>
       <span class="eco-pill-tools">includes Gitea</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-detection">
       <span class="eco-pill-name">CI platforms</span>
       <span class="eco-pill-tools">GitLab · Bitbucket · CircleCI · Azure</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
     <div class="eco-pill eco-pill-detection">
       <span class="eco-pill-name">Extensions</span>
       <span class="eco-pill-tools">browser · VS Code · JetBrains</span>
+      <span class="eco-not-tested">not tested</span>
     </div>
   </div>
 

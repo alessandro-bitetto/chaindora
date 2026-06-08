@@ -196,7 +196,7 @@ var scanCmd = &cobra.Command{
 		emitEndOfRunFooter(os.Stderr, plans, saved, savedID, fixRequested)
 
 		if len(all) > 0 {
-			os.Exit(1)
+			return SilentExit(1)
 		}
 		return nil
 	},

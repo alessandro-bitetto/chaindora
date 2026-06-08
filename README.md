@@ -581,12 +581,30 @@ surface gap identified there.
   publisher-change, maintainer-trust and version-diff now fire
   across .NET, PHP, Dart, Erlang/Elixir, Haskell, R, iOS, Conda-
   Python and Perl projects (15 ecosystems total, up from 6).
-- **v0.17** — AI / ML supply chain: HuggingFace pickle scanner,
-  PyTorch / TF / Keras model file scanner, MCP server / Claude
-  Code skill auditor.
-- **v0.18** — IaC supply chain: Terraform / OpenTofu modules +
+- **v0.17 — depth, not breadth.** The roadmap pauses ecosystem
+  expansion for one release to deepen the existing detection surface.
+  Two concrete deliverables:
+  - **Better `static-pattern` signatures.** The current scoring is
+    pattern-count-based; v0.17 adds named signature classes derived
+    from recent real-world attacks (postinstall-network-fetch,
+    crypto-stealer-wallet-regex, env-var-exfil-shape, npm-token-
+    grabber-shape). Each named signature carries a higher individual
+    weight, reducing both false positives on legitimate eval users
+    and false negatives on attacks that score below the count threshold.
+  - **Incident-pack auto-draft pipeline.** A bot ingests OSV
+    `MAL-*` entries daily and opens PRs into `incidents/draft/`
+    with the package metadata pre-filled. Maintainers review and
+    promote to `incidents/`. Compounds over time: every published
+    advisory becomes a one-click incident-pack entry instead of
+    manual YAML authoring. See `docs/incident-pack.md`.
+  - MCP server / Claude Code skill auditor lands inside the same
+    release on the inventory side (`internal/inventory/mcp.go`)
+    since it's a small, well-bounded parser.
+- **v0.18** — AI / ML supply chain: HuggingFace pickle scanner,
+  PyTorch / TF / Keras model file scanner.
+- **v0.19** — IaC supply chain: Terraform / OpenTofu modules +
   providers, Helm charts (deps + hooks), Ansible Galaxy.
-- **v0.19** — Emerging surfaces: devcontainer feature scanner,
+- **v0.20** — Emerging surfaces: devcontainer feature scanner,
   slopsquatting heuristic (LLM-hallucinated typosquats), Vim /
   Neovim / JetBrains plugin-manager inventory; PlatformIO; game-
   engine asset stores — community-driven.

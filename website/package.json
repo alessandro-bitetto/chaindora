@@ -1,6 +1,6 @@
 {
   "name": "chaindora-website",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Landing page for chaindora — supply-chain attack prevention and detection",
   "private": true,
   "scripts": {
@@ -19,8 +19,13 @@
     "@angular/platform-browser": "^18.2.0",
     "@angular/platform-browser-dynamic": "^18.2.0",
     "@angular/router": "^18.2.0",
+    "ajv": "^8.20.0",
+    "picomatch": "^4.0.4",
     "rxjs": "~7.8.0",
+    "tmp": "^0.2.5",
     "tslib": "^2.3.0",
+    "webpack": "^5.106.2",
+    "webpack-dev-server": "^5.2.4",
     "zone.js": "~0.14.10"
   },
   "devDependencies": {

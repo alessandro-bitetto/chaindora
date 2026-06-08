@@ -331,7 +331,7 @@ continuous-integration use:
 		// full inventory. Pre-existing tech debt doesn't fail
 		// the PR; only what this PR introduced does.
 		if shouldFail(newFindings, ciFailOn) {
-			os.Exit(1)
+			return SilentExit(1)
 		}
 		return nil
 	},

@@ -46,7 +46,9 @@ func TestMaintainerTrust_WarnsOnBrandNewPackage(t *testing.T) {
 	}
 }
 
-func TestMaintainerTrust_WarnsOnDormancyGap(t *testing.T) {
+// Dormancy ALONE (a single soft signal) is below the Warn threshold —
+// mature packages legitimately go quiet for years. It must Approve.
+func TestMaintainerTrust_DormancyAloneBelowThreshold(t *testing.T) {
 	now := time.Now()
 	versions := []registries.VersionInfo{
 		{Version: "1.0.0", PublishedAt: now.Add(-3 * 365 * 24 * time.Hour)},
@@ -61,8 +63,27 @@ func TestMaintainerTrust_WarnsOnDormancyGap(t *testing.T) {
 		GapThreshold:    6 * 30 * 24 * time.Hour,
 	}
 	r := m.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "p", Version: "1.0.3"})
+	if r.Verdict != VerdictApprove {
+		t.Errorf("dormancy alone is one signal (below threshold) → Approve, got %v: %q", r.Verdict, r.Reason)
+	}
+}
+
+// A composite — few-versions + dormancy — crosses the threshold and Warns.
+func TestMaintainerTrust_WarnsOnCompositeSignals(t *testing.T) {
+	now := time.Now()
+	versions := []registries.VersionInfo{
+		{Version: "1.0.0", PublishedAt: now.Add(-3 * 365 * 24 * time.Hour)},
+		{Version: "1.0.1", PublishedAt: now.Add(-1 * 24 * time.Hour)},
+	}
+	m := &MaintainerTrust{
+		Probes:          probesWith("npm", stubProbe{versions: versions}),
+		NewPackageDays:  30,
+		MinVersionCount: 3, // 2 versions < 3 → few-versions signal
+		GapThreshold:    6 * 30 * 24 * time.Hour,
+	}
+	r := m.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "p", Version: "1.0.1"})
 	if r.Verdict != VerdictWarn {
-		t.Errorf("2-year dormancy should Warn, got %v: %q", r.Verdict, r.Reason)
+		t.Errorf("few-versions + dormancy (2 signals) should Warn, got %v: %q", r.Verdict, r.Reason)
 	}
 }
 

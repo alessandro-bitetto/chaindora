@@ -85,9 +85,17 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 		p := pkgRefs[i]
 		for _, vr := range r.Vulns {
 			f := findings.Finding{
-				Detector:   "osv-ioc",
-				Category:   categoryForOSVID(vr.ID),
-				PURL:       p.PURL,
+				Detector: "osv-ioc",
+				Category: categoryForOSVID(vr.ID),
+				PURL:     p.PURL,
+				// OSV matches against lockfile-recorded
+				// (eco, name, version) tuples are about as
+				// canonical as supply-chain evidence gets:
+				// the advisory IDs the exact version, the
+				// lockfile confirms it's installed. Any
+				// false-positive rate at this layer is the
+				// advisory feed's, not ours.
+				Confidence: findings.ConfidenceHigh,
 				Ecosystem:  p.Ecosystem,
 				Name:       p.Name,
 				Version:    p.Version,

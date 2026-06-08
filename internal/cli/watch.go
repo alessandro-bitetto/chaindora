@@ -172,7 +172,14 @@ func watchOnePass(ctx context.Context, statePath string) error {
 	// this fingerprint before" — clients don't need a separate
 	// delta protocol.
 	if c, _ := loadAgentConfig(agentConfigPath); c != nil && c.ServerURL != "" {
-		if _, err := pushFindingsToServer(c, fs, strings.Join(os.Args, " ")); err != nil {
+		// watch passes are always intended to be complete scans —
+		// any error would have aborted the pass before this push
+		// site. Send a complete summary so the server can tell
+		// us apart from older agents (no summary = back-compat
+		// default of complete on the receiver, but explicit is
+		// better than implicit).
+		passSummary := findings.NewCompleteSummary(now, len(fs), strings.Join(os.Args, " "), Version)
+		if _, err := pushFindingsToServer(c, fs, strings.Join(os.Args, " "), &passSummary); err != nil {
 			fmt.Fprintf(os.Stderr, "[chdora watch] server push failed: %v\n", err)
 		} else if watchVerbose {
 			fmt.Fprintf(os.Stderr, "[chdora watch] pushed %d finding(s) to %s\n", len(fs), c.ServerURL)

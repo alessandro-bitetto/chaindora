@@ -43,6 +43,47 @@ func TestPublisherChange_WarnsOnChange(t *testing.T) {
 	}
 }
 
+// A change to a trusted-publishing identity ("GitHub Actions") backed by
+// sigstore provenance is a benign migration to OIDC trusted publishing,
+// not a takeover — Babel/eslint/semver et al. all did this.
+func TestPublisherChange_TrustedPublishingMigrationApproves(t *testing.T) {
+	versions := []registries.VersionInfo{
+		{Version: "1.0.0", Publisher: "alice", PublishedAt: time.Now().Add(-30 * 24 * time.Hour)},
+		{Version: "1.0.1", Publisher: "GitHub Actions", PublishedAt: time.Now().Add(-7 * 24 * time.Hour)},
+	}
+	probes := NewProbes()
+	probes.Register("npm", stubProbe{
+		publisherByVersion: map[string]string{"1.0.0": "alice", "1.0.1": "GitHub Actions"},
+		versions:           versions,
+	})
+	probes.RegisterProvenance("npm", stubProvenance{hasProv: true})
+	p := &PublisherChange{Probes: probes}
+	r := p.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "pkg", Version: "1.0.1"})
+	if r.Verdict != VerdictApprove {
+		t.Errorf("trusted-publishing migration (GitHub Actions + provenance) should Approve, got %v: %q", r.Verdict, r.Reason)
+	}
+}
+
+// The trusted-publishing name alone is not enough — without provenance to
+// back it, a change to "GitHub Actions" still Warns (can't be spoofed).
+func TestPublisherChange_CIIdentityWithoutProvenanceStillWarns(t *testing.T) {
+	versions := []registries.VersionInfo{
+		{Version: "1.0.0", Publisher: "alice", PublishedAt: time.Now().Add(-30 * 24 * time.Hour)},
+		{Version: "1.0.1", Publisher: "GitHub Actions", PublishedAt: time.Now().Add(-7 * 24 * time.Hour)},
+	}
+	probes := NewProbes()
+	probes.Register("npm", stubProbe{
+		publisherByVersion: map[string]string{"1.0.0": "alice", "1.0.1": "GitHub Actions"},
+		versions:           versions,
+	})
+	probes.RegisterProvenance("npm", stubProvenance{hasProv: false})
+	p := &PublisherChange{Probes: probes}
+	r := p.Check(context.Background(), PackageRef{Ecosystem: "npm", Name: "pkg", Version: "1.0.1"})
+	if r.Verdict != VerdictWarn {
+		t.Errorf("CI identity without provenance should still Warn, got %v: %q", r.Verdict, r.Reason)
+	}
+}
+
 func TestPublisherChange_WarnsOnFirstPublish(t *testing.T) {
 	versions := []registries.VersionInfo{
 		{Version: "0.1.0", Publisher: "alice", PublishedAt: time.Now()},

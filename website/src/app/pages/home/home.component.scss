@@ -600,13 +600,32 @@
   flex: 1 1 auto;
   min-width: 0;
 }
-// Override the `tested` badge sizing inside pills so it stays
-// proportional to the smaller pill chrome.
-.eco-pill .eco-tested {
+// Maturity badges inside pills. Colors mirror the coverage stat cards
+// above so the visual language is consistent: "tested" uses the
+// Battle-tested card accent; "not tested" uses the neutral baseline
+// ("Package managers" / code-shipped) treatment. There is no "stable"
+// badge — 0 ecosystems are stable today.
+.eco-pill .eco-tested,
+.eco-pill .eco-not-tested {
   flex: 0 0 auto;
+  font-family: var(--cd-mono);
   font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   padding: 1px 6px;
   margin-left: 0;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.eco-pill .eco-tested {
+  background: var(--cd-accent);
+  color: #ffffff;
+}
+.eco-pill .eco-not-tested {
+  background: var(--cd-bg-elevated);
+  color: var(--cd-fg-muted);
+  border: 1px solid var(--cd-border-strong);
 }
 
 .coverage-foot {

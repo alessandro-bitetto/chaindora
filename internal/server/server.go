@@ -209,15 +209,16 @@ func (s *Server) handleScanUpload(w http.ResponseWriter, r *http.Request, agentI
 		return
 	}
 	var body struct {
-		Command       string             `json:"command"`
-		ChdoraVersion string             `json:"chdora_version"`
-		Findings      []findings.Finding `json:"findings"`
+		Command       string                `json:"command"`
+		ChdoraVersion string                `json:"chdora_version"`
+		Findings      []findings.Finding    `json:"findings"`
+		Summary       *findings.ScanSummary `json:"summary,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	scan, err := s.Store.IngestFindings(agentID, body.Command, body.ChdoraVersion, body.Findings)
+	scan, err := s.Store.IngestFindingsWithSummary(agentID, body.Command, body.ChdoraVersion, body.Findings, body.Summary)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

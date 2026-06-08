@@ -12,6 +12,36 @@ const (
 	SeverityUnknown  Severity = "UNKNOWN"
 )
 
+// Confidence is the detector's self-reported certainty that this finding
+// is real — distinct from Severity, which describes how bad it would be
+// if the finding is real. A high-severity finding at low confidence is
+// "could be very bad, but the evidence is thin"; a medium-severity
+// finding at high confidence is "definitely real, modest impact." Fleet
+// consumers can use Confidence to weight noise reduction independent of
+// severity gating.
+type Confidence string
+
+const (
+	// ConfidenceHigh — the finding is grounded in canonical evidence:
+	// a lockfile-recorded (name, version, integrity) tuple matched by
+	// an authoritative source (OSV advisory, incident-pack entry,
+	// content-hash divergence). False-positive rate is essentially
+	// the false-positive rate of the underlying advisory feed.
+	ConfidenceHigh Confidence = "high"
+	// ConfidenceMedium — the finding is grounded in solid but
+	// non-canonical evidence: a transitive dep observed via
+	// node_modules walk (not the top-level lockfile), a heuristic
+	// pattern match, a behavioral check (publisher-change, cooldown)
+	// where the signal is real but interpretation context-dependent.
+	ConfidenceMedium Confidence = "medium"
+	// ConfidenceLow — the finding is inferred from indirect signals:
+	// reference-only mentions, name-similarity matches (typosquat
+	// suspicion without confirmed compromise), patterns that overlap
+	// known legitimate uses. Users should treat as "worth a look,"
+	// not "act now."
+	ConfidenceLow Confidence = "low"
+)
+
 // Category classifies what kind of question a finding answers. Added in
 // v0.7.0 to separate "we found a deliberate supply-chain attack against
 // you" from "your dependency has a known CVE in legitimately-written
@@ -73,8 +103,13 @@ type Finding struct {
 	VulnID     string              `json:"vuln_id"`
 	Summary    string              `json:"summary"`
 	Severity   Severity            `json:"severity"`
-	References []string            `json:"references,omitempty"`
-	SourcePath string              `json:"source_path,omitempty"`
+	// Confidence is the detector's self-reported certainty. Empty
+	// (omitted in JSON) means the detector hasn't been migrated to
+	// emit one yet; consumers should treat empty as ConfidenceMedium
+	// for ranking purposes. v0.17+.
+	Confidence Confidence `json:"confidence,omitempty"`
+	References []string   `json:"references,omitempty"`
+	SourcePath string     `json:"source_path,omitempty"`
 	// Integrity is the lockfile-recorded content hash for this
 	// (name, version) pair when one is known. v0.15+. Carried on
 	// findings so the v0.13 fleet server can detect cross-agent

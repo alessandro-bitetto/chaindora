@@ -58,6 +58,17 @@ const (
 	EcosystemShards    Ecosystem = "Shards"
 	EcosystemZig       Ecosystem = "Zig"
 	EcosystemElm       Ecosystem = "Elm"
+
+	// EcosystemMCP — Model Context Protocol server inventory. Not a
+	// package registry; the "package" here is the launcher spec
+	// declared in an MCP client's config (Claude Desktop, mcp.json,
+	// Cline, Gemini, etc.). Borrowed from bumblebee's MCP parser.
+	// Added v0.17 to land the auditor on the v0.18 roadmap a release
+	// early. No OSV mapping — MCP servers aren't tracked in a vuln
+	// database, so the value here is inventory-only (knowing which
+	// MCP servers are configured across the fleet when an advisory
+	// names a specific server).
+	EcosystemMCP Ecosystem = "MCP"
 )
 
 // Package represents one resolved dependency discovered in a manifest or lockfile.
@@ -534,6 +545,24 @@ func Scan(root string, opts ...ScanOption) (*Inventory, error) {
 			if len(pkgs) > 0 {
 				inv.Packages = append(inv.Packages, pkgs...)
 				inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemDocker, Kind: "compose"})
+			}
+		}
+
+		// MCP host-config files: dispatched after the main switch so
+		// they don't collide with ambiguous basenames. v0.17.
+		if IsKnownMCPConfig(base) || IsGeminiSettingsJSON(path) {
+			pkgs, perr := parseMCPConfig(path)
+			if perr != nil {
+				inv.Errors = append(inv.Errors, "mcp "+path+": "+perr.Error())
+				return nil
+			}
+			if len(pkgs) > 0 {
+				inv.Packages = append(inv.Packages, pkgs...)
+				kind := "mcp-config"
+				if IsGeminiSettingsJSON(path) {
+					kind = "gemini-settings"
+				}
+				inv.Sources = append(inv.Sources, Source{Path: path, Ecosystem: EcosystemMCP, Kind: kind})
 			}
 		}
 

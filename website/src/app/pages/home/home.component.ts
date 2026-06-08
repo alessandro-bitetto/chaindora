@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 
 interface RoadmapItem {
   title: string;
@@ -20,8 +21,48 @@ interface RoadmapPhase {
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss'],
 })
-export class HomeComponent {
-  readonly version = '0.16.0';
+export class HomeComponent implements OnInit {
+  // Fallback shown before the API responds (and if the request fails).
+  // Replaced at runtime with the real latest release so the page never
+  // shows a stale version after a release is cut.
+  version = '0.16.0';
+
+  // Install snippets live in the component (not inline in the template) so
+  // their shell ${...} / %{...} braces aren't parsed by Angular's control-flow
+  // template compiler. Both resolve the latest release at run time — never a
+  // pinned version — and cover macOS/Linux + Windows.
+  readonly unixInstall =
+    "OS=$(uname -s | tr '[:upper:]' '[:lower:]')\n" +
+    'ARCH=$(uname -m); case "$ARCH" in x86_64|amd64) ARCH=x86_64 ;; arm64|aarch64) ARCH=arm64 ;; esac\n' +
+    "TAG=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/alessandro-bitetto/chaindora/releases/latest | sed 's#.*/##')\n" +
+    'curl -fL "https://github.com/alessandro-bitetto/chaindora/releases/download/$TAG/chaindora_${TAG#v}_${OS}_${ARCH}.tar.gz" | tar xz\n' +
+    'sudo mv chdora /usr/local/bin/';
+
+  readonly windowsInstall =
+    '$tag = (Invoke-RestMethod https://api.github.com/repos/alessandro-bitetto/chaindora/releases/latest).tag_name\n' +
+    "$ver = $tag.TrimStart('v')\n" +
+    'Invoke-WebRequest "https://github.com/alessandro-bitetto/chaindora/releases/download/$tag/chaindora_${ver}_windows_x86_64.zip" -OutFile chdora.zip\n' +
+    'Expand-Archive chdora.zip -DestinationPath $HOME\\.chaindora\\bin -Force';
+
+  constructor(private readonly http: HttpClient) {}
+
+  ngOnInit(): void {
+    this.http
+      .get<{ tag_name?: string }>(
+        'https://api.github.com/repos/alessandro-bitetto/chaindora/releases/latest',
+      )
+      .subscribe({
+        next: (release) => {
+          const tag = release?.tag_name?.trim();
+          if (tag) {
+            this.version = tag.replace(/^v/, '');
+          }
+        },
+        error: () => {
+          /* keep the fallback version */
+        },
+      });
+  }
 
   // Roadmap is goal-driven, not version-driven. Specific tags will
   // attach to these phases as they ship; what matters for a reader

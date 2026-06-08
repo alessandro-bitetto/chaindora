@@ -164,22 +164,19 @@ Examples:
 		renderGateCheck(os.Stderr, pc, gateCheckExplain)
 
 		allow, verdict := policy.Decide(pc)
-		switch {
-		case allow:
-			os.Exit(0)
-		default:
-			switch verdict {
-			case gate.VerdictBlock:
-				os.Exit(1)
-			case gate.VerdictWarn:
-				os.Exit(2)
-			case gate.VerdictUnknown:
-				os.Exit(3)
-			default:
-				os.Exit(1)
-			}
+		if allow {
+			return nil // exit 0
 		}
-		return nil
+		switch verdict {
+		case gate.VerdictBlock:
+			return SilentExit(1)
+		case gate.VerdictWarn:
+			return SilentExit(2)
+		case gate.VerdictUnknown:
+			return SilentExit(3)
+		default:
+			return SilentExit(1)
+		}
 	},
 }
 
