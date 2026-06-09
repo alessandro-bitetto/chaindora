@@ -149,6 +149,58 @@ func TestVersionSatisfies(t *testing.T) {
 	}
 }
 
+func TestIsVendoredTree(t *testing.T) {
+	cases := []struct {
+		dir  string
+		want bool
+	}{
+		{"/Users/x/proj", false},
+		{"/Users/x/proj/src", false},
+		{"/Users/x/proj/node_modules/foo", true},
+		{"/Users/x/OrbStack/docker/volumes/mvp_be_node_modules/uri-js", true}, // substring match
+		{"/home/x/app/.venv/lib/python3.12", true},
+		{"/home/x/app/site-packages/pkg", true},
+		{"/Users/x/go/pkg/mod/github.com/foo", true},
+	}
+	for _, c := range cases {
+		if _, got := isVendoredTree(c.dir); got != c.want {
+			t.Errorf("isVendoredTree(%q) = %v, want %v", c.dir, got, c.want)
+		}
+	}
+}
+
+// TestPreflightUnwritable drops fixes in vendored trees and in
+// directories the user can't write to, while letting writable source
+// projects, manual plans, and global-package fixes through. Writability
+// is stubbed so the test is deterministic across OS / euid.
+func TestPreflightUnwritable(t *testing.T) {
+	plans := []findings.FixPlan{
+		{FindingFingerprint: "fp-vendor", VulnID: "A", PackageName: "uri-js",
+			ProjectDir: "/root/node_modules/uri-js", Command: "npm i", Category: findings.FixSemiSafe},
+		{FindingFingerprint: "fp-unwrite", VulnID: "B", PackageName: "hono",
+			ProjectDir: "/root/backend", Command: "npm i", Category: findings.FixSemiSafe},
+		{FindingFingerprint: "fp-ok", VulnID: "C", PackageName: "axios",
+			ProjectDir: "/root/app", Command: "npm i", Category: findings.FixSemiSafe},
+		{FindingFingerprint: "fp-manual", VulnID: "D",
+			ProjectDir: "/root/node_modules/x", Category: findings.FixManual, ManualSteps: []string{"do it"}},
+		{FindingFingerprint: "fp-global", VulnID: "E", Command: "npm i -g x", Category: findings.FixSafe},
+	}
+	writable := func(dir string) bool { return dir != "/root/backend" }
+	kept, dropped, notes := preflightFilterUnwritableWith(plans, writable)
+	if len(kept) != 3 {
+		t.Fatalf("expected 3 kept (ok, manual, global), got %d: %+v", len(kept), kept)
+	}
+	if !dropped["fp-vendor"] || !dropped["fp-unwrite"] {
+		t.Errorf("expected vendor + unwritable dropped, got %v", dropped)
+	}
+	if dropped["fp-ok"] || dropped["fp-manual"] || dropped["fp-global"] {
+		t.Errorf("over-dropped writable/manual/global: %v", dropped)
+	}
+	if len(notes) != 2 {
+		t.Errorf("expected 2 skip notes, got %d: %v", len(notes), notes)
+	}
+}
+
 func mustWriteLockfile(t *testing.T, dir string, versions map[string]string) {
 	t.Helper()
 	// Build a v3 package-lock.json with a single top-level package

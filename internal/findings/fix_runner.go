@@ -35,6 +35,23 @@ type RunOptions struct {
 	// Output is where the runner writes its diagnostic messages and the
 	// stdout/stderr of executed commands. Falls back to os.Stderr.
 	Output io.Writer
+
+	// RepoStatus probes a fix target's directory for its VCS state,
+	// feeding the pre-apply blast-radius recap and the per-repo headers.
+	// Defaults to a git-backed probe (gitRepoState). Injectable so tests
+	// stay hermetic — they don't need a real repo on disk.
+	RepoStatus func(dir string) RepoState
+}
+
+// RepoState describes the version-control status of a fix target's
+// directory. A single `chdora fix --plan` can rewrite lockfiles across
+// many unrelated repositories at once (the audit walk covers all of
+// $HOME); surfacing which of those have uncommitted work BEFORE we start
+// mutating is the difference between "reviewable change" and "what just
+// happened to my work tree". Probed once per distinct ProjectDir.
+type RepoState struct {
+	IsRepo bool // dir is inside a git work tree
+	Dirty  int  // count of uncommitted (porcelain) entries; -1 = unknown
 }
 
 // RunFixes evaluates plans, optionally prompts, and executes Commands.
@@ -62,7 +79,34 @@ func RunFixes(ctx context.Context, plans []FixPlan, opts RunOptions) (applied, s
 	}
 	fmt.Fprintf(out, "\n=== %d fix plan(s) ===\n", len(plans))
 
+	// Probe each distinct target directory's git state once, then show
+	// the blast radius up front so a bulk apply can't silently rewrite
+	// lockfiles across repos the user didn't realize were in scope.
+	repoStatus := opts.RepoStatus
+	if repoStatus == nil {
+		repoStatus = gitRepoState
+	}
+	repoCache := map[string]RepoState{}
+	repoOf := func(dir string) RepoState {
+		if dir == "" {
+			return RepoState{Dirty: -1}
+		}
+		if st, ok := repoCache[dir]; ok {
+			return st
+		}
+		st := repoStatus(dir)
+		repoCache[dir] = st
+		return st
+	}
+	if !opts.PlanOnly {
+		writeBlastRadius(out, plans, repoOf)
+	}
+
 	autoApplyRest := false
+	// lastExecDir tracks the project of the previous executable plan so
+	// we print a per-repo context header only when the target changes.
+	// Sentinel \x00 guarantees the first executable plan prints one.
+	lastExecDir := "\x00"
 	noOp := 0
 	// Probe the active Python interpreter once per RunFixes call. If any
 	// pip plan hits a no-op, we'll append an EOL heads-up so the user
@@ -70,6 +114,10 @@ func RunFixes(ctx context.Context, plans []FixPlan, opts RunOptions) (applied, s
 	pythonNote := pythonEOLNote(ctx)
 
 	for i, p := range plans {
+		if p.Executable() && p.ProjectDir != lastExecDir {
+			writeRepoHeader(out, p.ProjectDir, repoOf(p.ProjectDir))
+			lastExecDir = p.ProjectDir
+		}
 		printPlan(out, i+1, len(plans), p)
 
 		if opts.PlanOnly {
@@ -92,6 +140,16 @@ func RunFixes(ctx context.Context, plans []FixPlan, opts RunOptions) (applied, s
 			case "a":
 				shouldApply = true
 			case "A":
+				// "apply all remaining" commits to executing every
+				// remaining fix unattended — potentially dozens of
+				// installs across many repos. Show the blast radius of
+				// what's left and require an explicit confirm before
+				// flipping into unattended mode.
+				if !confirmApplyAll(out, in, plans[i:], repoOf) {
+					fmt.Fprintln(out, "  apply-all cancelled — continuing one at a time")
+					skipped++
+					continue
+				}
 				shouldApply = true
 				autoApplyRest = true
 			case "q":
@@ -519,6 +577,154 @@ func parseRequiredSemver(s string) ([3]int, bool) {
 		out[i] = n
 	}
 	return out, true
+}
+
+// gitRepoState is the default RepoStatus probe. It reports whether dir
+// is inside a git work tree and how many entries are uncommitted. Fails
+// open: any git error (git absent, not a repo, detached worktree) yields
+// IsRepo=false / Dirty=-1 so we never invent false dirtiness.
+func gitRepoState(dir string) RepoState {
+	if dir == "" {
+		return RepoState{Dirty: -1}
+	}
+	check := exec.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree")
+	out, err := check.Output()
+	if err != nil || strings.TrimSpace(string(out)) != "true" {
+		return RepoState{IsRepo: false, Dirty: -1}
+	}
+	st, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	if err != nil {
+		return RepoState{IsRepo: true, Dirty: -1}
+	}
+	dirty := 0
+	for _, ln := range strings.Split(strings.TrimRight(string(st), "\n"), "\n") {
+		if strings.TrimSpace(ln) != "" {
+			dirty++
+		}
+	}
+	return RepoState{IsRepo: true, Dirty: dirty}
+}
+
+// repoStateLabel renders a RepoState as a short parenthetical for the
+// recap / headers ("clean", "3 uncommitted changes", "not a git repo").
+func repoStateLabel(st RepoState) string {
+	switch {
+	case st.IsRepo && st.Dirty > 0:
+		s := "s"
+		if st.Dirty == 1 {
+			s = ""
+		}
+		return fmt.Sprintf("%d uncommitted change%s", st.Dirty, s)
+	case st.IsRepo:
+		return "clean"
+	default:
+		return "not a git repo"
+	}
+}
+
+// writeBlastRadius prints a pre-apply summary grouping every executable
+// fix by target directory, annotated with each repo's VCS state. This is
+// the guardrail the bulk audit→fix workflow was missing: before the first
+// command runs, the user sees "47 fixes across 11 dirs, 2 with
+// uncommitted changes" instead of discovering the spread by scrollback.
+func writeBlastRadius(w io.Writer, plans []FixPlan, repoOf func(string) RepoState) {
+	counts := map[string]int{}
+	var order []string
+	total := 0
+	for _, p := range plans {
+		if !p.Executable() {
+			continue
+		}
+		total++
+		if _, ok := counts[p.ProjectDir]; !ok {
+			order = append(order, p.ProjectDir)
+		}
+		counts[p.ProjectDir]++
+	}
+	if total == 0 {
+		return
+	}
+	dirty := 0
+	for _, dir := range order {
+		if dir != "" && repoOf(dir).Dirty > 0 {
+			dirty++
+		}
+	}
+	fmt.Fprintf(w, "\n── blast radius ─────────────────────────────────────────\n")
+	fmt.Fprintf(w, "  %d executable fix(es) across %d director%s:\n", total, len(order), pluralY(len(order)))
+	for _, dir := range order {
+		if dir == "" {
+			fmt.Fprintf(w, "     • %-46s %d fix(es)\n", "(global / host packages)", counts[dir])
+			continue
+		}
+		st := repoOf(dir)
+		mark := "•"
+		switch {
+		case st.IsRepo && st.Dirty > 0:
+			mark = "⚠"
+		case st.IsRepo:
+			mark = "✔"
+		}
+		fmt.Fprintf(w, "     %s %-46s %d fix(es)  (%s)\n", mark, dir, counts[dir], repoStateLabel(st))
+	}
+	if dirty > 0 {
+		fmt.Fprintf(w, "  ⚠ %d director%s with uncommitted changes — review `git diff` there before/after applying.\n",
+			dirty, pluralY(dirty))
+	}
+	fmt.Fprintln(w)
+}
+
+// writeRepoHeader prints a one-line context banner when the apply loop
+// moves to a new project, so each prompt is clearly scoped to its repo
+// (and flags dirty trees right where the decision is made).
+func writeRepoHeader(w io.Writer, dir string, st RepoState) {
+	if dir == "" {
+		fmt.Fprintln(w, "\n▸ global / host packages")
+		return
+	}
+	fmt.Fprintf(w, "\n▸ %s  (%s)\n", dir, repoStateLabel(st))
+}
+
+// confirmApplyAll shows what "apply all remaining" entails — count of
+// executable fixes, how many directories, how many with uncommitted
+// changes — and requires an explicit y/yes before going unattended.
+func confirmApplyAll(w io.Writer, r *bufio.Reader, remaining []FixPlan, repoOf func(string) RepoState) bool {
+	n := 0
+	seen := map[string]bool{}
+	dirs := 0
+	dirty := 0
+	for _, p := range remaining {
+		if !p.Executable() {
+			continue
+		}
+		n++
+		if !seen[p.ProjectDir] {
+			seen[p.ProjectDir] = true
+			dirs++
+			if p.ProjectDir != "" && repoOf(p.ProjectDir).Dirty > 0 {
+				dirty++
+			}
+		}
+	}
+	fmt.Fprintf(w, "\n  ⚠ apply-all will run %d executable fix(es) across %d director%s",
+		n, dirs, pluralY(dirs))
+	if dirty > 0 {
+		fmt.Fprintf(w, " (%d with uncommitted changes)", dirty)
+	}
+	fmt.Fprintln(w, ".")
+	fmt.Fprint(w, "    type 'y' to run them all, anything else to keep deciding one at a time > ")
+	line, _ := r.ReadString('\n')
+	line = strings.ToLower(strings.TrimSpace(line))
+	return line == "y" || line == "yes"
+}
+
+// pluralY returns the English plural suffix for "directory"/"directories"
+// style words — "y" for 1, "ies" for N.
+func pluralY(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }
 
 func severityRank(s Severity) int {

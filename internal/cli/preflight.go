@@ -59,17 +59,175 @@ func preflightFilterSatisfied(plans []findings.FixPlan) ([]findings.FixPlan, int
 	return kept, skipped, notes
 }
 
-// emitPreflightNotes prints the preflight skip diagnostics to stderr.
-// Empty notes → no-op; we don't want to print a header when nothing
-// was filtered.
+// emitPreflightNotes prints the "already-satisfied" skip diagnostics to
+// stderr. Empty notes → no-op; we don't want a header when nothing was
+// filtered.
 func emitPreflightNotes(w io.Writer, notes []string, skipped int) {
 	if skipped == 0 {
 		return
 	}
-	fmt.Fprintf(w, "[chdora] preflight skipped %d already-satisfied fix(es):\n", skipped)
+	emitSkipNotes(w, fmt.Sprintf("[chdora] preflight skipped %d already-satisfied fix(es):", skipped), notes)
+}
+
+// emitUnwritableNotes prints the "can't / shouldn't write here" skip
+// diagnostics from preflightFilterUnwritable.
+func emitUnwritableNotes(w io.Writer, notes []string) {
+	if len(notes) == 0 {
+		return
+	}
+	emitSkipNotes(w, fmt.Sprintf("[chdora] preflight skipped %d fix(es) in unwritable / vendored trees:", len(notes)), notes)
+}
+
+func emitSkipNotes(w io.Writer, header string, notes []string) {
+	if len(notes) == 0 {
+		return
+	}
+	fmt.Fprintln(w, header)
 	for _, n := range notes {
 		fmt.Fprintln(w, n)
 	}
+}
+
+// vendoredSegments are path components that mark an installed/vendored
+// dependency tree rather than a source project the user maintains. A
+// lockfile found *inside* one of these is a nested copy shipped with an
+// already-installed package (e.g. node_modules/foo/yarn.lock) — running
+// the package manager against it is meaningless and usually fails on
+// permissions. Detection-side scanning surfaces these (they can still
+// carry real CVEs), but the fixer must not try to execute upgrades there.
+var vendoredSegments = map[string]bool{
+	"node_modules":     true,
+	".venv":            true,
+	"venv":             true,
+	"site-packages":    true,
+	"bower_components": true,
+}
+
+// vendoredSubstrings catch caches and container volume mounts that don't
+// decompose into a single tidy path segment.
+var vendoredSubstrings = []string{
+	"/docker/volumes/", // Docker named-volume contents (OrbStack / Colima / Docker Desktop)
+	"/var/lib/docker/", // Linux Docker storage driver
+	"/.cargo/registry/",
+	"/pkg/mod/",     // Go module cache
+	"/.pnpm-store/", // pnpm content-addressable store
+}
+
+// isVendoredTree reports whether dir lives inside an installed/vendored
+// dependency tree (and a short human-readable reason). Path matching uses
+// filepath.ToSlash so Windows separators are handled — never raw
+// filepath.Match (see CLAUDE.md conventions).
+func isVendoredTree(dir string) (string, bool) {
+	slash := filepath.ToSlash(dir)
+	for _, seg := range strings.Split(slash, "/") {
+		if vendoredSegments[seg] {
+			return "lockfile lives inside a vendored tree (" + seg + ")", true
+		}
+	}
+	for _, sub := range vendoredSubstrings {
+		if strings.Contains(slash, sub) {
+			return "lockfile lives inside an installed/container tree (" + strings.Trim(sub, "/") + ")", true
+		}
+	}
+	return "", false
+}
+
+// dirExists reports whether p is an existing directory.
+func dirExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
+}
+
+// dirWritable reports whether the current user can create files in dir —
+// the operation npm / pnpm / yarn must perform to rewrite node_modules.
+// It probes by creating and removing a temp file: the only portable,
+// accurate test, since mode bits alone lie under sudo and on Windows.
+// When dir has a node_modules/ the probe targets that, because that's the
+// directory whose container-owned files produce the EACCES failures. A
+// missing target returns true — the package manager would create it, and
+// we'd rather attempt the fix than wrongly skip it.
+func dirWritable(dir string) bool {
+	if dir == "" {
+		return true
+	}
+	target := dir
+	if nm := filepath.Join(dir, "node_modules"); dirExists(nm) {
+		target = nm
+	}
+	f, err := os.CreateTemp(target, ".chdora-wcheck-*")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true
+		}
+		return false
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return true
+}
+
+// planLabel picks the most useful short identifier for a skip note.
+func planLabel(p findings.FixPlan) string {
+	switch {
+	case p.PackageName != "":
+		return p.PackageName
+	case p.VulnID != "":
+		return p.VulnID
+	default:
+		return "fix"
+	}
+}
+
+// preflightFilterUnwritable drops executable plans whose target tree
+// can't or shouldn't be modified in place: a vendored/installed lockfile
+// (node_modules, .venv, Docker volume, package cache) or a directory the
+// current user can't write to (typically container-owned files under a
+// Docker bind mount). These are exactly the EACCES / pointless-install
+// failures the user otherwise only discovers mid-run, one painful command
+// at a time. Manual plans and plans without a ProjectDir pass through
+// untouched.
+//
+// Returns (kept plans, dropped-fingerprint set, human-readable notes).
+// The fingerprint set lets the saved-plan apply path record these as
+// "skipped" rather than mislabeling them "applied".
+func preflightFilterUnwritable(plans []findings.FixPlan) ([]findings.FixPlan, map[string]bool, []string) {
+	return preflightFilterUnwritableWith(plans, dirWritable)
+}
+
+// preflightFilterUnwritableWith is the injectable core — tests pass a
+// stub writability probe so the filter is deterministic and
+// cross-platform (real fs permission tricks differ per OS / euid).
+func preflightFilterUnwritableWith(plans []findings.FixPlan, writable func(string) bool) ([]findings.FixPlan, map[string]bool, []string) {
+	kept := make([]findings.FixPlan, 0, len(plans))
+	dropped := map[string]bool{}
+	var notes []string
+	wcache := map[string]bool{}
+	for _, p := range plans {
+		if !p.Executable() || p.ProjectDir == "" {
+			kept = append(kept, p)
+			continue
+		}
+		if reason, vendored := isVendoredTree(p.ProjectDir); vendored {
+			dropped[p.FindingFingerprint] = true
+			notes = append(notes, fmt.Sprintf("  skipped %s @ %s (%s — patch the source project or rebuild the image)",
+				planLabel(p), p.ProjectDir, reason))
+			continue
+		}
+		w, ok := wcache[p.ProjectDir]
+		if !ok {
+			w = writable(p.ProjectDir)
+			wcache[p.ProjectDir] = w
+		}
+		if !w {
+			dropped[p.FindingFingerprint] = true
+			notes = append(notes, fmt.Sprintf("  skipped %s @ %s (not writable — likely owned by another user / a Docker volume; patch the source or rebuild the image)",
+				planLabel(p), p.ProjectDir))
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return kept, dropped, notes
 }
 
 func installedVersionCached(cache map[string]map[string]string, projectDir, pkgName string) (string, bool) {

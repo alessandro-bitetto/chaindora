@@ -223,7 +223,9 @@ func applyStoredPlan(ctx context.Context, store *fixplan.DiskStore, plan fixplan
 	emitPriorApplyBanner(os.Stderr, plan)
 	filtered, skipped, notes := preflightFilterSatisfied(plan.Plans)
 	emitPreflightNotes(os.Stderr, notes, skipped)
-	_, _, err := findings.RunFixes(ctx, filtered, findings.RunOptions{
+	runnable, unwritable, uwNotes := preflightFilterUnwritable(filtered)
+	emitUnwritableNotes(os.Stderr, uwNotes)
+	_, _, err := findings.RunFixes(ctx, runnable, findings.RunOptions{
 		PlanOnly:          opts.DryRun,
 		AutoYes:           opts.AutoYes,
 		AllowedCategories: allowed,
@@ -256,6 +258,10 @@ func applyStoredPlan(ctx context.Context, store *fixplan.DiskStore, plan fixplan
 		switch {
 		case satisfiedFP[fp.FindingFingerprint]:
 			status = "already-satisfied"
+		case unwritable[fp.FindingFingerprint]:
+			// Dropped by the writability/vendored preflight — it was
+			// never run, so it's "skipped", not "applied".
+			status = "skipped"
 		case contains(allowed, fp.Category):
 			status = "applied"
 		}

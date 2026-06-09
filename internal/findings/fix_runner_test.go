@@ -120,6 +120,79 @@ func TestRunFixesDedupesByCommand(t *testing.T) {
 	}
 }
 
+// TestRunFixes_BlastRadiusRecap verifies the pre-apply summary groups
+// fixes by directory and flags repos with uncommitted changes, using an
+// injected RepoStatus so the test needs no real git tree.
+func TestRunFixes_BlastRadiusRecap(t *testing.T) {
+	plans := []FixPlan{
+		{Description: "fix dirty", Category: FixSafe, Command: "true # a", Severity: SeverityHigh, VulnID: "X-1",
+			ProjectDir: "/repo/dirty", PackageName: "a", RequiredVersion: "1.0.0"},
+		{Description: "fix clean", Category: FixSafe, Command: "true # b", Severity: SeverityHigh, VulnID: "X-2",
+			ProjectDir: "/repo/clean", PackageName: "b", RequiredVersion: "1.0.0"},
+	}
+	stub := func(dir string) RepoState {
+		if dir == "/repo/dirty" {
+			return RepoState{IsRepo: true, Dirty: 3}
+		}
+		return RepoState{IsRepo: true, Dirty: 0}
+	}
+	var out bytes.Buffer
+	applied, _, err := RunFixes(context.Background(), plans, RunOptions{
+		AutoYes:           true,
+		AllowedCategories: []FixCategory{FixSafe},
+		Output:            &out,
+		RepoStatus:        stub,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied != 2 {
+		t.Fatalf("expected 2 applied, got %d", applied)
+	}
+	s := out.String()
+	for _, want := range []string{"blast radius", "uncommitted change", "git diff"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("recap missing %q in:\n%s", want, s)
+		}
+	}
+}
+
+// TestRunFixes_ApplyAllRequiresConfirm covers the safety gate on the
+// capital-A "apply all remaining" path: it must show a recap and only go
+// unattended on an explicit y/yes.
+func TestRunFixes_ApplyAllRequiresConfirm(t *testing.T) {
+	mk := func() []FixPlan {
+		return []FixPlan{
+			{Description: "Plan 1", Category: FixSafe, Command: "true # p1", Severity: SeverityHigh, VulnID: "X-1"},
+			{Description: "Plan 2", Category: FixSafe, Command: "true # p2", Severity: SeverityHigh, VulnID: "X-2"},
+		}
+	}
+	// 'A' then 'y' → both apply unattended.
+	var out bytes.Buffer
+	applied, _, _ := RunFixes(context.Background(), mk(), RunOptions{
+		Stdin:  strings.NewReader("A\ny\n"),
+		Output: &out,
+	})
+	if applied != 2 {
+		t.Errorf("A then 'y' should apply all (2), got %d", applied)
+	}
+	if !strings.Contains(out.String(), "apply-all will run") {
+		t.Errorf("missing apply-all recap in:\n%s", out.String())
+	}
+	// 'A' then 'n' → cancelled; fall back to one-at-a-time, then skip.
+	var out2 bytes.Buffer
+	applied2, _, _ := RunFixes(context.Background(), mk(), RunOptions{
+		Stdin:  strings.NewReader("A\nn\ns\n"),
+		Output: &out2,
+	})
+	if applied2 != 0 {
+		t.Errorf("A then 'n' should cancel apply-all (0 applied), got %d", applied2)
+	}
+	if !strings.Contains(out2.String(), "apply-all cancelled") {
+		t.Errorf("missing cancel message in:\n%s", out2.String())
+	}
+}
+
 func TestSeverityRank(t *testing.T) {
 	cases := []struct {
 		a, b Severity
