@@ -42,7 +42,11 @@ export class HomeComponent implements OnInit {
     '$tag = (Invoke-RestMethod https://api.github.com/repos/alessandro-bitetto/chaindora/releases/latest).tag_name\n' +
     "$ver = $tag.TrimStart('v')\n" +
     'Invoke-WebRequest "https://github.com/alessandro-bitetto/chaindora/releases/download/$tag/chaindora_${ver}_windows_x86_64.zip" -OutFile chdora.zip\n' +
-    'Expand-Archive chdora.zip -DestinationPath $HOME\\.chaindora\\bin -Force';
+    'Expand-Archive chdora.zip -DestinationPath $HOME\\.chaindora\\bin -Force\n' +
+    '# add chdora to your PATH (User scope) — open a new terminal afterwards\n' +
+    '$bin = "$HOME\\.chaindora\\bin"\n' +
+    "$old = [Environment]::GetEnvironmentVariable('Path','User')\n" +
+    'if ($old -notlike "*$bin*") { [Environment]::SetEnvironmentVariable(\'Path\', "$old;$bin", \'User\') }';
 
   constructor(private readonly http: HttpClient) {}
 

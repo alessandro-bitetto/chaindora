@@ -214,6 +214,12 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
           <button type="button" class="copy-btn" (click)="copy(cbWin.innerText, $event)" aria-label="Copy command">Copy</button>
         </div>
         <p class="muted small">
+          <strong>Add to PATH.</strong> The Windows snippet appends <code>~\.chaindora\bin</code> to your user PATH — open a
+          new terminal for it to take effect. On macOS / Linux, <code>/usr/local/bin</code> (the default target) is already
+          on PATH; for a no-sudo install, drop <code>chdora</code> in <code>~/.local/bin</code> and add
+          <code>export PATH="$HOME/.local/bin:$PATH"</code> to your shell rc (<code>~/.bashrc</code> or <code>~/.zshrc</code>).
+        </p>
+        <p class="muted small">
           Any platform with Go: <code>go install github.com/alessandro-bitetto/chaindora/cmd/chdora&#64;latest</code>
         </p>
       </div>
