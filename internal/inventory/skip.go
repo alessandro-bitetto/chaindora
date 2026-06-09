@@ -1,6 +1,9 @@
 package inventory
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // ShouldSkipDir reports whether a directory at the given absolute path,
 // with the given basename, should be skipped during any scan walk.
@@ -16,14 +19,32 @@ import "path/filepath"
 // whose parent is pkg" reliably matches Go's GOMODCACHE convention
 // without over-matching legitimate directories named "mod" elsewhere.
 func ShouldSkipDir(path, name string) bool {
+	// Renamed / extracted dependency trees. Container volumes and some
+	// tooling mount node_modules under a non-literal basename
+	// (mvp_be_node_modules, fe_node_modules, ...); the bytes are still a
+	// third-party install the user can't edit in place. Matching the
+	// "node_modules" suffix catches both the literal dir and the renamed
+	// variants that the basename list below would miss — which is exactly
+	// how a Docker volume's vendored modules slipped into an audit walk.
+	if strings.HasSuffix(name, "node_modules") {
+		return true
+	}
 	switch name {
 	case
 		// Package-manager / build-output trees holding third-party
 		// code copies the user can't edit in place.
-		"node_modules", ".venv", "venv", "__pycache__",
+		".venv", "venv", "__pycache__",
 		"vendor", "target", "dist", "build", ".next",
 		".gradle", ".cache", ".npm", ".yarn", ".pnpm-store",
 		".terraform", ".m2", ".gem", ".rustup", ".cargo", ".go",
+		// Container / VM product data: OrbStack, Colima, Docker. These
+		// hold the disk images and named volumes of containers the user
+		// runs — third-party install trees that aren't remediated in
+		// place (you rebuild the image or fix the source repo, not the
+		// runtime volume sitting on the laptop). Same scoping rationale
+		// as node_modules / Library: real risk, but it belongs to the
+		// image, surfaced when its source repo is scanned — not here.
+		"OrbStack", ".orbstack", ".colima", ".docker", "DockerDesktop",
 		// Version control.
 		".git",
 		// OS-level user-data dirs whose contents are managed by the
@@ -51,6 +72,12 @@ func ShouldSkipDir(path, name string) bool {
 		// addressed. Findings inside aren't actionable because the
 		// user resolves them via go.mod, not by editing the cache.
 		return filepath.Base(filepath.Dir(path)) == "pkg"
+	}
+	// Linux Docker storage driver root (basename varies: overlay2,
+	// volumes, containers, image, ...), matched by path so we don't
+	// over-skip a source dir that merely happens to be named "volumes".
+	if strings.Contains(filepath.ToSlash(path), "/var/lib/docker/") {
+		return true
 	}
 	return false
 }
