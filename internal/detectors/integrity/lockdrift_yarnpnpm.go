@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
@@ -23,11 +24,19 @@ import (
 // cross-check. Future work.
 
 func (d *Detector) checkYarnLockfileVsDisk(ctx context.Context, lockPath string) []findings.Finding {
-	return checkJSPkgVersionDriftFromLockfile(lockPath, "yarn.lock", parseYarnLockNames)
+	// Yarn classic has no per-version install store to confirm against,
+	// so version drift can't be graded (nil install record → medium).
+	return checkJSPkgVersionDriftFromLockfile(lockPath, "yarn.lock", parseYarnLockNames, nil)
 }
 
 func (d *Detector) checkPnpmLockfileVsDisk(ctx context.Context, lockPath string) []findings.Finding {
-	return checkJSPkgVersionDriftFromLockfile(lockPath, "pnpm-lock.yaml", parsePnpmLockNames)
+	// pnpm's node_modules/.pnpm/<name>@<version>/ virtual store is its
+	// authoritative record of what it installed — the pnpm analog of
+	// npm's .package-lock.json mirror. Pass it so version drift can be
+	// graded: a disk version the store knows about is staleness; one it
+	// doesn't is a copy pnpm never placed (possible tamper).
+	nodeModules := filepath.Join(filepath.Dir(lockPath), "node_modules")
+	return checkJSPkgVersionDriftFromLockfile(lockPath, "pnpm-lock.yaml", parsePnpmLockNames, pnpmStoreVersions(nodeModules))
 }
 
 // checkJSPkgVersionDriftFromLockfile is the shared shape: take a
@@ -46,7 +55,10 @@ func (d *Detector) checkPnpmLockfileVsDisk(ctx context.Context, lockPath string)
 // top-level `node_modules/<name>/` (the hoisted one); the others
 // live nested or under .pnpm/. As long as the hoisted version
 // matches SOMETHING the lockfile pins, there's no drift.
-func checkJSPkgVersionDriftFromLockfile(lockPath, kind string, parseFn func(string) []nameVersion) []findings.Finding {
+// installRecord maps package name → the set of versions a package
+// manager's own install store actually placed on disk (pnpm's .pnpm/
+// store). nil when the ecosystem has no such record (yarn classic).
+func checkJSPkgVersionDriftFromLockfile(lockPath, kind string, parseFn func(string) []nameVersion, installRecord map[string]map[string]struct{}) []findings.Finding {
 	projectDir := filepath.Dir(lockPath)
 	nodeModules := filepath.Join(projectDir, "node_modules")
 	if _, err := os.Stat(nodeModules); err != nil {
@@ -89,28 +101,40 @@ func checkJSPkgVersionDriftFromLockfile(lockPath, kind string, parseFn func(stri
 		}
 		// Version drift: on-disk version isn't in the lockfile's pinned
 		// set for this name (and it's not just the hoisted copy with the
-		// rest nested). For yarn/pnpm we have no installed-bytes hash to
-		// compare, so this can't distinguish a byte-swap from the far
-		// more common "node_modules is out of sync with the lockfile"
-		// (e.g. `pnpm update` rewrote the lockfile without reinstalling).
-		// It's therefore a STALENESS signal at medium severity — the
-		// identity-tamper case (a swapped directory) surfaces separately
-		// through the name-drift check below, which stays critical.
+		// rest nested). Grade by confidence using the install record:
+		//   - record knows this disk version (or no record available) →
+		//     the install is self-consistent and only the lockfile is out
+		//     of sync → MEDIUM staleness (the common `pnpm update`-without-
+		//     reinstall churn).
+		//   - record exists for this name but does NOT contain the disk
+		//     version → the copy on disk was never placed by the package
+		//     manager → CRITICAL (possible tamper).
+		// The identity-swap case is independently caught by name-drift.
 		if disk.Version != "" {
 			if _, matches := versions[disk.Version]; !matches {
 				pinnedList := versionSetToString(versions)
+				sev := findings.SeverityMedium
+				summary := fmt.Sprintf(
+					"%s pins %s at %s but node_modules/%s/package.json reports version %q — installed tree is out of sync with the lockfile; reinstall to reconcile (if you didn't change the lockfile, investigate)",
+					kind, name, pinnedList, name, disk.Version)
+				if rec, known := installRecord[name]; known {
+					if _, placed := rec[disk.Version]; !placed {
+						sev = findings.SeverityCritical
+						summary = fmt.Sprintf(
+							"%s pins %s at %s but node_modules/%s/package.json reports version %q, which matches no version in pnpm's own node_modules/.pnpm store — the installed copy was not placed by pnpm (possible tamper)",
+							kind, name, pinnedList, name, disk.Version)
+					}
+				}
 				out = append(out, findings.Finding{
-					Detector:  "integrity:lockfile-vs-disk-version",
-					Category:  findings.CategoryHostForensics,
-					Ecosystem: inventory.EcosystemNPM,
-					Name:      name,
-					Version:   pinnedList,
-					PURL:      inventory.PURL(inventory.EcosystemNPM, name, pinnedList),
-					VulnID:    "INTEGRITY-DRIFT-VERSION",
-					Summary: fmt.Sprintf(
-						"%s pins %s at %s but node_modules/%s/package.json reports version %q — installed tree is out of sync with the lockfile; reinstall to reconcile (if you didn't change the lockfile, investigate)",
-						kind, name, pinnedList, name, disk.Version),
-					Severity:   findings.SeverityMedium,
+					Detector:   "integrity:lockfile-vs-disk-version",
+					Category:   findings.CategoryHostForensics,
+					Ecosystem:  inventory.EcosystemNPM,
+					Name:       name,
+					Version:    pinnedList,
+					PURL:       inventory.PURL(inventory.EcosystemNPM, name, pinnedList),
+					VulnID:     "INTEGRITY-DRIFT-VERSION",
+					Summary:    summary,
+					Severity:   sev,
 					SourcePath: lockPath,
 				})
 			}
@@ -176,6 +200,62 @@ func joinStrings(s []string, sep string) string {
 		out += sep + v
 	}
 	return out
+}
+
+// pnpmStoreVersions reads node_modules/.pnpm and returns name → set of
+// installed versions. pnpm names its virtual-store directories
+// `<name>@<version>` (`@scope+name@<version>` for scoped packages), with
+// an optional peer-deps suffix (`_<hash>` in pnpm v6, `(<peers>)` in
+// v7+). This is pnpm's authoritative record of what it placed on disk —
+// the analog of npm's node_modules/.package-lock.json. Returns nil when
+// there's no .pnpm store (e.g. node_modules wasn't pnpm-installed), in
+// which case version drift is left at medium (we can't confirm tamper).
+func pnpmStoreVersions(nodeModules string) map[string]map[string]struct{} {
+	ents, err := os.ReadDir(filepath.Join(nodeModules, ".pnpm"))
+	if err != nil {
+		return nil
+	}
+	out := map[string]map[string]struct{}{}
+	for _, e := range ents {
+		// .pnpm contains a node_modules/ dir and a lock.yaml file
+		// alongside the per-package dirs — skip anything that isn't a
+		// <name>@<version> directory.
+		if !e.IsDir() || e.Name() == "node_modules" {
+			continue
+		}
+		name, version := parsePnpmStoreDir(e.Name())
+		if name == "" || version == "" {
+			continue
+		}
+		if out[name] == nil {
+			out[name] = map[string]struct{}{}
+		}
+		out[name][version] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// parsePnpmStoreDir extracts (name, version) from a .pnpm store directory
+// name: "lodash@4.17.21", "@babel+core@7.28.0", "react@18.2.0_react@…"
+// (v6 peer suffix), "react@18.2.0(react@…)" (v7+ peer suffix).
+func parsePnpmStoreDir(d string) (name, version string) {
+	// Strip the peer-deps suffix so it doesn't pollute the version.
+	if i := strings.IndexAny(d, "(_"); i >= 0 {
+		d = d[:i]
+	}
+	at := strings.LastIndex(d, "@")
+	if at <= 0 {
+		return "", ""
+	}
+	name, version = d[:at], d[at+1:]
+	if strings.HasPrefix(name, "@") {
+		// Scoped: pnpm encodes the "/" separator as "+".
+		name = strings.Replace(name, "+", "/", 1)
+	}
+	return name, version
 }
 
 // nameVersion is a tiny tuple used by the parser callbacks. aliasOf

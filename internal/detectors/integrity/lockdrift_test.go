@@ -417,6 +417,71 @@ func TestLockDrift_NpmVersionDriftNoMirrorIsCritical(t *testing.T) {
 	}
 }
 
+func TestParsePnpmStoreDir(t *testing.T) {
+	cases := []struct{ dir, name, version string }{
+		{"lodash@4.17.21", "lodash", "4.17.21"},
+		{"@babel+core@7.28.0", "@babel/core", "7.28.0"},
+		{"react-dom@18.2.0_react@18.2.0", "react-dom", "18.2.0"},  // v6 peer suffix
+		{"react-dom@18.2.0(react@18.2.0)", "react-dom", "18.2.0"}, // v7+ peer suffix
+		{"@scope+pkg@1.0.0(peer@2.0.0)", "@scope/pkg", "1.0.0"},
+		{"node_modules", "", ""}, // not a package dir
+	}
+	for _, c := range cases {
+		n, v := parsePnpmStoreDir(c.dir)
+		if n != c.name || v != c.version {
+			t.Errorf("parsePnpmStoreDir(%q) = (%q,%q), want (%q,%q)", c.dir, n, v, c.name, c.version)
+		}
+	}
+}
+
+// TestLockDrift_PnpmDriftStaleIsMedium — pnpm's .pnpm store contains the
+// on-disk version (4.17.20); the lockfile was bumped to 4.17.21 without a
+// reinstall. The install is self-consistent → staleness, MEDIUM.
+func TestLockDrift_PnpmDriftStaleIsMedium(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "pnpm-lock.yaml"), `lockfileVersion: '9.0'
+packages:
+  lodash@4.17.21:
+    resolution: {integrity: sha512-AAA}
+`)
+	mustWrite(t, filepath.Join(dir, "node_modules", "lodash", "package.json"), `{"name":"lodash","version":"4.17.20"}`)
+	// pnpm's own store recorded 4.17.20 — matches disk.
+	mustWrite(t, filepath.Join(dir, "node_modules", ".pnpm", "lodash@4.17.20", "node_modules", "lodash", "package.json"), `{"name":"lodash","version":"4.17.20"}`)
+
+	out, _ := New([]string{dir}).Detect(context.Background())
+	f, ok := findingByDetector(out, "integrity:lockfile-vs-disk-version")
+	if !ok {
+		t.Fatalf("expected version-drift finding, got: %+v", out)
+	}
+	if f.Severity != findings.SeverityMedium {
+		t.Errorf("store-confirmed stale drift should be medium, got %s", f.Severity)
+	}
+}
+
+// TestLockDrift_PnpmDriftUnplacedIsCritical — the on-disk copy (4.17.20)
+// matches no version in pnpm's store (which only has 4.17.21): pnpm never
+// placed these bytes → possible tamper, CRITICAL.
+func TestLockDrift_PnpmDriftUnplacedIsCritical(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "pnpm-lock.yaml"), `lockfileVersion: '9.0'
+packages:
+  lodash@4.17.21:
+    resolution: {integrity: sha512-AAA}
+`)
+	mustWrite(t, filepath.Join(dir, "node_modules", "lodash", "package.json"), `{"name":"lodash","version":"4.17.20"}`)
+	// Store only knows 4.17.21 — the on-disk 4.17.20 was never placed by pnpm.
+	mustWrite(t, filepath.Join(dir, "node_modules", ".pnpm", "lodash@4.17.21", "node_modules", "lodash", "package.json"), `{"name":"lodash","version":"4.17.21"}`)
+
+	out, _ := New([]string{dir}).Detect(context.Background())
+	f, ok := findingByDetector(out, "integrity:lockfile-vs-disk-version")
+	if !ok {
+		t.Fatalf("expected version-drift finding, got: %+v", out)
+	}
+	if f.Severity != findings.SeverityCritical {
+		t.Errorf("store-contradicted drift should be critical, got %s", f.Severity)
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
