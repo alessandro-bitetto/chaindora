@@ -86,6 +86,64 @@ __metadata:
 	}
 }
 
+// TestParseYarnLockAlias verifies the npm-alias target is captured into
+// AliasOf for both lockfile formats, while plain deps leave it empty.
+// This is what lets the integrity name-drift check tell a legitimate
+// alias (string-width-cjs → string-width) apart from a directory swap.
+func TestParseYarnLockAlias(t *testing.T) {
+	v1 := `# yarn lockfile v1
+
+string-width-cjs@npm:string-width@^4.2.0:
+  version "4.2.3"
+  resolved "https://registry.yarnpkg.com/string-width/-/string-width-4.2.3.tgz"
+
+lodash@^4.17.21:
+  version "4.17.21"
+`
+	berry := `__metadata:
+  version: 6
+
+"string-width-cjs@npm:string-width@^4.2.0":
+  version: 4.2.3
+  resolution: "string-width@npm:4.2.3"
+
+"lodash@npm:^4.17.21":
+  version: 4.17.21
+  resolution: "lodash@npm:4.17.21"
+`
+	for _, tc := range []struct{ name, content string }{{"v1", v1}, {"berry", berry}} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			path := filepath.Join(tmp, "yarn.lock")
+			if err := os.WriteFile(path, []byte(tc.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			pkgs, err := parseYarnLock(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var alias, plain *Package
+			for i := range pkgs {
+				switch pkgs[i].Name {
+				case "string-width-cjs":
+					alias = &pkgs[i]
+				case "lodash":
+					plain = &pkgs[i]
+				}
+			}
+			if alias == nil {
+				t.Fatalf("missing aliased entry string-width-cjs in %+v", pkgs)
+			}
+			if alias.AliasOf != "string-width" {
+				t.Errorf("AliasOf = %q, want %q", alias.AliasOf, "string-width")
+			}
+			if plain == nil || plain.AliasOf != "" {
+				t.Errorf("plain dep must have empty AliasOf, got %+v", plain)
+			}
+		})
+	}
+}
+
 func TestParseYarnV1Keys(t *testing.T) {
 	cases := []struct {
 		in   string

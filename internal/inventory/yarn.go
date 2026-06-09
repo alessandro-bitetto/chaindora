@@ -67,6 +67,7 @@ func parseYarnV1(text, source string) []Package {
 				PURL:       PURL(EcosystemNPM, name, currentVer),
 				SourcePath: source,
 				Integrity:  currentInt,
+				AliasOf:    yarnAliasTarget(k),
 			})
 		}
 	}
@@ -99,10 +100,11 @@ func parseYarnV1(text, source string) []Package {
 }
 
 // parseYarnV1Keys handles top-level entry lines like:
-//   lodash@^4.17.20
-//   lodash@^4.17.20, lodash@^4.17.21
-//   "@babel/code-frame@^7.0.0"
-//   "@scope/a@^1.0.0", "@scope/a@^1.2.0"
+//
+//	lodash@^4.17.20
+//	lodash@^4.17.20, lodash@^4.17.21
+//	"@babel/code-frame@^7.0.0"
+//	"@scope/a@^1.0.0", "@scope/a@^1.2.0"
 func parseYarnV1Keys(line string) []string {
 	var keys []string
 	var current strings.Builder
@@ -150,7 +152,9 @@ func yarnNameFromV1Spec(spec string) string {
 }
 
 // parseYarnBerry decodes a Yarn v2+ (Berry) lockfile. Keys look like
-//   "@babel/code-frame@npm:^7.0.0"
+//
+//	"@babel/code-frame@npm:^7.0.0"
+//
 // and multiple aliases get comma-joined into a single YAML key string.
 func parseYarnBerry(text, source string) ([]Package, error) {
 	var raw map[string]struct {
@@ -183,15 +187,49 @@ func parseYarnBerry(text, source string) ([]Package, error) {
 				PURL:       PURL(EcosystemNPM, name, entry.Version),
 				SourcePath: source,
 				Integrity:  entry.Checksum,
+				AliasOf:    yarnAliasTarget(spec),
 			})
 		}
 	}
 	return out, nil
 }
 
+// yarnAliasTarget returns the real package name an aliased yarn descriptor
+// resolves to, or "" for a plain (non-aliased) one. Yarn encodes an alias
+// as `<alias>@npm:<realname>@<range>` (both v1 and Berry); a plain
+// dependency is `<name>@^x.y.z` (v1) or `<name>@npm:<range>` (Berry),
+// where the text after `@npm:` is a bare version range, not a name@range.
+// The presence of a package-name@ structure after `@npm:` is the alias
+// signal — a version range never contains an embedded name.
+func yarnAliasTarget(spec string) string {
+	i := strings.Index(spec, "@npm:")
+	if i <= 0 {
+		return ""
+	}
+	return npmDescriptorName(spec[i+len("@npm:"):])
+}
+
+// npmDescriptorName returns the package name at the front of a descriptor
+// like "string-width@^4.2.0" or "@babel/core@^7.0.0", or "" when the
+// input is a bare version range ("^4.17.20") — i.e. there's no name@range
+// structure, which is the non-aliased case.
+func npmDescriptorName(s string) string {
+	if strings.HasPrefix(s, "@") { // scoped: @scope/pkg@range
+		if i := strings.Index(s[1:], "@"); i >= 0 {
+			return s[:i+1]
+		}
+		return ""
+	}
+	if i := strings.Index(s, "@"); i > 0 {
+		return s[:i]
+	}
+	return ""
+}
+
 // yarnNameFromBerrySpec parses Berry locator strings such as
-//   lodash@npm:^4.17.20
-//   "@babel/code-frame@npm:^7.0.0"
+//
+//	lodash@npm:^4.17.20
+//	"@babel/code-frame@npm:^7.0.0"
 func yarnNameFromBerrySpec(spec string) string {
 	if i := strings.Index(spec, "@npm:"); i > 0 {
 		return spec[:i]

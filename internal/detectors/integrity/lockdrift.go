@@ -28,7 +28,10 @@ import (
 //  1. **Version drift** — `package-lock.json` pins `lodash@4.17.21`,
 //     `node_modules/lodash/package.json` reports `4.17.20`. Either
 //     the install never completed or someone swapped the directory.
-//     Severity: CRITICAL.
+//     Graded by confidence: if npm's own `.package-lock.json` mirror
+//     reports the same on-disk version, the install is internally
+//     consistent and only the project lockfile is stale → MEDIUM;
+//     otherwise (no mirror, or mirror disagrees) → CRITICAL.
 //
 //  2. **Name drift** — `node_modules/lodash/package.json` reports
 //     `name: "evil-lodash"`. Directory was replaced wholesale.
@@ -60,6 +63,14 @@ func (d *Detector) checkNPMLockfileVsDisk(ctx context.Context, lockPath string) 
 	}
 	var lock struct {
 		Packages map[string]struct {
+			// Name is npm's own declaration of which package resolves at
+			// this path. It's present (and differs from the directory
+			// name) for aliased installs — `"string-width-cjs":
+			// {"name":"string-width"}` — and for git/file deps. Plain
+			// registry installs omit it (the name is implied by the
+			// path). This is the attacker-uncontrolled ground truth for
+			// the name-drift check below.
+			Name      string `json:"name"`
 			Version   string `json:"version"`
 			Integrity string `json:"integrity"`
 		} `json:"packages"`
@@ -71,8 +82,13 @@ func (d *Detector) checkNPMLockfileVsDisk(ctx context.Context, lockPath string) 
 		return nil
 	}
 
-	// Read the mirror lockfile if present; used by check #3.
-	mirrorIntegrity := map[string]string{} // name@version → integrity
+	// Read the mirror lockfile if present. node_modules/.package-lock.json
+	// is npm's authoritative record of what it actually installed at each
+	// path. Used by check #3 (integrity) and to grade version drift:
+	// mirror version == disk version at the same path means the install is
+	// internally consistent and only the project lockfile is stale.
+	mirrorIntegrity := map[string]string{}    // name@version → integrity
+	mirrorVersionByKey := map[string]string{} // install path key → installed version
 	if data, err := os.ReadFile(filepath.Join(nodeModules, ".package-lock.json")); err == nil {
 		var mirror struct {
 			Packages map[string]struct {
@@ -82,6 +98,9 @@ func (d *Detector) checkNPMLockfileVsDisk(ctx context.Context, lockPath string) 
 		}
 		if json.Unmarshal(data, &mirror) == nil {
 			for k, v := range mirror.Packages {
+				if v.Version != "" {
+					mirrorVersionByKey[k] = v.Version
+				}
 				if v.Integrity == "" || v.Version == "" {
 					continue
 				}
@@ -132,22 +151,54 @@ func (d *Detector) checkNPMLockfileVsDisk(ctx context.Context, lockPath string) 
 				// top level, keep the full path when nested.
 				displayPath := filepath.ToSlash(key)
 				if disk.Version != "" && disk.Version != entry.Version {
+					// Confidence split: if npm's own install record
+					// (.package-lock.json) reports the same version that's
+					// on disk, the install is internally consistent and
+					// only the *project* lockfile is out of sync — that's
+					// staleness (someone edited package-lock.json or pulled
+					// a branch), not tamper. Reserve critical for the case
+					// where the on-disk bytes match neither the project
+					// lockfile nor npm's own record (or there's no record
+					// to confirm against).
+					sev := findings.SeverityCritical
+					summary := fmt.Sprintf(
+						"package-lock.json pins %s@%s at %s but %s/package.json reports version %q — installed bytes do not match the lockfile",
+						name, entry.Version, displayPath, displayPath, disk.Version)
+					if mv, ok := mirrorVersionByKey[key]; ok && mv == disk.Version {
+						sev = findings.SeverityMedium
+						summary = fmt.Sprintf(
+							"package-lock.json pins %s@%s at %s but the installed copy is %q and npm's own node_modules/.package-lock.json agrees — stale project lockfile; run `npm ci` to reconcile",
+							name, entry.Version, displayPath, disk.Version)
+					}
 					out = append(out, findings.Finding{
-						Detector:  "integrity:lockfile-vs-disk-version",
-						Category:  findings.CategoryHostForensics,
-						Ecosystem: inventory.EcosystemNPM,
-						Name:      name,
-						Version:   entry.Version,
-						PURL:      inventory.PURL(inventory.EcosystemNPM, name, entry.Version),
-						VulnID:    "INTEGRITY-DRIFT-VERSION",
-						Summary: fmt.Sprintf(
-							"package-lock.json pins %s@%s at %s but %s/package.json reports version %q — installed bytes do not match the lockfile",
-							name, entry.Version, displayPath, displayPath, disk.Version),
-						Severity:   findings.SeverityCritical,
+						Detector:   "integrity:lockfile-vs-disk-version",
+						Category:   findings.CategoryHostForensics,
+						Ecosystem:  inventory.EcosystemNPM,
+						Name:       name,
+						Version:    entry.Version,
+						PURL:       inventory.PURL(inventory.EcosystemNPM, name, entry.Version),
+						VulnID:     "INTEGRITY-DRIFT-VERSION",
+						Summary:    summary,
+						Severity:   sev,
 						SourcePath: lockPath,
 					})
 				}
-				if disk.Name != "" && disk.Name != name {
+				// Expected on-disk name = npm's declared resolution for
+				// this path (entry.Name) when present, else the name
+				// derived from the install path. An aliased install
+				// legitimately has dir-name ≠ real-name, but the lockfile
+				// declares the real target on the entry — so comparing
+				// disk against THAT removes the alias false positive while
+				// still catching a genuine swap: a planted package.json
+				// whose name doesn't match the declared target trips it,
+				// and matching the declared target means the right package
+				// identity is installed (content tamper, if any, is the
+				// integrity-hash check's job, not this one).
+				expectedName := name
+				if entry.Name != "" {
+					expectedName = entry.Name
+				}
+				if disk.Name != "" && disk.Name != expectedName {
 					out = append(out, findings.Finding{
 						Detector:  "integrity:lockfile-vs-disk-name",
 						Category:  findings.CategoryHostForensics,
@@ -157,8 +208,8 @@ func (d *Detector) checkNPMLockfileVsDisk(ctx context.Context, lockPath string) 
 						PURL:      inventory.PURL(inventory.EcosystemNPM, name, entry.Version),
 						VulnID:    "INTEGRITY-DRIFT-NAME",
 						Summary: fmt.Sprintf(
-							"lockfile records %s@%s at %s but %s/package.json identifies as %q — directory replaced or symlinked to a different package",
-							name, entry.Version, displayPath, displayPath, disk.Name),
+							"lockfile records %s@%s at %s but %s/package.json identifies as %q (expected %q) — directory replaced or symlinked to a different package",
+							name, entry.Version, displayPath, displayPath, disk.Name, expectedName),
 						Severity:   findings.SeverityCritical,
 						SourcePath: lockPath,
 					})

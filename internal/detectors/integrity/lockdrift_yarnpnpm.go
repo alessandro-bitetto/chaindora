@@ -58,13 +58,20 @@ func checkJSPkgVersionDriftFromLockfile(lockPath, kind string, parseFn func(stri
 	}
 	// Group by name → set of pinned versions. yarn/pnpm both
 	// happily ship the same name at multiple versions when
-	// transitives demand it.
+	// transitives demand it. aliasTarget records npm-alias
+	// resolutions (yarn: `string-width-cjs@npm:string-width@…`) so the
+	// name check compares against the declared target, not the install
+	// directory name.
 	pinned := map[string]map[string]struct{}{}
+	aliasTarget := map[string]string{}
 	for _, e := range entries {
 		if pinned[e.name] == nil {
 			pinned[e.name] = map[string]struct{}{}
 		}
 		pinned[e.name][e.version] = struct{}{}
+		if e.aliasOf != "" {
+			aliasTarget[e.name] = e.aliasOf
+		}
 	}
 	var out []findings.Finding
 	for name, versions := range pinned {
@@ -80,9 +87,15 @@ func checkJSPkgVersionDriftFromLockfile(lockPath, kind string, parseFn func(stri
 		if err := json.Unmarshal(data, &disk); err != nil {
 			continue
 		}
-		// Drift only if on-disk version doesn't match ANY pinned
-		// version for this name. Otherwise the on-disk copy is
-		// just the hoisted one and the rest live nested.
+		// Version drift: on-disk version isn't in the lockfile's pinned
+		// set for this name (and it's not just the hoisted copy with the
+		// rest nested). For yarn/pnpm we have no installed-bytes hash to
+		// compare, so this can't distinguish a byte-swap from the far
+		// more common "node_modules is out of sync with the lockfile"
+		// (e.g. `pnpm update` rewrote the lockfile without reinstalling).
+		// It's therefore a STALENESS signal at medium severity — the
+		// identity-tamper case (a swapped directory) surfaces separately
+		// through the name-drift check below, which stays critical.
 		if disk.Version != "" {
 			if _, matches := versions[disk.Version]; !matches {
 				pinnedList := versionSetToString(versions)
@@ -95,14 +108,22 @@ func checkJSPkgVersionDriftFromLockfile(lockPath, kind string, parseFn func(stri
 					PURL:      inventory.PURL(inventory.EcosystemNPM, name, pinnedList),
 					VulnID:    "INTEGRITY-DRIFT-VERSION",
 					Summary: fmt.Sprintf(
-						"%s pins %s at %s but node_modules/%s/package.json reports version %q — installed bytes do not match any pinned version",
+						"%s pins %s at %s but node_modules/%s/package.json reports version %q — installed tree is out of sync with the lockfile; reinstall to reconcile (if you didn't change the lockfile, investigate)",
 						kind, name, pinnedList, name, disk.Version),
-					Severity:   findings.SeverityCritical,
+					Severity:   findings.SeverityMedium,
 					SourcePath: lockPath,
 				})
 			}
 		}
-		if disk.Name != "" && disk.Name != name {
+		// Name drift: compare the on-disk package name against the
+		// declared alias target when this entry is an alias, else the
+		// directory name. A legitimate alias (disk name == target) is
+		// silent; a genuine swap (disk name ≠ target/dir) still fires.
+		expectedName := name
+		if t := aliasTarget[name]; t != "" {
+			expectedName = t
+		}
+		if disk.Name != "" && disk.Name != expectedName {
 			out = append(out, findings.Finding{
 				Detector:  "integrity:lockfile-vs-disk-name",
 				Category:  findings.CategoryHostForensics,
@@ -112,8 +133,8 @@ func checkJSPkgVersionDriftFromLockfile(lockPath, kind string, parseFn func(stri
 				PURL:      inventory.PURL(inventory.EcosystemNPM, name, "any"),
 				VulnID:    "INTEGRITY-DRIFT-NAME",
 				Summary: fmt.Sprintf(
-					"%s records %s but node_modules/%s/package.json identifies as %q — directory replaced or symlinked",
-					kind, name, name, disk.Name),
+					"%s records %s but node_modules/%s/package.json identifies as %q (expected %q) — directory replaced or symlinked",
+					kind, name, name, disk.Name, expectedName),
 				Severity:   findings.SeverityCritical,
 				SourcePath: lockPath,
 			})
@@ -157,10 +178,14 @@ func joinStrings(s []string, sep string) string {
 	return out
 }
 
-// nameVersion is a tiny tuple used by the parser callbacks.
+// nameVersion is a tiny tuple used by the parser callbacks. aliasOf
+// carries the real package name when the entry is an npm alias (yarn),
+// so the name-drift check compares the on-disk name against the declared
+// target rather than the install-directory name.
 type nameVersion struct {
 	name    string
 	version string
+	aliasOf string
 }
 
 // parseYarnLockNames extracts (name, version) pairs from a yarn.lock
@@ -174,7 +199,7 @@ func parseYarnLockNames(path string) []nameVersion {
 	}
 	out := make([]nameVersion, 0, len(pkgs))
 	for _, p := range pkgs {
-		out = append(out, nameVersion{name: p.Name, version: p.Version})
+		out = append(out, nameVersion{name: p.Name, version: p.Version, aliasOf: p.AliasOf})
 	}
 	return out
 }
@@ -186,7 +211,9 @@ func parsePnpmLockNames(path string) []nameVersion {
 	}
 	out := make([]nameVersion, 0, len(pkgs))
 	for _, p := range pkgs {
-		out = append(out, nameVersion{name: p.Name, version: p.Version})
+		// pnpm keys its packages: map on the real name, so AliasOf is
+		// always empty here — included for symmetry with the yarn path.
+		out = append(out, nameVersion{name: p.Name, version: p.Version, aliasOf: p.AliasOf})
 	}
 	return out
 }

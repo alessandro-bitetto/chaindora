@@ -100,6 +100,17 @@ type Package struct {
 	// before with a DIFFERENT Integrity is a maintainer-account-takeover
 	// signal. Empty when the ecosystem's lockfile doesn't expose it.
 	Integrity string `json:"integrity,omitempty"`
+	// AliasOf is the real package name an install alias resolves to.
+	// Yarn records aliases as `string-width-cjs@npm:string-width@^4.2.0`:
+	// the directory installs under the alias name (string-width-cjs) but
+	// the package's own metadata reports the real name (string-width).
+	// Empty for plain installs. The integrity name-drift check compares
+	// the on-disk package.json name against this declared target instead
+	// of the directory name, so legitimate aliases don't read as a swap.
+	// (npm records the same fact on its lockfile entry's own `name`
+	// field; pnpm keys its packages: map on the real name — neither needs
+	// this carried through inventory.)
+	AliasOf string `json:"alias_of,omitempty"`
 }
 
 // Source identifies a manifest file that was successfully parsed.
