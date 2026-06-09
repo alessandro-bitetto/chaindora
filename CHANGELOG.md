@@ -13,6 +13,83 @@ v0.17 — AI/ML supply chain (HuggingFace pickle scanner, PyTorch /
 TF / Keras model file scanner, MCP server / agent-framework
 auditor).
 
+## [0.16.2] — 2026-06-09
+
+Calibration and fix-apply safety, driven by a real `chdora audit` /
+`chdora fix` run across a full `$HOME`. Two themes: stop the bulk
+fixer from rewriting unrelated repositories unattended, and stop the
+detectors from crying CRITICAL on things that aren't attacks. Every
+noise reduction here is verified against an attacker-uncontrolled
+signal — a lockfile-declared alias target, a package manager's own
+install record — never a name allowlist, and each is paired with a
+test proving the genuine-attack variant still fires.
+
+### Added
+
+- **`audit --git-only` (and `forensics --scan-projects --git-only`)** —
+  a focus mode that restricts project discovery to roots inside a git
+  work tree (the repos you maintain), skipping downloaded / extracted /
+  non-versioned trees. Deliberately **not** the default: a security
+  audit should still see those, since that's where supply-chain
+  compromises hide. Logs what it dropped — focus, never silent
+  blindness.
+- **Pre-apply blast-radius recap.** `--fix` now prints, before running
+  anything, a summary grouping executable fixes by directory with each
+  repo's git state (clean / N uncommitted / not a repo), a per-repo
+  header as the apply loop crosses projects, and an explicit confirm
+  gate on the capital-`A` "apply all remaining" so a single keystroke
+  can't rewrite lockfiles across many repositories unattended.
+
+### Changed
+
+- **Version-drift severity is graded by confidence instead of always
+  CRITICAL.** An on-disk `node_modules` version that differs from the
+  lockfile is staleness, not tamper, when the package manager's own
+  install record agrees with it: npm's `node_modules/.package-lock.json`
+  mirror, or pnpm's `node_modules/.pnpm/<name>@<version>/` virtual
+  store. Record confirms the on-disk version → MEDIUM ("stale install,
+  run `npm ci`"); contradicts it (bytes the manager never placed), or
+  no record exists → CRITICAL. Yarn classic has no such store and stays
+  MEDIUM; identity tamper is still caught at CRITICAL by the name-drift
+  check.
+- **Project discovery skips container/VM product data and renamed
+  module trees.** `~/OrbStack`, `.orbstack`, `.colima`, `.docker`,
+  `/var/lib/docker/`, and any basename ending in `node_modules`
+  (e.g. a Docker volume's `mvp_be_node_modules`) are no longer walked —
+  same scoping rationale as the existing `node_modules` / `Library`
+  skips: third-party install bytes you remediate at the image/source,
+  not on the laptop. Removes the bulk of an audit's noise at the source.
+
+### Fixed
+
+- **Aliased dependencies no longer false-positive as a directory swap.**
+  The lockfile-vs-disk NAME check compared the on-disk `package.json`
+  name against the install-directory name, firing CRITICAL on every npm
+  alias (`string-width-cjs` → `string-width`, shipped transitively by
+  `@isaacs/cliui`, eslint, …). It now compares against the resolution
+  target the lockfile itself declares — npm's per-entry `name` field, or
+  yarn's `@npm:<target>` (v1 and Berry) threaded through
+  `inventory.Package.AliasOf`. A swapped directory whose name doesn't
+  match the declared target still fires.
+- **pnpm store-dir parsing mishandled underscores in package names.**
+  Validated against ~2000 real `.pnpm` store directories: the first cut
+  misparsed `string_decoder@1.3.0` and `@types/babel__core@7.20.5`
+  (DefinitelyTyped `__` convention) into empty strings, silently
+  dropping those packages from the install record. Now anchors on the
+  name/version `@` and strips the peer-deps suffix only from the version
+  segment.
+- **Fix-apply preflight predicts unwritable / vendored targets.** A fix
+  whose target is a vendored tree (`node_modules`, `.venv`, Docker
+  volume, package cache) or a directory the current user can't write to
+  (container-owned files) is now skipped up front with a clear reason,
+  instead of failing mid-run with EACCES one command at a time. Dropped
+  fixes record as `skipped`, not mislabeled `applied`.
+- **website:** the Windows install snippet now adds `~\.chaindora\bin`
+  to the user PATH (it previously extracted there but left it off PATH,
+  so `chdora` wasn't runnable after a copy-paste install), plus a
+  no-sudo PATH note for Linux/macOS; install commands also gained
+  corner-pinned ecosystem badges and copy buttons.
+
 ## [0.16.0] — 2026-05-19
 
 Predictive-detector parity push: nine new per-ecosystem
