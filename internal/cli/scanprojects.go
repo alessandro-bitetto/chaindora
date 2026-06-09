@@ -132,34 +132,34 @@ func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]find
 // Directories named .github/workflows etc. are handled separately so we don't
 // trip every file inside them.
 var projectMarkers = map[string]bool{
-	"package.json":            true,
-	"package-lock.json":       true,
-	"yarn.lock":               true,
-	"pnpm-lock.yaml":          true,
-	"requirements.txt":        true,
-	"pyproject.toml":          true,
-	"Pipfile":                 true,
-	"Pipfile.lock":            true,
-	"poetry.lock":             true,
-	"uv.lock":                 true,
-	"Dockerfile":              true,
-	"dockerfile":              true,
-	"docker-compose.yml":      true,
-	"docker-compose.yaml":     true,
-	"compose.yml":             true,
-	"compose.yaml":            true,
-	"Cargo.toml":              true,
-	"go.mod":                  true,
-	"Gemfile":                 true,
-	"pom.xml":                 true,
-	"build.gradle":            true,
-	"build.gradle.kts":        true,
-	".gitlab-ci.yml":          true,
-	".gitlab-ci.yaml":         true,
-	"bitbucket-pipelines.yml": true,
+	"package.json":             true,
+	"package-lock.json":        true,
+	"yarn.lock":                true,
+	"pnpm-lock.yaml":           true,
+	"requirements.txt":         true,
+	"pyproject.toml":           true,
+	"Pipfile":                  true,
+	"Pipfile.lock":             true,
+	"poetry.lock":              true,
+	"uv.lock":                  true,
+	"Dockerfile":               true,
+	"dockerfile":               true,
+	"docker-compose.yml":       true,
+	"docker-compose.yaml":      true,
+	"compose.yml":              true,
+	"compose.yaml":             true,
+	"Cargo.toml":               true,
+	"go.mod":                   true,
+	"Gemfile":                  true,
+	"pom.xml":                  true,
+	"build.gradle":             true,
+	"build.gradle.kts":         true,
+	".gitlab-ci.yml":           true,
+	".gitlab-ci.yaml":          true,
+	"bitbucket-pipelines.yml":  true,
 	"bitbucket-pipelines.yaml": true,
-	"azure-pipelines.yml":     true,
-	"azure-pipelines.yaml":    true,
+	"azure-pipelines.yml":      true,
+	"azure-pipelines.yaml":     true,
 }
 
 // defaultScanProjectsSkipDirs is the built-in list of directory names that
@@ -223,7 +223,15 @@ func mergeExcludeMap(userExcludes []string) map[string]bool {
 // directories. If a discovered directory is a sub-directory of another that's
 // also discovered, only the ancestor is kept (one inventory.Scan() against
 // the ancestor will subsume the nested manifests).
-func discoverProjects(root string, skip map[string]bool) []string {
+//
+// gitOnly (opt-in via `audit --git-only`) keeps only roots that live inside
+// a git work tree. This is a deliberately narrow focus mode — "just the
+// repos I maintain" — NOT the default: a security audit should still see
+// downloaded tarballs, extracted archives, and other non-version-controlled
+// trees, since that's exactly where supply-chain compromises hide. The
+// noise those add is handled by severity calibration + the vendored/
+// container skip list, not by going blind to them.
+func discoverProjects(root string, skip map[string]bool, gitOnly bool) []string {
 	found := map[string]struct{}{}
 	prog := progress.New(os.Stderr)
 	prog.Start(fmt.Sprintf("discovering projects under %s", root))
@@ -278,7 +286,41 @@ func discoverProjects(root string, skip map[string]bool) []string {
 		roots = append(roots, r)
 	}
 	sort.Strings(roots)
-	return collapseNestedRoots(roots)
+	collapsed := collapseNestedRoots(roots)
+	if !gitOnly {
+		return collapsed
+	}
+	kept := make([]string, 0, len(collapsed))
+	for _, r := range collapsed {
+		if withinGitRepo(r, root) {
+			kept = append(kept, r)
+		}
+	}
+	if dropped := len(collapsed) - len(kept); dropped > 0 {
+		fmt.Fprintf(os.Stderr, "[chdora] --git-only: kept %d of %d discovered root(s) (%d not under version control)\n",
+			len(kept), len(collapsed), dropped)
+	}
+	return kept
+}
+
+// withinGitRepo reports whether dir is inside a git work tree, searching
+// dir and each ancestor up to (and including) scanRoot for a `.git` entry.
+// Bounded at scanRoot so we never probe outside the requested walk.
+func withinGitRepo(dir, scanRoot string) bool {
+	d := dir
+	for {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return true
+		}
+		if d == scanRoot {
+			return false
+		}
+		parent := filepath.Dir(d)
+		if parent == d { // reached the filesystem root
+			return false
+		}
+		d = parent
+	}
 }
 
 // collapseNestedRoots drops any directory that is a descendant of another

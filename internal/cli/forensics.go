@@ -25,6 +25,7 @@ var (
 	forensicsSkipHunt     bool
 	forensicsIncidentsDir string
 	forensicsScanProjects string
+	forensicsGitOnly      bool
 	forensicsSkipOSV      bool
 	forensicsSkipHeur     bool
 	forensicsVerbose      bool
@@ -40,17 +41,17 @@ var (
 	forensicsAggressive   bool
 	forensicsSavePlan     bool
 	// v0.11 trust-anchor drift
-	forensicsSkipTrustDrift          bool
+	forensicsSkipTrustDrift           bool
 	forensicsTrustDriftUpdateBaseline bool
 	// v0.13.1 integrity verification
-	forensicsSkipIntegrity bool
-	forensicsSkipRegistry bool
+	forensicsSkipIntegrity     bool
+	forensicsSkipRegistry      bool
 	forensicsExcludeCVEs       bool
 	forensicsExcludeSupply     bool
 	forensicsExcludeConfig     bool
 	forensicsExcludeHost       bool
 	forensicsExcludePredictive bool
-	forensicsOffline       bool
+	forensicsOffline           bool
 )
 
 var forensicsCmd = &cobra.Command{
@@ -170,7 +171,7 @@ func runForensicsFlow(ctx context.Context) error {
 			if forensicsVerbose {
 				fmt.Fprintf(os.Stderr, "discovering projects under %s\n", projRoot)
 			}
-			roots := discoverProjects(projRoot, mergeExcludeMap(forensicsExcludes))
+			roots := discoverProjects(projRoot, mergeExcludeMap(forensicsExcludes), forensicsGitOnly)
 			fmt.Fprintf(os.Stderr, "found %d project root(s) under %s\n", len(roots), projRoot)
 			opts := projectScanOpts{
 				IncidentsDir:  forensicsIncidentsDir,
@@ -351,6 +352,8 @@ func init() {
 	forensicsCmd.Flags().BoolVar(&forensicsSkipHunt, "skip-hunt", false, "skip the incident-pack file_artifact hunt")
 	forensicsCmd.Flags().StringVar(&forensicsScanProjects, "scan-projects", "",
 		"also walk this directory for project manifests (package.json, requirements.txt, Dockerfile, etc.) and run a full scan on each project root found")
+	forensicsCmd.Flags().BoolVar(&forensicsGitOnly, "git-only", false,
+		"restrict --scan-projects discovery to roots inside a git work tree (focus on repos you maintain; skips downloaded / extracted / non-versioned trees)")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipOSV, "skip-osv", false, "skip OSV.dev queries during --scan-projects")
 	forensicsCmd.Flags().BoolVar(&forensicsSkipHeur, "skip-heuristic", false, "skip behavioral heuristics during --scan-projects")
 	forensicsCmd.Flags().BoolVar(&forensicsVerbose, "verbose", false, "log per-project scanned + per-host check counts to stderr")

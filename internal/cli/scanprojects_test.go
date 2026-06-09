@@ -31,7 +31,7 @@ func TestDiscoverProjects(t *testing.T) {
 	// .github/workflows folder marks parent as a project too
 	mkfile("proj-d/.github/workflows/ci.yml")
 
-	got := discoverProjects(root, nil)
+	got := discoverProjects(root, nil, false)
 	sort.Strings(got)
 
 	want := []string{
@@ -44,6 +44,53 @@ func TestDiscoverProjects(t *testing.T) {
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("\n got: %v\nwant: %v", got, want)
+	}
+}
+
+// TestDiscoverProjectsGitOnly — the opt-in focus mode keeps only roots
+// inside a git work tree (the repo itself, or a project nested under one),
+// and drops non-versioned trees like a downloaded/extracted package.
+func TestDiscoverProjectsGitOnly(t *testing.T) {
+	root := t.TempDir()
+	mkfile := func(rel string) {
+		full := filepath.Join(root, rel)
+		_ = os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mkfile("repo/.git/HEAD")
+	mkfile("repo/package.json")
+	// A downloaded, non-versioned package.
+	mkfile("downloaded-pkg/package.json")
+
+	all := discoverProjects(root, nil, false)
+	gitOnly := discoverProjects(root, nil, true)
+	sort.Strings(gitOnly)
+
+	if len(all) <= len(gitOnly) {
+		t.Fatalf("git-only should drop the non-versioned root; all=%v gitOnly=%v", all, gitOnly)
+	}
+	want := []string{filepath.Join(root, "repo")}
+	if !reflect.DeepEqual(gitOnly, want) {
+		t.Errorf("\n got: %v\nwant: %v", gitOnly, want)
+	}
+}
+
+func TestWithinGitRepo(t *testing.T) {
+	root := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(root, "repo", ".git"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, "repo", "nested", "deep"), 0o755)
+	_ = os.MkdirAll(filepath.Join(root, "loose"), 0o755)
+
+	if !withinGitRepo(filepath.Join(root, "repo"), root) {
+		t.Error("repo with its own .git should be within a git repo")
+	}
+	if !withinGitRepo(filepath.Join(root, "repo", "nested", "deep"), root) {
+		t.Error("dir nested under a .git ancestor should be within a git repo")
+	}
+	if withinGitRepo(filepath.Join(root, "loose"), root) {
+		t.Error("dir with no .git ancestor (bounded at scanRoot) should not be within a git repo")
 	}
 }
 

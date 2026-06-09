@@ -15,32 +15,33 @@ import (
 // remember five flags.
 
 var (
-	auditRoots        []string
-	auditWholeMachine bool
-	auditFormat       string
-	auditIncidentsDir string
-	auditExcludes     []string
-	auditSkipDeep     bool
-	auditSkipPersist  bool
-	auditSkipExt      bool
-	auditSkipSSH      bool
-	auditSkipOSV      bool
-	auditSkipHeur     bool
-	auditSkipHunt     bool
-	auditVerbose      bool
-	auditFixPlan      bool
-	auditFix          bool
-	auditYes          bool
-	auditAggressive   bool
-	auditSavePlan     bool
-	auditSSHBaseline  string
-	auditSkipRegistry bool
+	auditRoots             []string
+	auditWholeMachine      bool
+	auditFormat            string
+	auditIncidentsDir      string
+	auditExcludes          []string
+	auditSkipDeep          bool
+	auditSkipPersist       bool
+	auditSkipExt           bool
+	auditSkipSSH           bool
+	auditSkipOSV           bool
+	auditSkipHeur          bool
+	auditSkipHunt          bool
+	auditVerbose           bool
+	auditFixPlan           bool
+	auditFix               bool
+	auditYes               bool
+	auditAggressive        bool
+	auditSavePlan          bool
+	auditSSHBaseline       string
+	auditSkipRegistry      bool
+	auditGitOnly           bool
 	auditExcludeCVEs       bool
 	auditExcludeSupply     bool
 	auditExcludeConfig     bool
 	auditExcludeHost       bool
 	auditExcludePredictive bool
-	auditOffline       bool
+	auditOffline           bool
 )
 
 // wholeMachineExcludes adds curated directory-basename skips on top of the
@@ -123,6 +124,7 @@ Each detector can be individually disabled with its --skip-X flag.`,
 		forensicsSkipHeur = auditSkipHeur
 		forensicsSkipHunt = auditSkipHunt
 		forensicsSkipRegistry = auditSkipRegistry
+		forensicsGitOnly = auditGitOnly
 		forensicsExcludeCVEs = auditExcludeCVEs
 		forensicsExcludeSupply = auditExcludeSupply
 		forensicsExcludeConfig = auditExcludeConfig
@@ -221,6 +223,8 @@ func init() {
 		"do not run behavioural heuristics on discovered projects")
 	auditCmd.Flags().BoolVar(&auditSkipRegistry, "skip-registry", false,
 		"do not query npm/PyPI for evidence (offline mode; dep-confusion / typosquat / install-script heuristics become silent)")
+	auditCmd.Flags().BoolVar(&auditGitOnly, "git-only", false,
+		"focus mode: only scan project roots inside a git work tree (repos you maintain). NOT the default — a full audit still sees downloaded / extracted / non-versioned trees, where supply-chain compromises often hide.")
 	auditCmd.Flags().BoolVar(&auditExcludeCVEs, "exclude-cves", false,
 		"hide the dependency-CVE section (commodity OSV CVE matches)")
 	auditCmd.Flags().BoolVar(&auditExcludeSupply, "exclude-supply-chain", false,

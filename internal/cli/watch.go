@@ -249,7 +249,7 @@ func watchRunAudit(ctx context.Context) ([]findings.Finding, error) {
 // abort the whole pass — we'd rather report SOME findings than
 // none.
 func watchScanProjects(ctx context.Context, root string) ([]findings.Finding, error) {
-	roots := discoverProjects(root, mergeExcludeMap(nil))
+	roots := discoverProjects(root, mergeExcludeMap(nil), false)
 	npm, pypi := buildRegistryProbes(false)
 	opts := projectScanOpts{
 		SkipOSV:       watchSkipOSV,
