@@ -424,6 +424,11 @@ func TestParsePnpmStoreDir(t *testing.T) {
 		{"react-dom@18.2.0_react@18.2.0", "react-dom", "18.2.0"},  // v6 peer suffix
 		{"react-dom@18.2.0(react@18.2.0)", "react-dom", "18.2.0"}, // v7+ peer suffix
 		{"@scope+pkg@1.0.0(peer@2.0.0)", "@scope/pkg", "1.0.0"},
+		// Real-world cases the first cut got wrong (found by validating
+		// the parser against ~2000 store dirs on disk):
+		{"string_decoder@1.3.0", "string_decoder", "1.3.0"},                                // underscore in name
+		{"@types+babel__core@7.20.5", "@types/babel__core", "7.20.5"},                      // DefinitelyTyped __ convention
+		{"@angular-devkit+core@19.2.23_chokidar@4.0.3", "@angular-devkit/core", "19.2.23"}, // scoped name + peer suffix
 		{"node_modules", "", ""}, // not a package dir
 	}
 	for _, c := range cases {

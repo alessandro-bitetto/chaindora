@@ -239,20 +239,43 @@ func pnpmStoreVersions(nodeModules string) map[string]map[string]struct{} {
 }
 
 // parsePnpmStoreDir extracts (name, version) from a .pnpm store directory
-// name: "lodash@4.17.21", "@babel+core@7.28.0", "react@18.2.0_react@…"
-// (v6 peer suffix), "react@18.2.0(react@…)" (v7+ peer suffix).
+// name: "lodash@4.17.21", "@babel+core@7.28.0",
+// "react-dom@18.2.0_react@18.2.0" (v6 peer suffix),
+// "react-dom@18.2.0(react@18.2.0)" (v7+ peer suffix),
+// "string_decoder@1.3.0" (underscore in name),
+// "@types+babel__core@7.20.5" (DefinitelyTyped __ convention).
+//
+// The anchor is the @ that separates name from version: the first @ for
+// an unscoped name (names never start with or contain a bare @), the
+// second for a scoped @scope+name. We must NOT split on _ or ( first —
+// those are legal in package names — but the version segment contains
+// neither, so the peer suffix is whatever follows the first _ or ( AFTER
+// the version.
 func parsePnpmStoreDir(d string) (name, version string) {
-	// Strip the peer-deps suffix so it doesn't pollute the version.
-	if i := strings.IndexAny(d, "(_"); i >= 0 {
-		d = d[:i]
+	var at int
+	if strings.HasPrefix(d, "@") {
+		rel := strings.Index(d[1:], "@")
+		if rel < 0 {
+			return "", ""
+		}
+		at = rel + 1
+	} else {
+		at = strings.Index(d, "@")
+		if at <= 0 {
+			return "", ""
+		}
 	}
-	at := strings.LastIndex(d, "@")
-	if at <= 0 {
+	name = d[:at]
+	rest := d[at+1:] // version + optional peer suffix
+	if i := strings.IndexAny(rest, "_("); i >= 0 {
+		rest = rest[:i]
+	}
+	version = rest
+	if version == "" {
 		return "", ""
 	}
-	name, version = d[:at], d[at+1:]
 	if strings.HasPrefix(name, "@") {
-		// Scoped: pnpm encodes the "/" separator as "+".
+		// Scoped: pnpm encodes the "/" scope separator as "+".
 		name = strings.Replace(name, "+", "/", 1)
 	}
 	return name, version
