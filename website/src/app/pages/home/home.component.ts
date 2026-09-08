@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { version as packageVersion } from '../../../../package.json';
 
 interface RoadmapItem {
   title: string;
@@ -24,8 +25,11 @@ interface RoadmapPhase {
 export class HomeComponent implements OnInit {
   // Fallback shown before the API responds (and if the request fails).
   // Replaced at runtime with the real latest release so the page never
-  // shows a stale version after a release is cut.
-  version = '0.16.0';
+  // shows a stale version after a release is cut. The fallback itself is
+  // stamped at build time from website/package.json, which the release
+  // flow sets from the tag (scripts/website-version.sh) — never edit a
+  // version literal here.
+  version: string = packageVersion;
 
   // Install snippets live in the component (not inline in the template) so
   // their shell ${...} / %{...} braces aren't parsed by Angular's control-flow

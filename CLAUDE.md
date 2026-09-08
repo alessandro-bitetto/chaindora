@@ -200,11 +200,18 @@ Useful smoke tests during development:
 1. Update `CHANGELOG.md`: move `[Unreleased]` items into a new
    `[X.Y.Z] — YYYY-MM-DD` section. Keep `[Unreleased]` as a placeholder
    above it.
-2. `git commit -m "vX.Y.Z: <short subject>"`
-3. `git tag -a vX.Y.Z -m "vX.Y.Z — <short subject>"`
-4. `git push origin main && git push origin vX.Y.Z`
-5. `.github/workflows/release.yml` triggers on the tag push; goreleaser
-   builds cross-platform archives + SHA-256 checksums + a GitHub Release.
+2. `scripts/website-version.sh set vX.Y.Z` — stamps `website/package.json`
+   (+ `package-lock.json`). The website's fallback version is imported
+   from `package.json` at build time, so this is the only place it lives;
+   never hand-edit a version literal in `home.component.ts`.
+3. `git commit -m "vX.Y.Z: <short subject>"`
+4. `git tag -a vX.Y.Z -m "vX.Y.Z — <short subject>"`
+5. `git push origin main && git push origin vX.Y.Z`
+6. `.github/workflows/release.yml` triggers on the tag push. It first runs
+   `scripts/website-version.sh check` and fails the release if the website
+   version disagrees with the tag (fix: stamp, commit, delete the
+   unpublished tag, re-tag). Then goreleaser builds cross-platform
+   archives + SHA-256 checksums + a GitHub Release.
 
 One commit per tag is the convention — `git log --oneline` is the
 design history.
@@ -284,6 +291,8 @@ internal/
                                 HTTP probes with disk cache
   progress/                     stderr status-line for slow walks
 incidents/                      curated incident YAMLs (community-maintained)
+scripts/                        release helpers (website-version.sh: set/check
+                                the website version against the tag)
 testdata/                       fixtures for parser tests + integration demos
 docs/                           contributor docs
 website/                        chaindora.dev — Angular 18 static site (v0.13.2+)

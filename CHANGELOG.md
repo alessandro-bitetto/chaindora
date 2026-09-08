@@ -13,6 +13,18 @@ v0.17 — AI/ML supply chain (HuggingFace pickle scanner, PyTorch /
 TF / Keras model file scanner, MCP server / agent-framework
 auditor).
 
+### Changed — website version follows the release tag
+
+- **website:** the fallback version shown before the GitHub releases
+  API answers is no longer a literal in `home.component.ts`; it is
+  imported at build time from `website/package.json`. New
+  `scripts/website-version.sh set vX.Y.Z` stamps `package.json` +
+  `package-lock.json` as step 2 of the release flow, and
+  `release.yml` runs `scripts/website-version.sh check` before
+  goreleaser, failing the release if the website version drifted from
+  the tag. Both files were three hand-edits behind (0.16.0 / 0.16.1
+  vs the 0.16.2 tag); they now read 0.16.2.
+
 ## [0.16.2] — 2026-06-09
 
 Calibration and fix-apply safety, driven by a real `chdora audit` /

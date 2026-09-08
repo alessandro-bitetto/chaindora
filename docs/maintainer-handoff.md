@@ -36,14 +36,24 @@ The release is fully automated once a tag is pushed.
 # 1. Update CHANGELOG.md: move [Unreleased] items to [X.Y.Z] — YYYY-MM-DD.
 $EDITOR CHANGELOG.md
 
-# 2. Commit + tag + push.
+# 2. Stamp the website version from the tag (website/package.json + lockfile).
+#    The site imports it at build time; nothing else needs a hand edit.
+scripts/website-version.sh set vX.Y.Z
+
+# 3. Commit + tag + push.
 git commit -am "vX.Y.Z: <short subject>"
 git tag -a vX.Y.Z -m "vX.Y.Z — <short subject>"
 git push origin main && git push origin vX.Y.Z
 
-# 3. .github/workflows/release.yml triggers on the tag and runs goreleaser.
-#    Watch at: https://github.com/alessandro-bitetto/chaindora/actions
+# 4. .github/workflows/release.yml triggers on the tag: it verifies the
+#    website version matches the tag (fails the release otherwise), then
+#    runs goreleaser. Watch at: https://github.com/alessandro-bitetto/chaindora/actions
 ```
+
+If step 4 fails on the version check, the tag exists but nothing was
+published: run step 2, commit, `git tag -d vX.Y.Z && git push origin
+:refs/tags/vX.Y.Z`, then re-tag the new commit. Only unpublished tags
+may be moved.
 
 What goreleaser produces:
 

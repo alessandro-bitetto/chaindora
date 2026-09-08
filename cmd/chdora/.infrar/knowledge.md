@@ -39,7 +39,8 @@ category: app
 | `internal/fixplan/` | `DiskStore` at `~/.chaindora/fix-plans/` (atomic write, sudo chown-back) |
 | `internal/osv/`, `internal/registries/`, `internal/incidents/`, `internal/progress/` | OSV client + CVSS/semver, registry probes with disk cache, incident YAML loader, stderr progress line |
 | `incidents/*.yaml` | Curated incident pack shipped in release archives |
-| `.github/workflows/test.yml`, `release.yml` | 3-OS test matrix + dogfood self-scan; goreleaser on `v*` tags |
+| `.github/workflows/test.yml`, `release.yml` | 3-OS test matrix + dogfood self-scan; on `v*` tags `release.yml` first runs `scripts/website-version.sh check` (fails the release if `website/package.json` disagrees with the tag), then goreleaser |
+| `scripts/website-version.sh` | Release helper: `set vX.Y.Z` stamps the website's `package.json` + lockfile from the tag; `check vX.Y.Z` verifies them |
 
 ## Surface
 
@@ -71,4 +72,4 @@ category: app
 - `findings.Fingerprint` is exported and used by the osvioc and incident fix planners; renaming it breaks both.
 - The fleet server speaks plain HTTP (no TLS); intended to sit behind a TLS-terminating proxy with `--enrollment-secret` set. Open enrollment when the secret is empty.
 - Dogfood CI runs `chdora ci . --exclude testdata --exclude website --fail-on critical,high`; `testdata/` holds intentionally malicious fixtures.
-- Release flow: CHANGELOG section, one commit per tag `vX.Y.Z`, tag push triggers goreleaser. Latest tag at time of writing is 0.16.2 (`CHANGELOG.md`). Do not commit the built `/chdora` binary.
+- Release flow: CHANGELOG section, `scripts/website-version.sh set vX.Y.Z` (stamps the website version from the tag), one commit per tag `vX.Y.Z`, tag push triggers `release.yml`, which fails closed on a website-version mismatch before goreleaser runs. Latest tag at time of writing is 0.16.2 (`CHANGELOG.md`). Do not commit the built `/chdora` binary.

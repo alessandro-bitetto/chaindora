@@ -62,6 +62,18 @@ website/
                 └── home.component.scss
 ```
 
+## Version display
+
+The hero and the download button show the latest release. At run time
+the page asks the GitHub releases API; until it answers (or if it
+fails) it shows a fallback. The fallback is **not** hand-edited: it is
+imported at build time from the `version` field of `package.json`
+(`import { version } from '../../../../package.json'` in
+`home.component.ts`, enabled by `resolveJsonModule` in `tsconfig.json`),
+and the release flow stamps that field from the tag with
+`scripts/website-version.sh set vX.Y.Z` (see the root `CLAUDE.md`). The
+release workflow refuses a tag whose `package.json` version differs.
+
 ## Editing content
 
 The home page sources its data (attack-class matrix, ecosystem list,
