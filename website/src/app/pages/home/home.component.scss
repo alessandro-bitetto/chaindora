@@ -106,8 +106,15 @@
     border-color: rgba(218, 47, 47, 0.35);
     background: var(--cd-accent-soft);
 
-    strong { color: var(--cd-accent); font-family: var(--cd-mono); }
+    // Deeper red for the 13px mono text on the pink chip — brand red
+    // itself is below 4.5:1 there.
+    strong { color: var(--cd-accent-ink); font-family: var(--cd-mono); }
     &:hover { border-color: var(--cd-accent); }
+
+    // Loading placeholder sized like a "v0.16.2" tag so the chip
+    // doesn't jump when the real value arrives.
+    .skeleton { width: 4.2em; height: 0.9em; vertical-align: -0.1em; }
+    &[aria-busy="true"] a { pointer-events: none; }
   }
 }
 
@@ -484,24 +491,37 @@
 }
 
 // Copy-to-clipboard button overlaid on install code blocks, parked in
-// the terminal title bar next to the traffic-light dots.
+// the terminal title bar next to the traffic-light dots. A successful
+// copy turns the button red with a check mark and briefly outlines the
+// whole terminal, so the confirmation is visible even when the eye is on
+// the code rather than the button.
 .code-block {
   position: relative;
+
+  pre { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+  &.flash pre {
+    border-color: var(--cd-accent);
+    box-shadow: 0 0 0 3px rgba(218, 47, 47, 0.25);
+  }
 }
 .copy-btn {
   position: absolute;
-  top: 7px;
+  top: 6px;
   right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
   font-family: var(--cd-mono);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  padding: 4px 10px;
+  padding: 3px 10px;
   border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.86);
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 
@@ -515,7 +535,30 @@
     color: #ffffff;
     background: var(--cd-accent);
     border-color: var(--cd-accent);
+    &::before { content: "\2713"; font-size: 11px; line-height: 1; }
   }
+  &.failed {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.22);
+    border-color: rgba(255, 255, 255, 0.5);
+    &::before { content: "\2715"; font-size: 10px; line-height: 1; }
+  }
+}
+// "latest v0.16.2" tag in the title bar of the two snippets that pull
+// the latest release at run time — shows what "latest" currently
+// resolves to, with a shimmer while the lookup is in flight.
+.code-status {
+  position: absolute;
+  top: 10px;
+  right: 88px;
+  font-family: var(--cd-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.62);
+  white-space: nowrap;
+
+  .skeleton { width: 3.6em; height: 0.85em; vertical-align: -0.05em; }
 }
 
 // ----------------------------------------------------------- Coverage
@@ -676,7 +719,7 @@
   right: -6px;
   z-index: 1;
   font-family: var(--cd-mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -983,6 +1026,8 @@
     }
   }
 
+  .skeleton-btn { width: 3.4em; height: 0.85em; margin-left: 2px; }
+
   .btn-secondary {
     background: transparent;
     color: #ffffff;
@@ -1084,6 +1129,7 @@
 }
 
 @media (max-width: 560px) {
+  .code-status { display: none; }
   .coverage-pills { grid-template-columns: 1fr; gap: 12px; }
   .eco-pill-name { padding-right: 64px; }
 }

@@ -1,5 +1,11 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { timeout } from 'rxjs';
+
+// Which install snippet a copy button belongs to. Keys the "Copied"
+// state so only the pressed button flips, and names the snippet in the
+// screen-reader announcement.
+export type SnippetKey = 'unix' | 'windows' | 'gate' | 'run';
 
 interface RoadmapItem {
   title: string;
@@ -21,11 +27,33 @@ interface RoadmapPhase {
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss'],
 })
-export class HomeComponent implements OnInit {
-  // Fallback shown before the API responds (and if the request fails).
-  // Replaced at runtime with the real latest release so the page never
-  // shows a stale version after a release is cut.
+export class HomeComponent implements OnInit, OnDestroy {
+  // Fallback shown if the release lookup fails. Replaced at runtime with
+  // the real latest release so the page never shows a stale version after
+  // a release is cut. While the lookup is in flight the template renders
+  // a skeleton instead of this value (see `versionState`).
   version = '0.16.2';
+
+  // 'loading' → skeleton; 'live' → tag from GitHub; 'fallback' → the
+  // hard-coded value after a network error / rate limit / timeout.
+  versionState: 'loading' | 'live' | 'fallback' = 'loading';
+
+  // Snippet whose copy button currently shows "Copied", if any.
+  copied: SnippetKey | null = null;
+  // Set when the clipboard write was refused (insecure context, denied
+  // permission) so the button can say so instead of lying.
+  copyFailed: SnippetKey | null = null;
+  // Text for the polite live region that announces copy results.
+  copyAnnouncement = '';
+
+  private copyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  readonly snippetNames: Record<SnippetKey, string> = {
+    unix: 'macOS / Linux install command',
+    windows: 'Windows PowerShell install command',
+    gate: 'gate activation commands',
+    run: 'detection commands',
+  };
 
   // Install snippets live in the component (not inline in the template) so
   // their shell ${...} / %{...} braces aren't parsed by Angular's control-flow
@@ -50,21 +78,70 @@ export class HomeComponent implements OnInit {
 
   constructor(private readonly http: HttpClient) {}
 
-  // Copy an install snippet to the clipboard and flash "Copied" on the button.
-  copy(text: string, ev: Event): void {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(text);
+  // Copy an install snippet to the clipboard. The button state lives in
+  // the component (not on the DOM node) so the template renders the
+  // "Copied" label + check icon and the live region announces it.
+  async copy(key: SnippetKey, text: string): Promise<void> {
+    const ok = await this.writeClipboard(text);
+    if (this.copyTimer) {
+      clearTimeout(this.copyTimer);
     }
-    const btn = ev.currentTarget as HTMLButtonElement | null;
-    if (!btn) {
-      return;
+    this.copied = ok ? key : null;
+    this.copyFailed = ok ? null : key;
+    this.copyAnnouncement = ok
+      ? `Copied ${this.snippetNames[key]} to clipboard`
+      : `Could not copy ${this.snippetNames[key]} — select the text and copy it manually`;
+    this.copyTimer = setTimeout(() => {
+      this.copied = null;
+      this.copyFailed = null;
+      this.copyTimer = null;
+    }, 2200);
+  }
+
+  copyLabel(key: SnippetKey): string {
+    if (this.copied === key) {
+      return 'Copied';
     }
-    btn.textContent = 'Copied';
-    btn.classList.add('copied');
-    setTimeout(() => {
-      btn.textContent = 'Copy';
-      btn.classList.remove('copied');
-    }, 1500);
+    if (this.copyFailed === key) {
+      return 'Failed';
+    }
+    return 'Copy';
+  }
+
+  private async writeClipboard(text: string): Promise<boolean> {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        /* fall through to the legacy path */
+      }
+    }
+    // Legacy fallback for insecure contexts (plain http previews).
+    if (typeof document === 'undefined') {
+      return false;
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  ngOnDestroy(): void {
+    if (this.copyTimer) {
+      clearTimeout(this.copyTimer);
+    }
   }
 
   ngOnInit(): void {
@@ -72,15 +149,23 @@ export class HomeComponent implements OnInit {
       .get<{ tag_name?: string }>(
         'https://api.github.com/repos/alessandro-bitetto/chaindora/releases/latest',
       )
+      // A slow GitHub API must not leave the skeleton up indefinitely —
+      // after 6s show the fallback version instead.
+      .pipe(timeout(6000))
       .subscribe({
         next: (release) => {
           const tag = release?.tag_name?.trim();
           if (tag) {
             this.version = tag.replace(/^v/, '');
+            this.versionState = 'live';
+          } else {
+            this.versionState = 'fallback';
           }
         },
         error: () => {
-          /* keep the fallback version */
+          // Keep the fallback version; the template stops showing the
+          // skeleton and renders it as-is.
+          this.versionState = 'fallback';
         },
       });
   }

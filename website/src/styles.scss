@@ -16,11 +16,16 @@
   --cd-fg:               #000000;
   --cd-accent:           #da2f2f;
   --cd-accent-soft:      rgba(218, 47, 47, 0.08);
+  // Brand red is 4.75:1 on white — AA for body text, but it drops below
+  // 4.5:1 on the grey bands and the pink chip. Small red TEXT on tinted
+  // surfaces uses this slightly deeper shade (≥ 4.9:1 on #f6f6f6 and on
+  // the soft pink) while fills, rules and large display text keep #da2f2f.
+  --cd-accent-ink:       #c62828;
 
   // Functional neutrals derived from black at low alpha — kept off the
   // brand palette deliberately. Borders, muted copy, code backgrounds.
   --cd-fg-muted:         rgba(0, 0, 0, 0.62);
-  --cd-fg-subtle:        rgba(0, 0, 0, 0.45);
+  --cd-fg-subtle:        rgba(0, 0, 0, 0.56);
   --cd-border:           rgba(0, 0, 0, 0.12);
   --cd-border-strong:    rgba(0, 0, 0, 0.24);
   --cd-bg-elevated:      #f6f6f6;
@@ -69,7 +74,11 @@ html {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
+  // Skeletons stay as a flat bar; hover lifts and the hero float are
+  // already neutralised by the zero-duration rule above.
+  .skeleton { animation: none; background: rgba(0, 0, 0, 0.12); }
 }
 
 html, body {
@@ -83,11 +92,18 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  // Safety net: clip any rogue horizontal overflow rather than letting
-  // it propagate into a viewport-level horizontal scrollbar.
-  overflow-x: hidden;
   width: 100%;
 }
+
+// Safety net: clip any rogue horizontal overflow (the full-bleed
+// section bands use a negative-margin pseudo-element) rather than
+// letting it become a viewport-level horizontal scrollbar. The clip
+// goes on <html>, whose overflow propagates to the viewport; it must
+// NOT be `overflow-x: hidden` on <body> — that turns body into a
+// scroll container and silently breaks the sticky header. `clip` on
+// body is a belt-and-braces guard that is not a scroll container.
+html { overflow-x: hidden; }
+body { overflow-x: clip; }
 
 img {
   max-width: 100%;
@@ -113,12 +129,90 @@ a {
 
 // One visible focus style for every interactive element — links,
 // buttons, copy controls. Only on keyboard focus, never on click.
+// Two-tone ring (red outline + white halo) so it stays visible on the
+// grey bands and on top of the red primary button alike.
 :focus-visible {
-  outline: 2px solid var(--cd-accent);
-  outline-offset: 3px;
+  outline: 3px solid var(--cd-accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px #ffffff;
   border-radius: 3px;
 }
 :focus:not(:focus-visible) { outline: none; }
+
+// On dark surfaces (terminals, the closing card, the black GitHub
+// button) invert the ring: white outline, red halo.
+.on-dark :focus-visible,
+pre :focus-visible,
+.code-block :focus-visible {
+  outline-color: #ffffff;
+  box-shadow: 0 0 0 5px var(--cd-accent);
+}
+
+// Skip link: first tabbable element on the page, invisible until it
+// receives keyboard focus, then drops in under the top edge.
+.skip-link {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  padding: 10px 16px;
+  border-radius: var(--cd-radius);
+  background: #000000;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform 0.15s ease;
+
+  &:focus,
+  &:focus-visible {
+    transform: translateY(0);
+    color: #ffffff;
+    text-decoration: none;
+    outline-color: var(--cd-accent);
+    box-shadow: 0 0 0 5px #ffffff, var(--cd-shadow-md);
+  }
+}
+
+// Screen-reader-only text (live-region announcements, richer labels).
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+// Loading placeholder — a soft shimmering bar sized by the element.
+// Used while the latest-release lookup is in flight; degrades to a
+// static grey bar when motion is reduced.
+.skeleton {
+  display: inline-block;
+  min-width: 3.5em;
+  height: 1em;
+  vertical-align: -0.15em;
+  border-radius: 4px;
+  background: linear-gradient(90deg,
+    rgba(0, 0, 0, 0.08) 0%, rgba(0, 0, 0, 0.16) 50%, rgba(0, 0, 0, 0.08) 100%);
+  background-size: 200% 100%;
+  animation: cd-shimmer 1.4s linear infinite;
+}
+.on-dark .skeleton,
+pre .skeleton {
+  background: linear-gradient(90deg,
+    rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0.3) 50%, rgba(255, 255, 255, 0.14) 100%);
+  background-size: 200% 100%;
+}
+@keyframes cd-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
 
 code {
   font-family: var(--cd-mono);
@@ -188,7 +282,9 @@ pre {
     font-weight: 700;
   }
   .cd-comment {
-    color: rgba(255, 255, 255, 0.42);
+    // 0.58 alpha on #0f0f0f ≈ #959595 → 6.6:1; the previous 0.42 fell
+    // under 4.5:1 for 13px text.
+    color: rgba(255, 255, 255, 0.58);
   }
 }
 
@@ -278,7 +374,7 @@ section.section-shaded {
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--cd-accent);
+  color: var(--cd-accent-ink);
 
   &::before {
     content: "";

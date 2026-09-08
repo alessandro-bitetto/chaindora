@@ -17,9 +17,14 @@
         <a class="btn btn-secondary" href="https://github.com/alessandro-bitetto/chaindora" target="_blank" rel="noopener">View on GitHub <span aria-hidden="true">→</span></a>
       </div>
       <ul class="hero-stats" aria-label="Project facts">
-        <li class="hero-stat hero-stat-version">
+        <li class="hero-stat hero-stat-version" [attr.aria-busy]="versionState === 'loading' ? 'true' : null">
           <a href="https://github.com/alessandro-bitetto/chaindora/releases/latest" target="_blank" rel="noopener">
-            <strong>v{{ version }}</strong> latest
+            @if (versionState === 'loading') {
+              <strong><span class="skeleton" aria-hidden="true"></span><span class="visually-hidden">Loading latest version</span></strong>
+            } @else {
+              <strong>v{{ version }}</strong>
+            }
+            latest
           </a>
         </li>
         <li class="hero-stat"><strong>Apache-2.0</strong></li>
@@ -214,14 +219,36 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
         <h3>Get the binary</h3>
         <p>Pre-built archives for macOS / Linux / Windows on every release — these always pull the latest.</p>
         <p class="install-os">macOS / Linux</p>
-        <div class="code-block">
+        <div class="code-block" [class.flash]="copied === 'unix'">
           <pre #cbUnix><code>{{ unixInstall }}</code></pre>
-          <button type="button" class="copy-btn" (click)="copy(cbUnix.innerText, $event)" aria-label="Copy command">Copy</button>
+          @if (versionState === 'loading') {
+            <span class="code-status" aria-hidden="true">latest <span class="skeleton"></span></span>
+          } @else {
+            <span class="code-status">latest v{{ version }}</span>
+          }
+          <button
+            type="button"
+            class="copy-btn"
+            [class.copied]="copied === 'unix'"
+            [class.failed]="copyFailed === 'unix'"
+            [attr.aria-label]="'Copy ' + snippetNames.unix"
+            (click)="copy('unix', cbUnix.innerText)">{{ copyLabel('unix') }}</button>
         </div>
         <p class="install-os">Windows (PowerShell)</p>
-        <div class="code-block">
+        <div class="code-block" [class.flash]="copied === 'windows'">
           <pre #cbWin><code>{{ windowsInstall }}</code></pre>
-          <button type="button" class="copy-btn" (click)="copy(cbWin.innerText, $event)" aria-label="Copy command">Copy</button>
+          @if (versionState === 'loading') {
+            <span class="code-status" aria-hidden="true">latest <span class="skeleton"></span></span>
+          } @else {
+            <span class="code-status">latest v{{ version }}</span>
+          }
+          <button
+            type="button"
+            class="copy-btn"
+            [class.copied]="copied === 'windows'"
+            [class.failed]="copyFailed === 'windows'"
+            [attr.aria-label]="'Copy ' + snippetNames.windows"
+            (click)="copy('windows', cbWin.innerText)">{{ copyLabel('windows') }}</button>
         </div>
         <p class="muted small">
           <strong>Add to PATH.</strong> The Windows snippet appends <code>~\.chaindora\bin</code> to your user PATH — open a
@@ -240,10 +267,16 @@ chaindora gate: <span class="cd-blocked">BLOCKED</span>
       <div class="step-body">
         <h3>Activate prevention</h3>
         <p>Drops a shim ahead of 42 package managers — npm / yarn / pnpm / bun / deno, pip / poetry / uv / pipenv / pdm / conda, mvn / gradle / sbt, dotnet / paket, composer, cargo, go, bundle / gem, pod / swift / dart / flutter, mix / rebar3, stack / cabal, brew, conan, vcpkg, opam, julia, R, and more.</p>
-        <div class="code-block">
+        <div class="code-block" [class.flash]="copied === 'gate'">
           <pre #cbGate><code>chdora gate install
 export PATH="$HOME/.chaindora/bin:$PATH"  # add to your shell rc</code></pre>
-          <button type="button" class="copy-btn" (click)="copy(cbGate.innerText, $event)" aria-label="Copy command">Copy</button>
+          <button
+            type="button"
+            class="copy-btn"
+            [class.copied]="copied === 'gate'"
+            [class.failed]="copyFailed === 'gate'"
+            [attr.aria-label]="'Copy ' + snippetNames.gate"
+            (click)="copy('gate', cbGate.innerText)">{{ copyLabel('gate') }}</button>
         </div>
         <p class="muted small">
           Every package-manager install resolves through chaindora's checkers from here on.
@@ -256,15 +289,25 @@ export PATH="$HOME/.chaindora/bin:$PATH"  # add to your shell rc</code></pre>
       <div class="step-body">
         <h3>Run detection</h3>
         <p>One project, the whole host, or a CI gate — pick the surface you care about.</p>
-        <div class="code-block">
+        <div class="code-block" [class.flash]="copied === 'run'">
           <pre #cbRun><code>chdora scan .                                  # one project
 chdora audit --whole-machine                   # everything under $HOME + host state
 chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
-          <button type="button" class="copy-btn" (click)="copy(cbRun.innerText, $event)" aria-label="Copy command">Copy</button>
+          <button
+            type="button"
+            class="copy-btn"
+            [class.copied]="copied === 'run'"
+            [class.failed]="copyFailed === 'run'"
+            [attr.aria-label]="'Copy ' + snippetNames.run"
+            (click)="copy('run', cbRun.innerText)">{{ copyLabel('run') }}</button>
         </div>
       </div>
     </article>
   </div>
+
+  <!-- Announces copy results to screen readers; the visible feedback is
+       the button label + colour change. -->
+  <div class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">{{ copyAnnouncement }}</div>
 </section>
 
 <!-- Ecosystems -->
@@ -306,17 +349,17 @@ chdora ci . --baseline ./.chdora-baseline.json --sarif out.sarif</code></pre>
   <!-- Legend explaining the pill colors -->
   <div class="coverage-legend">
     <div class="legend-item">
-      <span class="legend-dot legend-dot-full"></span>
+      <span class="legend-dot legend-dot-full" aria-hidden="true"></span>
       <strong>Full coverage</strong>
       <span class="legend-desc">install-time gate · OSV vulns · content-hash republish-guard</span>
     </div>
     <div class="legend-item">
-      <span class="legend-dot legend-dot-gated"></span>
+      <span class="legend-dot legend-dot-gated" aria-hidden="true"></span>
       <strong>Gated · no OSV</strong>
       <span class="legend-desc">cooldown · republish-guard · static-pattern only</span>
     </div>
     <div class="legend-item">
-      <span class="legend-dot legend-dot-detection"></span>
+      <span class="legend-dot legend-dot-detection" aria-hidden="true"></span>
       <strong>Detection only</strong>
       <span class="legend-desc">no registry boundary to gate at</span>
     </div>
@@ -534,7 +577,7 @@ chdora watch --interval 1h</code></pre>
 
 <!-- Closing CTA -->
 <section class="container section closing">
-  <div class="closing-card">
+  <div class="closing-card on-dark">
     <img src="assets/logo-symbol.png" alt="" aria-hidden="true" class="closing-mascot" />
     <h2 class="closing-h brand-display">Ready when you are.</h2>
     <p>
@@ -542,7 +585,13 @@ chdora watch --interval 1h</code></pre>
       shared server box. Same code path everywhere.
     </p>
     <div class="cta">
-      <a class="btn btn-primary" href="https://github.com/alessandro-bitetto/chaindora/releases/latest" target="_blank" rel="noopener">Download v{{ version }}</a>
+      <a class="btn btn-primary" href="https://github.com/alessandro-bitetto/chaindora/releases/latest" target="_blank" rel="noopener" [attr.aria-busy]="versionState === 'loading' ? 'true' : null">
+        @if (versionState === 'loading') {
+          Download <span class="skeleton skeleton-btn" aria-hidden="true"></span><span class="visually-hidden">latest release</span>
+        } @else {
+          Download v{{ version }}
+        }
+      </a>
       <a class="btn btn-secondary" href="https://github.com/alessandro-bitetto/chaindora" target="_blank" rel="noopener">Star on GitHub</a>
     </div>
   </div>

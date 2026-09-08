@@ -1,5 +1,19 @@
-import { Component, HostListener } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import {
+  Component,
+  ElementRef,
+  HostListener,
+  NgZone,
+  OnDestroy,
+  OnInit,
+  inject,
+} from '@angular/core';
+import { NavigationEnd, Router, RouterLink } from '@angular/router';
+import { Subscription, filter } from 'rxjs';
+
+interface SectionLink {
+  id: 'prevention' | 'detection' | 'install' | 'fleet';
+  label: string;
+}
 
 @Component({
   selector: 'cd-header',
@@ -13,16 +27,20 @@ import { RouterLink } from '@angular/router';
           <span class="brand-text">chaindora</span>
         </a>
         <nav class="links" aria-label="Primary">
-          <a href="#prevention">Prevention</a>
-          <a href="#detection">Detection</a>
-          <a href="#install">Install</a>
+          @for (s of sections; track s.id) {
+            <a
+              [href]="'#' + s.id"
+              class="section-link"
+              [class.active]="active === s.id"
+              [attr.aria-current]="active === s.id ? 'true' : null">{{ s.label }}</a>
+          }
           <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/docs/threat-model.md" target="_blank" rel="noopener">Threat model</a>
-          <a href="https://github.com/alessandro-bitetto/chaindora" target="_blank" rel="noopener" class="github">GitHub <span aria-hidden="true">→</span></a>
+          <a href="https://github.com/alessandro-bitetto/chaindora" target="_blank" rel="noopener" class="github on-dark">GitHub <span aria-hidden="true">→</span></a>
         </nav>
         <button
           type="button"
           class="menu-btn"
-          aria-label="Toggle navigation"
+          [attr.aria-label]="menuOpen ? 'Close menu' : 'Open menu'"
           aria-controls="mobile-nav"
           [attr.aria-expanded]="menuOpen"
           (click)="toggleMenu()">
@@ -34,12 +52,23 @@ import { RouterLink } from '@angular/router';
       @if (menuOpen) {
         <nav id="mobile-nav" class="mobile-nav" aria-label="Primary">
           <div class="container mobile-nav-inner">
-            <a href="#prevention" (click)="closeMenu()">Prevention</a>
-            <a href="#detection" (click)="closeMenu()">Detection</a>
-            <a href="#install" (click)="closeMenu()">Install</a>
-            <a href="#fleet" (click)="closeMenu()">Fleet mode</a>
-            <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/docs/threat-model.md" target="_blank" rel="noopener" (click)="closeMenu()">Threat model</a>
-            <a href="https://github.com/alessandro-bitetto/chaindora" target="_blank" rel="noopener" (click)="closeMenu()">GitHub <span aria-hidden="true">→</span></a>
+            <div class="mobile-sections">
+              @for (s of sections; track s.id) {
+                <a
+                  [href]="'#' + s.id"
+                  class="mobile-section"
+                  [class.active]="active === s.id"
+                  [attr.aria-current]="active === s.id ? 'true' : null"
+                  (click)="closeMenu()">
+                  <span class="dot" aria-hidden="true"></span>
+                  {{ s.label }}
+                </a>
+              }
+            </div>
+            <div class="mobile-external">
+              <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/docs/threat-model.md" target="_blank" rel="noopener" (click)="closeMenu()">Threat model</a>
+              <a href="https://github.com/alessandro-bitetto/chaindora" target="_blank" rel="noopener" (click)="closeMenu()">GitHub <span aria-hidden="true">→</span></a>
+            </div>
           </div>
         </nav>
       }
@@ -47,14 +76,19 @@ import { RouterLink } from '@angular/router';
   `,
   styles: [
     `
+      /* Sticky lives on the host: a sticky child can only travel within */
+      /* its parent's box, and the host is what the page flow sizes.     */
+      :host {
+        display: block;
+        position: sticky;
+        top: 0;
+        z-index: 20;
+      }
       .site-header {
         background: rgba(255, 255, 255, 0.88);
         backdrop-filter: saturate(140%) blur(10px);
         -webkit-backdrop-filter: saturate(140%) blur(10px);
         border-bottom: 1px solid transparent;
-        position: sticky;
-        top: 0;
-        z-index: 20;
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
         /* Once the page scrolls under the bar, give it an edge so the */
@@ -98,7 +132,7 @@ import { RouterLink } from '@angular/router';
       .links {
         display: flex;
         align-items: center;
-        gap: 4px;
+        gap: 2px;
         font-size: 14px;
         flex-shrink: 0;
 
@@ -111,7 +145,8 @@ import { RouterLink } from '@angular/router';
           transition: color 0.15s ease, background-color 0.15s ease;
 
           /* Underline that grows in from the center on hover — subtle */
-          /* affordance without shifting layout. */
+          /* affordance without shifting layout. The same bar stays put */
+          /* on the link whose section is currently in view.            */
           &::after {
             content: "";
             position: absolute;
@@ -125,8 +160,12 @@ import { RouterLink } from '@angular/router';
             transition: transform 0.18s ease;
           }
           &:hover {
-            color: var(--cd-accent);
+            color: var(--cd-accent-ink);
             text-decoration: none;
+            &::after { transform: scaleX(1); }
+          }
+          &.active {
+            color: var(--cd-accent-ink);
             &::after { transform: scaleX(1); }
           }
         }
@@ -176,28 +215,82 @@ import { RouterLink } from '@angular/router';
         .bar:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
       }
 
+      /* Compact panel: the four page sections as a 2×2 grid of chips */
+      /* with an in-view marker, then the two external links in a row. */
       .mobile-nav {
         border-top: 1px solid var(--cd-border);
         background: #ffffff;
+        animation: cd-menu-in 0.18s ease;
+      }
+      @keyframes cd-menu-in {
+        from { opacity: 0; transform: translateY(-6px); }
+        to   { opacity: 1; transform: translateY(0); }
       }
       .mobile-nav-inner {
         display: flex;
         flex-direction: column;
-        padding-top: 8px;
-        padding-bottom: 12px;
+        gap: 10px;
+        padding-top: 12px;
+        padding-bottom: 14px;
+      }
+      .mobile-sections {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .mobile-section {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 8px 14px;
+        border: 1px solid var(--cd-border);
+        border-radius: var(--cd-radius);
+        background: var(--cd-bg-elevated);
+        color: #000000;
+        font-weight: 600;
+        font-size: 15px;
+        line-height: 1.2;
+
+        .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--cd-border-strong);
+          flex-shrink: 0;
+          transition: background-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        &:hover {
+          text-decoration: none;
+          border-color: var(--cd-border-strong);
+          color: #000000;
+        }
+        &.active {
+          border-color: var(--cd-accent);
+          background: var(--cd-accent-soft);
+          color: var(--cd-accent-ink);
+          .dot {
+            background: var(--cd-accent);
+            box-shadow: 0 0 0 3px rgba(218, 47, 47, 0.18);
+          }
+        }
+      }
+      .mobile-external {
+        display: flex;
+        gap: 4px 18px;
+        flex-wrap: wrap;
+        padding: 4px 2px 0;
+        border-top: 1px solid var(--cd-border);
 
         a {
-          display: flex;
+          display: inline-flex;
           align-items: center;
-          justify-content: space-between;
-          padding: 12px 4px;
-          color: #000000;
+          gap: 6px;
+          min-height: 40px;
+          color: var(--cd-fg-muted);
           font-weight: 600;
-          font-size: 16px;
-          border-bottom: 1px solid var(--cd-border);
-
-          &:last-child { border-bottom: 0; }
-          &:hover { color: var(--cd-accent); text-decoration: none; }
+          font-size: 14px;
+          &:hover { color: var(--cd-accent-ink); text-decoration: none; }
         }
       }
 
@@ -208,16 +301,53 @@ import { RouterLink } from '@angular/router';
         .links .github { margin-left: 0; padding: 7px 12px; font-size: 13px; }
         .menu-btn { display: flex; }
       }
+      @media (max-width: 380px) {
+        .mobile-sections { grid-template-columns: 1fr; }
+      }
     `,
   ],
 })
-export class HeaderComponent {
+export class HeaderComponent implements OnInit, OnDestroy {
   scrolled = false;
   menuOpen = false;
+  // Id of the page section currently under the reading line, or null
+  // when none of the anchored sections is (hero, catches, coverage…).
+  active: SectionLink['id'] | null = null;
+
+  readonly sections: SectionLink[] = [
+    { id: 'prevention', label: 'Prevention' },
+    { id: 'detection', label: 'Detection' },
+    { id: 'install', label: 'Install' },
+    { id: 'fleet', label: 'Fleet mode' },
+  ];
+
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly router = inject(Router);
+  private readonly zone = inject(NgZone);
+  private navSub?: Subscription;
+  private frame: number | null = null;
+
+  ngOnInit(): void {
+    // The sections live in the routed HomeComponent, which renders after
+    // this header — recompute once navigation settles (and after each
+    // anchor navigation, which also fires NavigationEnd).
+    this.navSub = this.router.events
+      .pipe(filter((e) => e instanceof NavigationEnd))
+      .subscribe(() => this.scheduleUpdate());
+    this.scheduleUpdate();
+  }
+
+  ngOnDestroy(): void {
+    this.navSub?.unsubscribe();
+    if (this.frame !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this.frame);
+    }
+  }
 
   @HostListener('window:scroll')
   onScroll(): void {
     this.scrolled = window.scrollY > 4;
+    this.scheduleUpdate();
   }
 
   @HostListener('window:resize')
@@ -227,11 +357,21 @@ export class HeaderComponent {
     if (this.menuOpen && window.innerWidth > 720) {
       this.menuOpen = false;
     }
+    this.scheduleUpdate();
   }
 
   @HostListener('document:keydown.escape')
   onEscape(): void {
     this.closeMenu();
+  }
+
+  // Tap outside the header closes the panel — the header is sticky, so
+  // the panel would otherwise stay open while the user scrolls the page.
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(ev: MouseEvent): void {
+    if (this.menuOpen && !this.host.nativeElement.contains(ev.target as Node)) {
+      this.menuOpen = false;
+    }
   }
 
   toggleMenu(): void {
@@ -240,5 +380,44 @@ export class HeaderComponent {
 
   closeMenu(): void {
     this.menuOpen = false;
+  }
+
+  // Coalesce scroll/resize bursts into one layout read per frame.
+  private scheduleUpdate(): void {
+    if (typeof window === 'undefined' || this.frame !== null) {
+      return;
+    }
+    this.frame = requestAnimationFrame(() => {
+      this.frame = null;
+      this.updateActive();
+    });
+  }
+
+  // The "reading line" sits a third of the way down the viewport, just
+  // below the sticky header. Whichever anchored section straddles that
+  // line is current. When two sit side by side (prevention / detection
+  // cards on desktop) the one named in the URL hash wins — it is the
+  // one the user just navigated to — otherwise the first in page order.
+  private updateActive(): void {
+    const headerH = this.host.nativeElement.offsetHeight || 72;
+    const line = headerH + Math.min(window.innerHeight * 0.3, 240);
+    const hits: SectionLink['id'][] = [];
+    for (const s of this.sections) {
+      const el = document.getElementById(s.id);
+      if (!el) {
+        continue;
+      }
+      const r = el.getBoundingClientRect();
+      if (r.top <= line && r.bottom > line) {
+        hits.push(s.id);
+      }
+    }
+    const fromHash = hits.find((id) => `#${id}` === window.location.hash);
+    const next = fromHash ?? hits[0] ?? null;
+    if (next !== this.active) {
+      // rAF callbacks run outside Angular's zone bookkeeping in some
+      // configurations; re-enter so the binding updates immediately.
+      this.zone.run(() => (this.active = next));
+    }
   }
 }
