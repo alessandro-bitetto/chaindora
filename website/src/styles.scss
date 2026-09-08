@@ -6,13 +6,16 @@
 //
 // Body copy uses a system sans-serif for readability; the brand font is
 // reserved for the logo, hero H1, and other display-scale text.
-
-@import url("https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap");
+//
+// The Permanent Marker stylesheet is linked from index.html (with
+// preconnect hints) instead of an @import here, so the font request
+// starts in parallel with the CSS download rather than after it.
 
 :root {
   --cd-bg:               #ffffff;
   --cd-fg:               #000000;
   --cd-accent:           #da2f2f;
+  --cd-accent-soft:      rgba(218, 47, 47, 0.08);
 
   // Functional neutrals derived from black at low alpha — kept off the
   // brand palette deliberately. Borders, muted copy, code backgrounds.
@@ -30,10 +33,44 @@
   --cd-display:          "Permanent Marker", var(--cd-font);
 
   --cd-radius:           6px;
-  --cd-radius-lg:        10px;
+  --cd-radius-lg:        12px;
+
+  // Layout rhythm. Every landing section pads with --cd-section-y so the
+  // vertical spacing between blocks is identical page-wide and scales
+  // smoothly with the viewport instead of jumping at one breakpoint.
+  --cd-header-h:         72px;
+  --cd-section-y:        clamp(56px, 7vw, 96px);
+  --cd-container:        1120px;
+  --cd-gutter:           clamp(16px, 4vw, 32px);
+
+  --cd-shadow-sm:        0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 14px rgba(0, 0, 0, 0.05);
+  --cd-shadow-md:        0 2px 4px rgba(0, 0, 0, 0.05), 0 14px 36px rgba(0, 0, 0, 0.09);
+
+  // Type scale — fluid between the phone and desktop sizes so headings
+  // never look either cramped or oversized at intermediate widths.
+  --cd-fs-h1:            clamp(36px, 2.6vw + 22px, 64px);
+  --cd-fs-h2:            clamp(30px, 1.6vw + 20px, 42px);
+  --cd-fs-h3:            clamp(18px, 0.4vw + 16px, 21px);
+  --cd-fs-lede:          clamp(16px, 0.35vw + 14px, 19px);
 }
 
 * { box-sizing: border-box; }
+
+html {
+  // Anchor links (#prevention, #install, …) land below the sticky header
+  // instead of underneath it.
+  scroll-padding-top: calc(var(--cd-header-h) + 16px);
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 html, body {
   margin: 0;
@@ -57,40 +94,56 @@ img {
   height: auto;
 }
 
+::selection {
+  background: var(--cd-accent);
+  color: #ffffff;
+}
+
 a {
   color: var(--cd-accent);
   text-decoration: none;
+  text-underline-offset: 3px;
   transition: color 0.15s ease;
 
   &:hover {
     color: var(--cd-fg);
     text-decoration: underline;
-    text-underline-offset: 2px;
   }
 }
 
+// One visible focus style for every interactive element — links,
+// buttons, copy controls. Only on keyboard focus, never on click.
+:focus-visible {
+  outline: 2px solid var(--cd-accent);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+:focus:not(:focus-visible) { outline: none; }
+
 code {
   font-family: var(--cd-mono);
-  font-size: 0.92em;
+  font-size: 0.9em;
   background: var(--cd-bg-elevated);
   border: 1px solid var(--cd-border);
-  border-radius: 3px;
+  border-radius: 4px;
   padding: 1px 6px;
   color: var(--cd-fg);
+  overflow-wrap: anywhere;
 }
 
 pre {
   font-family: var(--cd-mono);
-  font-size: 0.88em;
+  font-size: 13px;
   background: #0f0f0f;
   border: 1px solid #0f0f0f;
   border-radius: var(--cd-radius);
-  padding: 36px 20px 16px;
+  padding: 40px 20px 18px;
   overflow-x: auto;
-  line-height: 1.55;
+  line-height: 1.6;
   margin: 0;
   color: #e6e6e6;
   position: relative;
+  tab-size: 2;
   // macOS-style terminal chrome: three dots in the top bar.
   // The first dot is the red ::before; the other two are
   // painted via box-shadow to keep the markup unchanged.
@@ -110,7 +163,7 @@ pre {
   &::after {
     content: '';
     position: absolute;
-    top: 33px;
+    top: 34px;
     left: 0;
     right: 0;
     height: 1px;
@@ -122,6 +175,8 @@ pre {
     border: none;
     padding: 0;
     color: inherit;
+    font-size: inherit;
+    overflow-wrap: normal;
   }
 
   // Token classes used inline inside <pre><code>…</code></pre>.
@@ -142,13 +197,14 @@ h1, h2, h3, h4 {
   font-weight: 700;
   letter-spacing: -0.01em;
   margin: 0 0 16px;
-  line-height: 1.25;
+  line-height: 1.2;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
-h1 { font-size: 48px; letter-spacing: -0.02em; }
-h2 { font-size: 30px; margin-top: 64px; }
-h3 { font-size: 19px; margin-top: 32px; }
+h1 { font-size: var(--cd-fs-h1); letter-spacing: -0.02em; line-height: 1.05; }
+h2 { font-size: var(--cd-fs-h2); line-height: 1.1; }
+h3 { font-size: var(--cd-fs-h3); }
 
 // Display class — uses the brand font. Apply to the wordmark and
 // hero-scale headings only.
@@ -156,38 +212,120 @@ h3 { font-size: 19px; margin-top: 32px; }
   font-family: var(--cd-display);
   font-weight: 400;
   letter-spacing: 0.01em;
+
+  .accent { color: var(--cd-accent); }
 }
 
-p { margin: 0 0 16px; }
+p {
+  margin: 0 0 16px;
+  text-wrap: pretty;
+}
 
 .container {
-  max-width: 1100px;
+  width: 100%;
+  max-width: var(--cd-container);
   margin: 0 auto;
-  padding: 0 24px;
+  padding-left: var(--cd-gutter);
+  padding-right: var(--cd-gutter);
+}
+
+// Landing-page section rhythm. Each section pads vertically with the
+// shared token; shaded sections additionally paint a full-bleed
+// background behind themselves without leaving the centered flow.
+// The pseudo-element extends to the viewport edges via the
+// negative-margin trick — works because body has overflow-x:hidden
+// so the bleed doesn't introduce a horizontal scrollbar.
+section.section {
+  position: relative;
+  padding-top: var(--cd-section-y);
+  padding-bottom: var(--cd-section-y);
+}
+
+section.section-shaded {
+  z-index: 0;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    margin-left: calc(50% - 50vw);
+    margin-right: calc(50% - 50vw);
+    background: var(--cd-bg-elevated);
+    border-top: 1px solid var(--cd-border);
+    border-bottom: 1px solid var(--cd-border);
+    z-index: -1;
+  }
+}
+
+// Section header: eyebrow (mono, red rule) → display h2 → muted lede.
+// Every section opens with the same stack so the eye learns the
+// hierarchy once and reads the whole page with it.
+.section-head {
+  max-width: 760px;
+  margin-bottom: clamp(28px, 4vw, 44px);
+
+  h2 { margin: 0 0 14px; }
+  .section-lede { margin: 0; }
+}
+
+.section-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-family: var(--cd-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cd-accent);
+
+  &::before {
+    content: "";
+    width: 22px;
+    height: 3px;
+    background: var(--cd-accent);
+    border-radius: 2px;
+  }
+}
+
+.section-lede {
+  font-size: var(--cd-fs-lede);
+  line-height: 1.6;
+  color: var(--cd-fg-muted);
 }
 
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 11px 20px;
+  min-height: 44px;
+  padding: 10px 22px;
   border-radius: var(--cd-radius);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 1.2;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.15s ease;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
   text-decoration: none !important;
+
+  &:active { transform: translateY(1px); }
 
   &.btn-primary {
     background: var(--cd-accent);
     color: #ffffff;
     border-color: var(--cd-accent);
+    box-shadow: 0 6px 18px rgba(218, 47, 47, 0.28);
 
     &:hover {
       background: #000000;
       border-color: #000000;
       color: #ffffff;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
     }
   }
 
@@ -252,49 +390,8 @@ table {
 
 .muted { color: var(--cd-fg-muted); }
 
-// Section rhythm: paints a full-viewport-width background behind a
-// `.container` section without taking it out of the centered flow.
-// The pseudo-element extends to the viewport edges via the
-// negative-margin trick — works because body has overflow-x:hidden
-// so the bleed doesn't introduce a horizontal scrollbar.
-//
-// Sections wearing this class convert their outer margin into
-// inner padding so the shaded area extends with the content,
-// instead of leaving a white gap above/below it.
-section.section-shaded {
-  position: relative;
-  z-index: 0;
-  margin-top: 0 !important;
-  padding-top: 64px;
-  padding-bottom: 56px;
-
-  &::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    margin-left: calc(50% - 50vw);
-    margin-right: calc(50% - 50vw);
-    background: var(--cd-bg-elevated);
-    z-index: -1;
-  }
-}
-
 @media (max-width: 720px) {
-  section.section-shaded {
-    padding-top: 48px;
-    padding-bottom: 40px;
-  }
-}
-
-@media (max-width: 720px) {
-  h1 { font-size: 34px; }
-  h2 { font-size: 24px; margin-top: 48px; }
-  .container { padding: 0 16px; }
-  pre { padding: 12px 14px; font-size: 0.82em; }
-}
-
-@media (max-width: 380px) {
-  h1 { font-size: 28px; }
-  h2 { font-size: 22px; }
-  .container { padding: 0 12px; }
+  :root { --cd-header-h: 60px; }
+  // Keep the top padding: the terminal-chrome dots live there.
+  pre { padding: 38px 14px 14px; font-size: 12px; }
 }

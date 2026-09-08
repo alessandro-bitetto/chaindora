@@ -25,7 +25,7 @@ export class HomeComponent implements OnInit {
   // Fallback shown before the API responds (and if the request fails).
   // Replaced at runtime with the real latest release so the page never
   // shows a stale version after a release is cut.
-  version = '0.16.0';
+  version = '0.16.2';
 
   // Install snippets live in the component (not inline in the template) so
   // their shell ${...} / %{...} braces aren't parsed by Angular's control-flow

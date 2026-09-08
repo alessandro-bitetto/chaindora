@@ -48,66 +48,92 @@ import { Component } from '@angular/core';
   styles: [
     `
       .site-footer {
+        position: relative;
         background: #ffffff;
-        border-top: 2px solid #000000;
-        padding: 64px 0 32px;
-        margin-top: 96px;
+        border-top: 1px solid var(--cd-border);
+        padding: clamp(48px, 6vw, 72px) 0 32px;
+
+        /* Thin brand rule sitting on the top border — echoes the red */
+        /* accents used by the section eyebrows above. */
+        &::before {
+          content: "";
+          position: absolute;
+          top: -1px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: min(120px, 30%);
+          height: 3px;
+          background: var(--cd-accent);
+          border-radius: 0 0 3px 3px;
+        }
       }
       .cols {
         display: grid;
-        grid-template-columns: 1.5fr 1fr 1fr 1fr;
-        gap: 48px;
+        grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr));
+        gap: 40px 48px;
       }
       .brand-img {
         display: block;
-        height: 48px;
+        height: 44px;
         width: auto;
-        margin-bottom: 14px;
+        margin-bottom: 16px;
       }
       .tag-line {
         color: var(--cd-fg-muted);
-        font-size: 13px;
+        font-size: 14px;
         line-height: 1.6;
         margin: 0;
       }
       .heading {
+        font-family: var(--cd-mono);
         font-size: 11px;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.1em;
         color: #000000;
-        margin-bottom: 12px;
+        margin-bottom: 14px;
       }
       .col a {
         display: block;
-        color: var(--cd-fg);
-        font-size: 13px;
-        padding: 4px 0;
+        color: var(--cd-fg-muted);
+        font-size: 14px;
+        padding: 5px 0;
+        transition: color 0.15s ease, transform 0.15s ease;
 
         &:hover {
           color: var(--cd-accent);
           text-decoration: none;
+          transform: translateX(2px);
         }
       }
       .bottom {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
         border-top: 1px solid var(--cd-border);
         padding-top: 24px;
-        margin-top: 48px;
-        font-size: 12px;
+        margin-top: clamp(32px, 5vw, 56px);
+        font-size: 13px;
         color: var(--cd-fg-muted);
       }
-      @media (max-width: 720px) {
+      @media (max-width: 900px) {
         .cols {
-          grid-template-columns: 1fr;
-          gap: 32px;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 36px 32px;
+        }
+        .brand-col { grid-column: 1 / -1; }
+      }
+      @media (max-width: 560px) {
+        .cols {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 32px 24px;
         }
         .bottom {
           flex-direction: column;
-          gap: 8px;
           align-items: flex-start;
+          gap: 6px;
         }
       }
     `,
