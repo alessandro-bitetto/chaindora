@@ -1,0 +1,22 @@
+# Written by Infrar, inside the directory Infrar owns. Nothing outside it is touched,
+# and this file changes how git merges ONLY the files it names.
+#
+# -merge: do not line-merge a generated file. On a conflict git then writes no conflict
+# markers and leaves one whole, valid side in the tree — instead of interleaving two
+# generated files into text that describes neither branch, and that for a manifest is not
+# even parseable. The path is still recorded as conflicted: nothing is decided for you.
+# The answer to a conflict here is to regenerate the file, which Infrar does when it is
+# the one merging; anywhere else, take either side and let the next analysis rewrite it.
+#
+# linguist-generated / gitlab-generated: ask the code host to collapse these in a
+# pull-request diff. Hosts that do not know them ignore them.
+#
+# Everything NOT listed below merges normally, on purpose — build.yaml is authored and two
+# branches adding different env entries must genuinely combine, and lessons.md is appended
+# memory that is never regenerated.
+
+.gitattributes  -merge linguist-generated=true gitlab-generated
+root.md         -merge linguist-generated=true gitlab-generated
+knowledge.md    -merge linguist-generated=true gitlab-generated
+commit.md       -merge linguist-generated=true gitlab-generated
+iac-preview/**  -merge linguist-generated=true gitlab-generated

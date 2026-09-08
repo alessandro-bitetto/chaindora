@@ -1,0 +1,26 @@
+schema_version: 1
+context: repo-root
+dockerfileContent: |
+  # syntax=docker/dockerfile:1
+
+  # ---- dependencies + build (rooted at a registry image so the module download is cacheable) ----
+  FROM golang:1-alpine AS build
+  WORKDIR /src
+  ENV CGO_ENABLED=0 GOFLAGS=-mod=mod GOTOOLCHAIN=auto
+
+  # Workspace manifests first, in a stable order, so `go mod download` is reused across nodes.
+  COPY go.mod go.sum* ./
+  RUN go mod download
+
+  # Then the sources; build only this node's entry point.
+  COPY . .
+  RUN go build -trimpath -ldflags="-s -w" -o /out/chdora ./cmd/chdora
+
+  # ---- runtime ----
+  FROM gcr.io/distroless/static-debian12
+  WORKDIR /app
+  COPY --from=build /out/chdora /app/chdora
+run:
+  entry:
+    file: /app/chdora
+    origin: built

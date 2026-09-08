@@ -1,0 +1,33 @@
+schema_version: 1
+context: node
+dockerfileContent: |
+  # syntax=docker/dockerfile:1
+
+  # ---- install dependencies (lockfile committed -> reproducible npm ci) ----
+  FROM node:20-alpine AS deps
+  WORKDIR /app
+  ENV NG_CLI_ANALYTICS=false CI=true
+  COPY package.json package-lock.json ./
+  RUN npm ci
+
+  # ---- build the Angular application ----
+  FROM deps AS build
+  WORKDIR /app
+  COPY angular.json tsconfig.json tsconfig.app.json ./
+  COPY src/ src/
+  RUN npm run build
+  # Angular 18's application builder emits dist/<project>/browser; the legacy builder emits dist/<project>.
+  # Locate the built index.html and stage its directory as the served root.
+  RUN set -e; \
+      idx="$(find dist -type f -name index.html -path '*/browser/*' | head -n 1)"; \
+      [ -n "$idx" ] || idx="$(find dist -type f -name index.html | head -n 1)"; \
+      [ -n "$idx" ]; \
+      mkdir -p /out; \
+      cp -R "$(dirname "$idx")/." /out/
+
+  # ---- serve the built output with nginx (non-root friendly image, listens on 8080) ----
+  FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+  RUN printf 'server {\n  listen 8080;\n  server_name _;\n  root /usr/share/nginx/html;\n  index index.html;\n  location / {\n    try_files $uri $uri/ /index.html;\n  }\n}\n' > /etc/nginx/conf.d/default.conf
+  COPY --from=build /out/ /usr/share/nginx/html/
+  EXPOSE 8080
+env: []
