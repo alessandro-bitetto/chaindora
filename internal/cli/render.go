@@ -1,0 +1,627 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/alessandro-bitetto/chaindora/internal/findings"
+)
+
+// renderFindings writes findings in the requested format. format must be one
+// of: text, json, jsonl, sarif, github.
+func renderFindings(w io.Writer, fs []findings.Finding, format string) error {
+	switch format {
+	case "", "text":
+		writeText(w, fs)
+		return nil
+	case "json":
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(fs)
+	case "jsonl":
+		return findings.EmitJSONL(w, fs)
+	case "sarif":
+		return findings.EmitSARIF(w, fs, Version)
+	case "github":
+		return findings.EmitGitHubAnnotations(w, fs)
+	}
+	return fmt.Errorf("unknown format %q (want text|json|jsonl|sarif|github)", format)
+}
+
+// effectiveFormat applies the deprecated --json shortcut on top of --format.
+// --json wins only if --format is at its default ("text").
+func effectiveFormat(format string, jsonShortcut bool) string {
+	if jsonShortcut && (format == "" || format == "text") {
+		return "json"
+	}
+	return format
+}
+
+// writeText renders findings as human-readable output: severity-sorted,
+// grouped into sections, deduplicated by (VulnID, PURL) so the same CVE
+// across multiple projects shows once with all source paths listed,
+// word-wrapped summaries, and trimmed reference lists. Designed for
+// skim-ability — for the full ungrouped data use --format json.
+const (
+	maxRefsShown    = 2
+	maxSourcesShown = 4
+	wrapWidth       = 76
+)
+
+// renderGroup is a render-time aggregation: one row per unique
+// (VulnID, PURL) pair across the input Finding slice. Sources accumulates
+// every distinct SourcePath that produced a finding in the group.
+type renderGroup struct {
+	findings.Finding
+	Sources []string
+}
+
+// groupForRender collapses a flat Finding slice into per-(VulnID, PURL)
+// groups while preserving severity grouping downstream (groups inherit
+// the headline finding's severity). When VulnID and PURL are both empty
+// (rare — only happens for malformed findings), the group key falls back
+// to the SourcePath so each unique artifact still gets its own entry.
+func groupForRender(fs []findings.Finding) []renderGroup {
+	type key struct{ vulnID, purl, fallback string }
+	groups := map[key]*renderGroup{}
+	var order []key
+	for _, f := range fs {
+		k := key{vulnID: f.VulnID, purl: f.PURL}
+		if k.vulnID == "" && k.purl == "" {
+			k.fallback = f.SourcePath
+		}
+		g, ok := groups[k]
+		if !ok {
+			g = &renderGroup{Finding: f}
+			groups[k] = g
+			order = append(order, k)
+		}
+		if f.SourcePath != "" {
+			g.Sources = append(g.Sources, f.SourcePath)
+		}
+	}
+	out := make([]renderGroup, 0, len(order))
+	for _, k := range order {
+		g := groups[k]
+		// Deduplicate + sort the source paths so output is stable
+		// across runs.
+		seen := map[string]struct{}{}
+		uniq := g.Sources[:0]
+		for _, s := range g.Sources {
+			if _, dup := seen[s]; dup {
+				continue
+			}
+			seen[s] = struct{}{}
+			uniq = append(uniq, s)
+		}
+		sort.Strings(uniq)
+		g.Sources = uniq
+		out = append(out, *g)
+	}
+	return out
+}
+
+// ANSI color helpers. Emitted only when the writer is a TTY and NO_COLOR is
+// unset (https://no-color.org/). Empty strings otherwise — the formatting
+// stays correct in pipes / files / CI logs without ANSI noise.
+type palette struct {
+	reset, bold, red, magenta, yellow, blue, gray, cyan, green string
+}
+
+func newPalette(w io.Writer) palette {
+	if !isTerm(w) {
+		return palette{}
+	}
+	return palette{
+		reset:   "\x1b[0m",
+		bold:    "\x1b[1m",
+		red:     "\x1b[31m",
+		magenta: "\x1b[35m",
+		yellow:  "\x1b[33m",
+		blue:    "\x1b[34m",
+		gray:    "\x1b[90m",
+		cyan:    "\x1b[36m",
+		green:   "\x1b[32m",
+	}
+}
+
+func isTerm(w io.Writer) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+// Exclude* package-level vars are toggled from CLI flags
+// (--exclude-cves, --exclude-supply-chain, --exclude-host,
+// --exclude-config). When true, the corresponding section is omitted
+// from the rendered output. Default = false everywhere = show
+// everything ("audit means tell me what you found").
+var (
+	ExcludeSupplyChain bool
+	ExcludeCVEs        bool
+	ExcludeConfig      bool
+	ExcludeHost        bool
+	// ExcludePredictive hides the predictive-detector section
+	// (gate-style behavioral signals replayed against installed
+	// packages — cooldown, publisher-change, maintainer-trust,
+	// version-diff). Default false → predictive findings appear in
+	// their own section. Set true via `--exclude-predictive` when
+	// scanning in noise-sensitive contexts (CI runs where you only
+	// care about critical/high; the predictive defaults are medium).
+	ExcludePredictive bool
+)
+
+func writeText(w io.Writer, fs []findings.Finding) {
+	if len(fs) == 0 {
+		fmt.Fprintln(w, "no known supply chain compromises detected")
+		return
+	}
+
+	p := newPalette(w)
+	rgs := groupForRender(fs)
+
+	// Five-bucket partition (+ predictive). Splitting by
+	// Category produces honest section banners — "34 supply-chain
+	// signals!" doesn't get to mean 33 unpinned-ref + 1 launchd agent.
+	supplyChain, depCVE, config, host, predictive := partitionByCategory(rgs)
+
+	// Executive summary: severity-first headline that
+	// surfaces action-required counts BEFORE the wall of sections.
+	// When the user has thousands of findings (typical for an
+	// audit), the old single-line summary buried the actually-
+	// urgent count behind every category's expanded output.
+	writeExecutiveSummary(w, p, rgs, supplyChain, depCVE, config, host, predictive)
+
+	idx := 0
+
+	if !ExcludeSupplyChain {
+		writeCategorySection(w, p, "SUPPLY-CHAIN ATTACK SIGNALS",
+			"no incident matches, no malicious packages, no attack-shape dependencies — chdora's primary check came up clean",
+			p.bold+p.red, supplyChain, &idx)
+	}
+	if !ExcludeCVEs {
+		writeCategorySection(w, p, "DEPENDENCY VULNERABILITIES (OSV.dev)",
+			"no known CVEs in scanned dependencies",
+			p.bold+p.cyan, depCVE, &idx)
+	}
+	if !ExcludeConfig {
+		writeCategorySection(w, p, "CONFIGURATION RISKS",
+			"no unpinned action refs, no curl|bash CI patterns — attack-surface is tight",
+			p.bold+p.yellow, config, &idx)
+	}
+	if !ExcludeHost {
+		writeCategorySection(w, p, "HOST STATE",
+			"no leaked credentials, no shell-rc tampering, no unexpected persistence",
+			p.bold+p.magenta, host, &idx)
+	}
+	if !ExcludePredictive {
+		// Predictive section gets condensed rendering when it's
+		// noisy (typical: thousands of medium-severity advisory
+		// signals from an audit walk). Show severity headline + top
+		// N findings + "(K more — rerun without --truncate)" footer.
+		writePredictiveSection(w, p, predictive, &idx)
+	}
+}
+
+// writeExecutiveSummary prints a 3-line action-oriented header
+// surfaced ABOVE the per-section breakdown:
+//
+//  1. Total findings + per-severity counts (critical/high
+//     colored prominently — those are the default --fail-on
+//     threshold and what the user must act on)
+//  2. Per-category one-line tally with subtle color cues
+//
+// A single inline summary is insufficient: a single inline summary line that
+// got buried below thousands of findings when audits produced
+// large volumes. Users had to scroll up after a long audit run
+// to figure out what the headline numbers actually were.
+func writeExecutiveSummary(w io.Writer, p palette, all []renderGroup,
+	supplyChain, depCVE, config, host, predictive []renderGroup,
+) {
+	totalUnique := len(all)
+	critical := 0
+	high := 0
+	medium := 0
+	for _, g := range all {
+		switch g.Severity {
+		case findings.SeverityCritical:
+			critical++
+		case findings.SeverityHigh:
+			high++
+		case findings.SeverityMedium:
+			medium++
+		}
+	}
+
+	bar := strings.Repeat("─", wrapWidth+4)
+	fmt.Fprintln(w, bar)
+	fmt.Fprintf(w, "  %s%d findings%s   ", p.bold, totalUnique, p.reset)
+	if critical > 0 {
+		fmt.Fprintf(w, "%s%d critical%s  ", p.bold+p.red, critical, p.reset)
+	}
+	if high > 0 {
+		fmt.Fprintf(w, "%s%d high%s  ", p.bold+p.yellow, high, p.reset)
+	}
+	if medium > 0 {
+		fmt.Fprintf(w, "%s%d medium%s", p.gray, medium, p.reset)
+	}
+	fmt.Fprintln(w)
+
+	tallies := []struct {
+		label string
+		group []renderGroup
+		color string
+	}{
+		{"supply-chain", supplyChain, p.red},
+		{"dependency-cve", depCVE, p.cyan},
+		{"configuration", config, p.yellow},
+		{"host-state", host, p.magenta},
+		{"predictive", predictive, p.blue},
+	}
+	var pieces []string
+	for _, t := range tallies {
+		if len(t.group) == 0 {
+			continue
+		}
+		pieces = append(pieces, fmt.Sprintf("%s%s%s %d", t.color, t.label, p.reset, len(t.group)))
+	}
+	if len(pieces) > 0 {
+		fmt.Fprintf(w, "  %s\n", strings.Join(pieces, p.gray+" · "+p.reset))
+	}
+	if critical+high > 0 {
+		fmt.Fprintf(w, "  %sFocus on the %d critical+high finding%s first.%s\n",
+			p.gray, critical+high, pluralSuffix(critical+high), p.reset)
+	}
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w)
+}
+
+// writePredictiveSection renders the predictive section with a
+// condensation strategy: if there are >50 unique findings, show
+// the top 20 by severity-then-detector-name and append a
+// "(K more)" footer. Predictive is advisory by design — the user
+// shouldn't act on individual findings, so flooding the terminal
+// with thousands of entries hides the few that actually matter.
+func writePredictiveSection(w io.Writer, p palette, group []renderGroup, idx *int) {
+	const condenseThreshold = 50
+	const condenseShow = 20
+	if len(group) <= condenseThreshold {
+		writeCategorySection(w, p, "PREDICTIVE SIGNALS",
+			"no behavioral anomalies on installed packages — cooldown, publisher, maintainer, version-diff, republish-guard all clean",
+			p.bold+p.blue, group, idx)
+		return
+	}
+
+	bar := strings.Repeat("=", wrapWidth+4)
+	fmt.Fprintln(w, bar)
+	sevParts := summaryBySeverity(group)
+	fmt.Fprintf(w, "%sPREDICTIVE SIGNALS%s  (%d finding%s — %s) %scondensed view: showing top %d%s\n",
+		p.bold+p.blue, p.reset,
+		len(group), pluralSuffix(len(group)), strings.Join(sevParts, ", "),
+		p.gray, condenseShow, p.reset)
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w)
+
+	// Sort + take top N. Predictive findings sort by severity then
+	// alphabetic package name for stable output.
+	sorted := append([]renderGroup(nil), group...)
+	sortGroupsBySeverityThenName(sorted)
+	if len(sorted) > condenseShow {
+		sorted = sorted[:condenseShow]
+	}
+	grouped := groupAndSort(sorted)
+	for _, sev := range grouped.order {
+		sub := grouped.bySev[sev]
+		if len(sub) == 0 {
+			continue
+		}
+		writeSection(w, p, sev, sub, idx)
+	}
+	remaining := len(group) - condenseShow
+	fmt.Fprintf(w, "%s   (%d more predictive findings hidden — re-run with --no-condense-predictive to see all,%s\n",
+		p.gray, remaining, p.reset)
+	fmt.Fprintf(w, "%s    or `chdora plans show <id>` to inspect the saved plan in detail)%s\n", p.gray, p.reset)
+	fmt.Fprintln(w)
+}
+
+// sortGroupsBySeverityThenName orders renderGroups by severity
+// (critical first) then alphabetically by package name. Used for
+// the predictive condensed view so the "top 20" actually surfaces
+// the highest-severity items first.
+func sortGroupsBySeverityThenName(gs []renderGroup) {
+	sevRank := map[findings.Severity]int{
+		findings.SeverityCritical: 0,
+		findings.SeverityHigh:     1,
+		findings.SeverityMedium:   2,
+		findings.SeverityLow:      3,
+		findings.SeverityUnknown:  4,
+	}
+	for i := 1; i < len(gs); i++ {
+		for j := i; j > 0; j-- {
+			a, b := gs[j-1], gs[j]
+			ar, br := sevRank[a.Severity], sevRank[b.Severity]
+			if ar > br || (ar == br && a.Finding.Name > b.Finding.Name) {
+				gs[j-1], gs[j] = b, a
+				continue
+			}
+			break
+		}
+	}
+}
+
+// writeCategorySection renders one of the four top-level sections. When
+// the section has findings, the banner shows the per-severity counts
+// and every finding is rendered (sorted by severity within the section).
+// When the section is empty, a single "✅ no findings — <reassuring
+// message>" banner is shown so the user sees the section ran and came
+// up clean (the absence is a positive signal, not silence).
+func writeCategorySection(w io.Writer, p palette, title, emptyMessage, color string, group []renderGroup, idx *int) {
+	bar := strings.Repeat("=", wrapWidth+4)
+	fmt.Fprintln(w, bar)
+	if len(group) == 0 {
+		fmt.Fprintf(w, "%s%s%s  %s(✅ 0 findings — %s)%s\n",
+			color, title, p.reset, p.gray, emptyMessage, p.reset)
+		fmt.Fprintln(w, bar)
+		fmt.Fprintln(w)
+		return
+	}
+	sevParts := summaryBySeverity(group)
+	fmt.Fprintf(w, "%s%s%s  (%d finding%s — %s)\n",
+		color, title, p.reset,
+		len(group), pluralSuffix(len(group)), strings.Join(sevParts, ", "))
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w)
+	grouped := groupAndSort(group)
+	for _, sev := range grouped.order {
+		sub := grouped.bySev[sev]
+		if len(sub) == 0 {
+			continue
+		}
+		writeSection(w, p, sev, sub, idx)
+	}
+}
+
+// partitionByCategory splits findings into the five top-level sections.
+// Categories are derived from Finding.Category (set explicitly by some
+// detectors, e.g. osv-ioc for MAL-* vs CVE) or inferred via
+// findings.DeriveCategory from the Detector field.
+func partitionByCategory(rgs []renderGroup) (supplyChain, depCVE, config, host, predictive []renderGroup) {
+	for _, g := range rgs {
+		switch findings.DeriveCategory(g.Finding) {
+		case findings.CategorySupplyChainAttack:
+			supplyChain = append(supplyChain, g)
+		case findings.CategoryDependencyCVE:
+			depCVE = append(depCVE, g)
+		case findings.CategoryConfiguration:
+			config = append(config, g)
+		case findings.CategoryHostForensics:
+			host = append(host, g)
+		case findings.CategoryPredictive:
+			predictive = append(predictive, g)
+		default:
+			// Unclassified — fold into supply-chain so it can't get
+			// lost. This shouldn't happen in normal operation since
+			// every detector should set or be derivable.
+			supplyChain = append(supplyChain, g)
+		}
+	}
+	return supplyChain, depCVE, config, host, predictive
+}
+
+func summaryBySeverity(rgs []renderGroup) []string {
+	order := []findings.Severity{
+		findings.SeverityCritical, findings.SeverityHigh,
+		findings.SeverityMedium, findings.SeverityLow,
+		findings.SeverityUnknown,
+	}
+	counts := map[findings.Severity]int{}
+	for _, g := range rgs {
+		s := g.Severity
+		if s == "" {
+			s = findings.SeverityUnknown
+		}
+		counts[s]++
+	}
+	var parts []string
+	for _, sev := range order {
+		if c := counts[sev]; c > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", c, strings.ToLower(string(sev))))
+		}
+	}
+	return parts
+}
+
+type grouped struct {
+	bySev map[findings.Severity][]renderGroup
+	order []findings.Severity
+}
+
+func groupAndSort(rgs []renderGroup) grouped {
+	g := grouped{
+		bySev: make(map[findings.Severity][]renderGroup),
+		order: []findings.Severity{
+			findings.SeverityCritical,
+			findings.SeverityHigh,
+			findings.SeverityMedium,
+			findings.SeverityLow,
+			findings.SeverityUnknown,
+		},
+	}
+	for _, rg := range rgs {
+		key := rg.Severity
+		if key == "" {
+			key = findings.SeverityUnknown
+		}
+		g.bySev[key] = append(g.bySev[key], rg)
+	}
+	// Within each severity, stable order: detector, then vuln-id, then name.
+	for sev := range g.bySev {
+		sort.SliceStable(g.bySev[sev], func(i, j int) bool {
+			a, b := g.bySev[sev][i], g.bySev[sev][j]
+			if a.Detector != b.Detector {
+				return a.Detector < b.Detector
+			}
+			if a.VulnID != b.VulnID {
+				return a.VulnID < b.VulnID
+			}
+			return a.Name < b.Name
+		})
+	}
+	return g
+}
+
+func writeSection(w io.Writer, p palette, sev findings.Severity, rgs []renderGroup, idx *int) {
+	bar := strings.Repeat("=", wrapWidth+4)
+	sevColor := severityColor(p, sev)
+	fmt.Fprintln(w, bar)
+	fmt.Fprintf(w, "%s%s%s  (%d %s)\n", sevColor, strings.ToUpper(string(sev)), p.reset,
+		len(rgs), pluralize("finding", len(rgs)))
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w)
+	for _, rg := range rgs {
+		*idx++
+		writeFinding(w, p, *idx, rg)
+	}
+}
+
+func writeFinding(w io.Writer, p palette, num int, g renderGroup) {
+	f := g.Finding
+	// Headline: #N  detector | vuln-id | purl-or-name
+	loc := f.PURL
+	if loc == "" {
+		loc = f.Name
+	}
+	parts := []string{f.Detector}
+	if f.VulnID != "" {
+		parts = append(parts, f.VulnID)
+	}
+	if loc != "" {
+		parts = append(parts, loc)
+	}
+	fmt.Fprintf(w, "  %s#%d%s  %s%s%s\n", p.bold, num, p.reset, p.cyan, strings.Join(parts, " | "), p.reset)
+
+	// Summary, word-wrapped under a hanging indent.
+	if s := strings.TrimSpace(f.Summary); s != "" {
+		for _, line := range wrapWords(s, wrapWidth) {
+			fmt.Fprintf(w, "      %s\n", line)
+		}
+	}
+
+	// Sources — list every distinct path the group collapsed across.
+	// Singular line for 1 source (matches the pre-grouping layout);
+	// plural block for 2+, truncated past maxSourcesShown.
+	sources := g.Sources
+	switch len(sources) {
+	case 0:
+		// No sources beyond what's encoded in the headline (e.g. global
+		// packages where PURL fully identifies the install).
+	case 1:
+		if sources[0] != loc {
+			fmt.Fprintf(w, "      %ssource:%s  %s\n", p.gray, p.reset, sources[0])
+		}
+	default:
+		fmt.Fprintf(w, "      %ssources:%s %s\n", p.gray, p.reset, sources[0])
+		shown := sources[1:]
+		hidden := 0
+		if len(shown) > maxSourcesShown-1 {
+			hidden = len(shown) - (maxSourcesShown - 1)
+			shown = shown[:maxSourcesShown-1]
+		}
+		for _, s := range shown {
+			fmt.Fprintf(w, "               %s\n", s)
+		}
+		if hidden > 0 {
+			fmt.Fprintf(w, "               %s(+%d more occurrence%s — use --format json for the full list)%s\n",
+				p.gray, hidden, pluralSuffix(hidden), p.reset)
+		}
+	}
+
+	// Fix hint, if the detector knows a clean version to pin to.
+	if f.FixUpgradeTo != "" {
+		fmt.Fprintf(w, "      %sfix:%s     upgrade to %s%s%s\n", p.gray, p.reset, p.bold, f.FixUpgradeTo, p.reset)
+	}
+
+	// References — top N, with a tail count for the rest.
+	if len(f.References) > 0 {
+		shown := f.References
+		hidden := 0
+		if len(shown) > maxRefsShown {
+			hidden = len(shown) - maxRefsShown
+			shown = shown[:maxRefsShown]
+		}
+		fmt.Fprintf(w, "      %srefs:%s    %s\n", p.gray, p.reset, shown[0])
+		for _, ref := range shown[1:] {
+			fmt.Fprintf(w, "               %s\n", ref)
+		}
+		if hidden > 0 {
+			fmt.Fprintf(w, "               %s(+%d more — use --format json for the full list)%s\n", p.gray, hidden, p.reset)
+		}
+	}
+
+	fmt.Fprintln(w)
+}
+
+func pluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func severityColor(p palette, sev findings.Severity) string {
+	if p.reset == "" {
+		return ""
+	}
+	switch sev {
+	case findings.SeverityCritical:
+		return p.bold + p.red
+	case findings.SeverityHigh:
+		return p.bold + p.magenta
+	case findings.SeverityMedium:
+		return p.yellow
+	case findings.SeverityLow:
+		return p.blue
+	}
+	return p.gray
+}
+
+// wrapWords greedy-wraps s onto lines of at most width characters. Single
+// words longer than width are emitted on their own line uncut (URLs etc).
+func wrapWords(s string, width int) []string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return nil
+	}
+	var lines []string
+	current := words[0]
+	for _, word := range words[1:] {
+		if len(current)+1+len(word) > width {
+			lines = append(lines, current)
+			current = word
+		} else {
+			current += " " + word
+		}
+	}
+	lines = append(lines, current)
+	return lines
+}
+
+func pluralize(word string, n int) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
+}

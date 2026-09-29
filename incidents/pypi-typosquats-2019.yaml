@@ -1,0 +1,41 @@
+schema: 1
+id: PYPI-TYPOSQUATS-DATEUTIL-JELLYFISH-2019-11
+name: python3-dateutil / jeIlyfish credential-stealing typosquats
+severity: critical
+date: "2019-12-01"
+summary: |
+  Two PyPI packages were uploaded in late 2019 as typosquats of popular
+  libraries:
+
+  - `python3-dateutil` typosquats `python-dateutil` (note hyphen vs.
+    digit). The legitimate package is published under the hyphenated
+    name; the digit-prefixed name was malicious.
+  - `jeIlyfish` typosquats `jellyfish`. Note the *capital I* (Eye) where
+    `jellyfish` has a lowercase `l` (ell) — at most fonts the two are
+    visually identical.
+
+  Both packages depended on each other; the actual payload lived in
+  `jeIlyfish` and ran on import: it read `~/.ssh/`, GnuPG keyring
+  files, and a hard-coded list of credential paths, then exfiltrated
+  the content to an attacker-controlled host.
+
+  PyPI removed both packages on 2019-12-01. The entire package
+  namespace is malware — flag any installed version.
+
+references:
+  - "https://www.zdnet.com/article/twelve-malicious-python-libraries-found-and-removed-from-pypi/"
+  - "https://snyk.io/vuln/SNYK-PYTHON-PYTHON3DATEUTIL-561190"
+  - "https://github.com/pypa/advisory-database/tree/main/vulns/jeIlyfish"
+
+packages:
+  - ecosystem: PyPI
+    name: "python3-dateutil"
+    versions: ["*"]
+  - ecosystem: PyPI
+    name: "jeIlyfish"
+    versions: ["*"]
+
+post_compromise:
+  - "Treat every SSH private key under ~/.ssh on the affected host as exposed — generate new keys and rotate authorized_keys on every server the old key could reach."
+  - "Rotate any GnuPG private keys in ~/.gnupg/private-keys-v1.d/."
+  - "Audit ~/.aws/credentials, ~/.docker/config.json, ~/.netrc, ~/.gitconfig for tokens that may have been read at import time."

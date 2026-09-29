@@ -1,0 +1,79 @@
+# .goreleaser.yml — cross-platform binary release config.
+# See https://goreleaser.com/customization/ for the full schema.
+version: 2
+
+project_name: chaindora
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: chaindora
+    main: ./cmd/chdora
+    binary: chdora
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/alessandro-bitetto/chaindora/internal/cli.Version={{.Version}}
+
+archives:
+  - id: chaindora
+    ids: [chaindora]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+      - CHANGELOG.md
+      - SECURITY.md
+      - incidents/*.yaml
+
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Version }}_checksums.txt'
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: alessandro-bitetto
+    name: chaindora
+  draft: false
+  prerelease: auto
+  header: |
+    ## Chaindora {{ .Tag }}
+
+    Supply-chain prevention and detection for npm, PyPI, .NET/NuGet,
+    Go modules and Rust/crates.io, including alternative package managers.
+
+    Download the archive for your operating system and architecture, extract
+    `chdora` (`chdora.exe` on Windows), add it to PATH, and run `chdora scan .`.
+
+    Each archive has a SHA-256 entry in `chaindora_{{ .Version }}_checksums.txt`.
+    Verify your downloaded archive against that entry before installation.
+
+    [Documentation](https://github.com/alessandro-bitetto/chaindora/blob/{{ .Tag }}/README.md)
+    · [Threat model](https://github.com/alessandro-bitetto/chaindora/blob/{{ .Tag }}/docs/threat-model.md)

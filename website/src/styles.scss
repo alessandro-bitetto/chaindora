@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap');
+
+:root {
+  --cd-red: #da2f2f;
+  --cd-ink: #000;
+  --cd-paper: #fff;
+  --cd-muted: rgba(0, 0, 0, .62);
+  --cd-line: rgba(0, 0, 0, .16);
+  --cd-wash: rgba(0, 0, 0, .035);
+  --cd-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --cd-mono: 'SF Mono', Consolas, 'Liberation Mono', monospace;
+  --cd-display: 'Permanent Marker', var(--cd-font);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 105px; }
+body { margin: 0; font-family: var(--cd-font); background: var(--cd-paper); color: var(--cd-ink); -webkit-font-smoothing: antialiased; line-height: 1.6; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; cursor: pointer; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--cd-red); outline-offset: 5px; }
+button:disabled { cursor: default; }
+img { max-width: 100%; }
+h1, h2, h3, p { margin: 0; }
+h2 { font-size: clamp(32px, 4.3vw, 52px); line-height: 1.08; letter-spacing: -.055em; font-weight: 750; }
+h3 { letter-spacing: -.035em; line-height: 1.15; }
+code { font-family: var(--cd-mono); }
+.container { width: min(1200px, calc(100% - 96px)); margin-inline: auto; }
+.eyebrow, .small-label { font-family: var(--cd-mono); text-transform: uppercase; font-size: 10px; font-weight: 600; letter-spacing: .13em; }
+.eyebrow { display: flex; align-items: center; gap: 10px; }
+.small-label { color: var(--cd-muted); display: block; }
+.button { display: inline-flex; align-items: center; justify-content: space-between; gap: 28px; min-height: 50px; padding: 12px 22px; font-size: 13px; font-weight: 650; border: 1px solid transparent; transition: background .2s, transform .2s; }
+.button-red { background: var(--cd-red); color: #fff; }
+.button-red:hover { background: #000; transform: translateY(-2px); }
+.text-link { display: inline-flex; align-items: center; gap: 14px; font-size: 13px; font-weight: 650; }
+.text-link:hover { color: var(--cd-red); }
+::selection { background: var(--cd-red); color: #fff; }
+@media(max-width: 900px) { .container { width: calc(100% - 48px); } }
+@media(max-width: 520px) { .container { width: calc(100% - 36px); } html { scroll-padding-top: 80px; } }
+@media(prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }

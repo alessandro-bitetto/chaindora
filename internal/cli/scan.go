@@ -1,0 +1,228 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/spf13/cobra"
+
+	"time"
+
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/heuristic"
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/osvioc"
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/predictive"
+	"github.com/alessandro-bitetto/chaindora/internal/findings"
+	"github.com/alessandro-bitetto/chaindora/internal/gate"
+	"github.com/alessandro-bitetto/chaindora/internal/incidents"
+	"github.com/alessandro-bitetto/chaindora/internal/inventory"
+	"github.com/alessandro-bitetto/chaindora/internal/osv"
+)
+
+var (
+	jsonOut          bool
+	scanFormat       string
+	incidentsDir     string
+	skipOSV          bool
+	skipIncidents    bool
+	skipHeuristic    bool
+	scanFreshPopular bool
+	scanExcludes     []string
+	scanFixPlan      bool
+	scanFix          bool
+	scanYes          bool
+	scanAggressive   bool
+	scanSavePlan     bool
+	scanSkipRegistry bool
+	scanExcludeCVEs       bool
+	scanExcludeSupply     bool
+	scanExcludeConfig     bool
+	scanExcludeHost       bool
+	scanExcludePredictive bool
+	scanOffline           bool
+	scanSkipPredictive    bool
+)
+
+var scanCmd = &cobra.Command{
+	Use:   "scan [path]",
+	Short: "Scan a directory tree for known-compromised supply chain components",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		root := "."
+		if len(args) == 1 {
+			root = args[0]
+		}
+
+		// --offline is a meta-flag: combines --skip-osv and
+		// --skip-registry so users don't have to remember both for
+		// air-gapped scans.
+		if scanOffline {
+			skipOSV = true
+			scanSkipRegistry = true
+		}
+
+		inv, err := inventory.Scan(root, inventory.WithExcludes(scanExcludes...))
+		if err != nil {
+			return fmt.Errorf("inventory: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "inventoried %d packages from %d sources\n",
+			len(inv.Packages), len(inv.Sources))
+		for _, e := range inv.Errors {
+			fmt.Fprintln(os.Stderr, "warn:", e)
+		}
+
+		ctx := context.Background()
+		var all []findings.Finding
+		tally := newDetectorTally()
+
+		if !skipOSV {
+			tally.Enable("osv-ioc")
+			client := osv.NewClient()
+			det := osvioc.New(client)
+			results, err := det.Detect(ctx, inv)
+			if err != nil {
+				return fmt.Errorf("osv detector: %w", err)
+			}
+			tally.AbsorbFindings(results)
+			all = append(all, results...)
+		}
+
+		if !skipIncidents {
+			dir := incidents.ResolveDir([]string{
+				incidentsDir,
+				"incidents",
+				filepath.Join(os.Getenv("HOME"), ".chaindora", "incidents"),
+			})
+			if dir == "" {
+				fmt.Fprintln(os.Stderr, "warn: no incident pack directory found (use --incidents to specify)")
+			} else {
+				incs, err := incidents.LoadDir(dir)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "warn: incident pack load failed:", err)
+				} else {
+					fmt.Fprintf(os.Stderr, "loaded %d incidents from %s\n", len(incs), dir)
+					tally.Enable("incident-pack")
+					det := incident.New(incs, scanExcludes...)
+					results, err := det.Detect(ctx, inv, root)
+					if err != nil {
+						return fmt.Errorf("incident detector: %w", err)
+					}
+					tally.AbsorbFindings(results)
+					all = append(all, results...)
+				}
+			}
+		}
+
+		if !skipHeuristic {
+			tally.Enable("heuristic")
+			npm, pypi := buildRegistryProbes(scanSkipRegistry)
+			det := heuristic.New(heuristic.Config{
+				FreshPopular: heuristic.FreshPopularConfig{Enabled: scanFreshPopular},
+				Excludes:     scanExcludes,
+				NPMProbe:     npm,
+				PyPIProbe:    pypi,
+			})
+			results, err := det.Detect(ctx, inv, root)
+			if err != nil {
+				return fmt.Errorf("heuristic detector: %w", err)
+			}
+			tally.AbsorbFindings(results)
+			all = append(all, results...)
+		}
+
+		// Predictive layer: replay gate-style behavioral checks
+		// (cooldown, publisher-change, maintainer-trust, version-
+		// diff, provenance) against installed packages. Default
+		// severity=medium so --fail-on=critical,high stays quiet;
+		// republish-guard (cache-driven) escalates to critical
+		// when an integrity collision is detected.
+		if !scanSkipPredictive && !scanSkipRegistry {
+			tally.Enable("predictive")
+			probes := buildGateProbes()
+			cache := gate.NewCache(gate.DefaultCacheRoot(), 7*24*time.Hour)
+			det := predictive.New(probes, 72*time.Hour, cache)
+			results, err := det.Detect(ctx, inv)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "warn: predictive detector:", err)
+			}
+			tally.AbsorbFindings(results)
+			all = append(all, results...)
+		}
+
+		tally.Print(os.Stderr)
+
+		ExcludeCVEs = scanExcludeCVEs
+		ExcludeSupplyChain = scanExcludeSupply
+		ExcludeConfig = scanExcludeConfig
+		ExcludeHost = scanExcludeHost
+		ExcludePredictive = scanExcludePredictive
+		if err := renderFindings(os.Stdout, all, effectiveFormat(scanFormat, jsonOut)); err != nil {
+			return err
+		}
+
+		plans := buildAllFixPlans(all)
+		var savedID string
+		if scanSavePlan && len(plans) > 0 {
+			id, sErr := saveFixPlan(plans, len(all), root)
+			if sErr != nil {
+				return fmt.Errorf("save plan: %w", sErr)
+			}
+			savedID = id
+		}
+		if scanFixPlan || scanFix {
+			allowed := []findings.FixCategory{findings.FixSafe}
+			if scanAggressive {
+				allowed = append(allowed, findings.FixSemiSafe)
+			}
+			_, _, fErr := findings.RunFixes(ctx, plans, findings.RunOptions{
+				PlanOnly:          scanFixPlan && !scanFix,
+				AutoYes:           scanYes,
+				AllowedCategories: allowed,
+			})
+			if fErr != nil {
+				return fErr
+			}
+		}
+		saved := scanSavePlan && savedID != ""
+		fixRequested := scanFixPlan || scanFix
+		if !saved && !fixRequested {
+			if id := maybePromptSavePlan(os.Stdin, os.Stderr, plans, len(all), root, saved, fixRequested); id != "" {
+				saved = true
+				savedID = id
+			}
+		}
+		emitEndOfRunFooter(os.Stderr, plans, saved, savedID, fixRequested)
+
+		if len(all) > 0 {
+			return SilentExit(1)
+		}
+		return nil
+	},
+}
+
+func init() {
+	scanCmd.Flags().BoolVar(&jsonOut, "json", false, "deprecated; shortcut for --format=json")
+	scanCmd.Flags().StringVar(&scanFormat, "format", "text", "output format: text|json|jsonl|sarif|github")
+	scanCmd.Flags().StringVar(&incidentsDir, "incidents", "", "path to incident-pack YAML directory (default: ./incidents or ~/.chaindora/incidents)")
+	scanCmd.Flags().BoolVar(&skipOSV, "skip-osv", false, "skip OSV.dev queries")
+	scanCmd.Flags().BoolVar(&skipIncidents, "skip-incidents", false, "skip the curated incident pack")
+	scanCmd.Flags().BoolVar(&skipHeuristic, "skip-heuristic", false, "skip behavioral heuristics (unpinned refs, CI shell patterns, install scripts, typosquat, dep-confusion)")
+	scanCmd.Flags().BoolVar(&scanFreshPopular, "fresh-popular", false, "also check whether popular npm/PyPI deps were published in the last 14 days (requires network)")
+	scanCmd.Flags().BoolVar(&scanSkipRegistry, "skip-registry", false, "do not query npm/PyPI for dep-confusion / typosquat / install-script evidence (offline mode; those heuristics become silent)")
+	scanCmd.Flags().BoolVar(&scanExcludeCVEs, "exclude-cves", false, "hide the dependency-CVE section (commodity OSV CVE matches)")
+	scanCmd.Flags().BoolVar(&scanExcludeSupply, "exclude-supply-chain", false, "hide the supply-chain attack section (incident pack, MAL-*, evidence-based heuristics)")
+	scanCmd.Flags().BoolVar(&scanExcludeConfig, "exclude-config", false, "hide the configuration-risks section (unpinned action refs, curl|bash CI patterns)")
+	scanCmd.Flags().BoolVar(&scanExcludeHost, "exclude-host", false, "hide the host-state section (credential files, shell-rc, persistence)")
+	scanCmd.Flags().BoolVar(&scanExcludePredictive, "exclude-predictive", false, "hide the predictive-signals section (gate-style behavioral checks: cooldown, publisher-change, maintainer-trust, version-diff, republish-guard)")
+	scanCmd.Flags().BoolVar(&scanOffline, "offline", false, "no network calls at all — implies --skip-osv and --skip-registry. Uses only the local incident pack + cached registry data.")
+	scanCmd.Flags().BoolVar(&scanSkipPredictive, "skip-predictive", false, "skip the predictive detector (gate-style behavioral signals replayed against installed packages: cooldown, publisher-change, maintainer-trust, version-diff, republish-guard via cache)")
+	scanCmd.Flags().StringSliceVar(&scanExcludes, "exclude", nil, "directory basename(s) to skip (repeatable or comma-separated, e.g. --exclude testdata,vendor)")
+	scanCmd.Flags().BoolVar(&scanFixPlan, "fix-plan", false, "describe a remediation plan for each finding without executing anything")
+	scanCmd.Flags().BoolVar(&scanFix, "fix", false, "after scanning, prompt to apply remediation for each finding (use --yes to auto-apply safe fixes)")
+	scanCmd.Flags().BoolVar(&scanYes, "yes", false, "auto-apply all fixes classified `safe` without prompting (requires --fix)")
+	scanCmd.Flags().BoolVar(&scanAggressive, "fix-aggressive", false, "also auto-apply `semi-safe` fixes under --yes (uninstalls, project-lockfile upgrades)")
+	scanCmd.Flags().BoolVar(&scanSavePlan, "save-plan", false, "save the generated fix-plan to ~/.chaindora/fix-plans/ and print its ID (apply later with 'chdora fix --plan ID')")
+	rootCmd.AddCommand(scanCmd)
+}

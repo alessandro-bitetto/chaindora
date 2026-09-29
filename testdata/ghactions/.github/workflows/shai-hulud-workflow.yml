@@ -1,0 +1,10 @@
+# Test fixture: this file's presence triggers the Shai-Hulud incident
+# file_artifact match. The contents are intentionally a no-op; the IOC
+# is the filename itself.
+name: shai-hulud
+on: push
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
