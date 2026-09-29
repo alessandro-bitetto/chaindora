@@ -23,6 +23,7 @@ checks where they fit your workflow.
 | What Chaindora can and cannot protect | [Threat model](threat-model.md) |
 | Detection pipeline, gate checks and repository layout | [Architecture](architecture.md) |
 | Remaining security work and acceptance criteria | [Security roadmap](security-hardening.md) |
+| Real package-manager validation, findings and safe test runner | [Environment testing](environment-testing.md) |
 | Finding fields | [Finding JSON schema](schema/v1/finding.schema.json) |
 | Fleet scan completion metadata | [Scan summary JSON schema](schema/v1/scan-summary.schema.json) |
 

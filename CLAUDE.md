@@ -60,6 +60,11 @@ progress and diagnostics belong on stderr. The static website output is
 
 - Internal/network/parser failures return Unknown, never successful inspection.
   Warning and Unknown policy overrides are independent. Block always wins.
+- Empty resolved trees refuse installation even with relaxed policy. Dry-run
+  prevents final handoff on passthrough and flags-only routes as well.
+- CI inventory errors remain visible in JSON/SARIF and force exit 2 independent
+  of suppressions, baselines and severity policy; incomplete runs cannot update
+  baselines or apply fixes.
 - Preserve `*gate.PMError` output and exit codes for package-manager failures.
   Use `wrapPMError` in resolvers; CLI internal errors remain distinct.
 - `CachedRun` checks republish history and always runs the current stack.

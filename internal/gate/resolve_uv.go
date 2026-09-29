@@ -12,10 +12,10 @@ import (
 
 // ResolveUVTree resolves what `uv add <pkg>` would install.
 // Approach:
-//   1. tmpdir with a minimal pyproject.toml in PEP 621 format
-//      (uv uses [project] not [tool.poetry]).
-//   2. `uv lock --no-progress` resolves + writes uv.lock.
-//   3. Parse uv.lock TOML.
+//  1. tmpdir with a minimal pyproject.toml in PEP 621 format
+//     (uv uses [project] not [tool.poetry]).
+//  2. `uv lock --no-progress` resolves + writes uv.lock.
+//  3. Parse uv.lock TOML.
 //
 // uvPath is the absolute path to the real `uv` binary.
 func ResolveUVTree(ctx context.Context, uvPath string, addArgs []string) ([]PackageRef, error) {
@@ -112,6 +112,11 @@ func parseUVLockTree(data []byte, directs []uvDepArg) []PackageRef {
 	seen := map[string]struct{}{}
 	var refs []PackageRef
 	for _, block := range strings.Split(string(data), "[[package]]")[1:] {
+		// uv includes the local project in its lockfile. It is not a PyPI
+		// dependency, even if its name also happens to exist on the registry.
+		if uvLocalProject(block) {
+			continue
+		}
 		name := poetryLockField(block, "name")
 		version := poetryLockField(block, "version")
 		if name == "" || version == "" {
@@ -134,6 +139,24 @@ func parseUVLockTree(data []byte, directs []uvDepArg) []PackageRef {
 		})
 	}
 	return refs
+}
+
+func uvLocalProject(block string) bool {
+	for _, line := range strings.Split(block, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok || strings.TrimSpace(key) != "source" {
+			continue
+		}
+		value = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(value), "{"))
+		kind, _, ok := strings.Cut(value, "=")
+		if ok {
+			switch strings.TrimSpace(kind) {
+			case "virtual", "editable", "directory":
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // uvLockFirstSha256 finds the first `hash = "sha256:..."` field

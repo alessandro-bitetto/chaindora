@@ -200,6 +200,9 @@ continuous-integration use:
 		if !ciIgnoreSuppressions {
 			all, suppressed = findings.FilterSuppressed(all, suppressions, time.Now())
 		}
+		// Coverage failures are operational errors, not suppressible accepted
+		// risk. Keep them in every report, independently of finding policy.
+		all = append(all, inventoryFailureFindings(root, inv.Errors)...)
 		// Emit expired-suppression warning to stderr regardless of
 		// format — this is operational signal, not finding data.
 		expiredCount := 0
@@ -282,6 +285,11 @@ continuous-integration use:
 			if ciVerbose {
 				fmt.Fprintf(os.Stderr, "wrote SARIF to %s\n", ciSARIFPath)
 			}
+		}
+
+		if len(inv.Errors) > 0 {
+			fmt.Fprintln(os.Stderr, "[chdora] inventory incomplete: CI refused; fixes and baseline updates were not applied")
+			return SilentExit(2)
 		}
 
 		plans := buildAllFixPlans(all)

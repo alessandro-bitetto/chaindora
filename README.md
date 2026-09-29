@@ -59,7 +59,8 @@ not imply coverage of every command or lockfile version.
 | Go modules | go | `go.mod`, with checksum evidence from `go.sum` |
 | Rust / crates.io | Cargo | `Cargo.lock` |
 
-Manifest fallbacks cannot provide the precision of resolved lockfiles. Bun has
+Manifest fallbacks cannot provide the precision of resolved lockfiles; exact
+PyPI `==` pins are normalized for version-specific matching. Bun has
 an install resolver but no Bun lockfile inventory parser. Deno coverage is for
 npm dependencies; raw HTTPS and JSR dependencies are outside the supported scope.
 
@@ -88,8 +89,9 @@ package requests are checked for the following forms:
 Bare update-all resolution exists for npm, Yarn, pnpm and Cargo. Other recognized
 bare update verbs are refused when no update-all resolver exists. Deno and Paket
 operate on existing project state: they do not reliably model a newly requested
-dependency or subsequent update. Deno's resolver and lockfile format handling
-need further validation against current Deno versions.
+dependency or subsequent update. Deno 2 resolves existing project dependencies
+without a local `node_modules` directory; npm entries in lockfile versions 3–5
+are understood. Empty or failed resolutions refuse installation.
 
 **Known gaps:** bare installs such as `npm install`, `npm ci`, `uv pip install`,
 `uv sync`, restore/build/run commands, and unrecognized verbs can pass through
@@ -125,6 +127,9 @@ chdora gate exec --dry-run npm install lodash@4.17.21
 chdora gate check requests@2.32.3 --ecosystem pypi
 chdora gate check golang.org/x/text@v0.28.0 --ecosystem go
 ```
+
+`gate exec --dry-run` never hands off the final command, including commands that
+would otherwise pass through ungated. Resolution still invokes a package manager.
 
 Versions here illustrate syntax, not safety recommendations.
 
@@ -175,6 +180,10 @@ Findings include severity, confidence and evidence. Predictive credential hits
 are High severity / Medium confidence: a suspicious combination, not proven
 exfiltration. Failed credential inspection emits a Low configuration finding;
 several other incomplete predictive checks still produce no finding.
+
+CI reports failed inventory parsing as `CHDORA-INVENTORY-INCOMPLETE` in JSON and
+SARIF and exits 2, regardless of severity policy, suppressions or baselines.
+Incomplete runs do not apply fixes or update baselines.
 
 Use `--exclude` for directory basenames. `--skip-*` disables detector work;
 `--exclude-*` hides categories in text output, while JSON/SARIF and CI policy

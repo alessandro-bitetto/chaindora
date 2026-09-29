@@ -44,12 +44,21 @@ path stores and aggregates explicitly submitted fleet reports.
    authorize a new install by themselves. Hash history survives approval TTL.
 5. `Policy.Decide` evaluates every result independently. Block always refuses;
    warning and unknown overrides are separate. Empty evidence is Unknown.
+   An empty resolved tree refuses installation before overrides are considered.
 6. Only after policy approval does `execReal` invoke the original command.
    That invocation can resolve different bytes: transaction binding is open work.
 
 `gate check` assesses one package. `gate exec --dry-run` resolves and reports
-without handing off the install; it is not a sandbox for resolver subprocesses.
+without handing off any command, including passthrough routes; it is not a
+sandbox for resolver subprocesses. Yarn's major version is detected before
+selecting a script-disabled command. Deno 2 resolves with no `node_modules`
+directory and preserves subprocess failures; inventory and the gate share its
+v3–v5 npm lock parser and Paket's indentation-aware NuGet parser.
 Gate flags precede the manager name; the rest belong to the manager.
+
+CI inventory failures emit a structured `CHDORA-INVENTORY-INCOMPLETE` finding
+and exit 2 independently of severity, suppressions and baselines. Incomplete
+runs cannot apply fixes or replace the baseline.
 
 ## Archive and source inspection
 

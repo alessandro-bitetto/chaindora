@@ -14,12 +14,12 @@ import (
 //
 //   - PEP 621 / uv / pdm / setuptools — `[project].dependencies`
 //     is an array of PEP 508 specifiers:
-//       dependencies = ["requests>=2.31", "rich~=13.0"]
+//     dependencies = ["requests>=2.31", "rich~=13.0"]
 //
 //   - Poetry — `[tool.poetry.dependencies]` is a table of
 //     name → version-spec entries:
-//       requests = "^2.31"
-//       rich = {version = "^13.0", optional = true}
+//     requests = "^2.31"
+//     rich = {version = "^13.0", optional = true}
 //
 // We extract name + constraint string. Like the other manifest
 // fallbacks, this gives inventory presence + name-level malicious
@@ -38,6 +38,14 @@ func parsePyprojectManifest(path string) ([]Package, error) {
 			return
 		}
 		canonical := normalizePyPIName(name)
+		// An exact PEP 440 pin is a concrete version, not an unresolved range.
+		// Preserve ranges/wildcards so they are never mistaken for resolved deps.
+		if strings.HasPrefix(version, "==") && !strings.HasPrefix(version, "===") {
+			pin := strings.TrimSpace(strings.TrimPrefix(version, "=="))
+			if pin != "" && !strings.ContainsAny(pin, "*,<>=!~ \t") {
+				version = pin
+			}
+		}
 		key := canonical + "@" + version
 		if _, dup := seen[key]; dup {
 			return

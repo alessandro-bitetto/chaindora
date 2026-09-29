@@ -225,6 +225,9 @@ Examples:
 			}
 		}
 		fmt.Fprintf(os.Stderr, "[chdora] tree resolved: %d unique (name, version) tuple(s)\n", len(refs))
+		if len(refs) == 0 {
+			return fmt.Errorf("install refused: resolution produced no inspectable packages; an empty dependency tree cannot authorize installation")
+		}
 
 		// Gate every node. CachedRun reads from ~/.chaindora/gate-cache/
 		// as integrity history, reruns every current checker, and
@@ -305,6 +308,9 @@ func renderGateNode(w *os.File, pc gate.PackageCheck, explain bool) {
 // beats Warn beats Approve. We don't surface mixed states here —
 // the caller already rendered per-node detail.
 func overallVerdict(results []gate.PackageCheck, policy gate.Policy) gate.Verdict {
+	if len(results) == 0 {
+		return gate.VerdictUnknown
+	}
 	worst := gate.VerdictApprove
 	for _, pc := range results {
 		allow, v := policy.Decide(pc)
@@ -712,6 +718,12 @@ func isGatedPM(pm string) bool {
 // transparent, the user sees identical output to what they'd see
 // without chdora in the path.
 func execReal(bin string, args []string) error {
+	// Passthrough commands reach this function before resolution. Dry-run
+	// must prevent those handoffs too; it must never execute an install.
+	if gateExecDryRun {
+		fmt.Fprintf(os.Stderr, "[chdora] --dry-run: would pass through %s %s (not inspected); command not executed\n", bin, strings.Join(args, " "))
+		return nil
+	}
 	// We use exec.Command + Run rather than syscall.Exec so the
 	// gate's "approved — exec'ing" line stays visible; with a true
 	// exec, our stderr line gets clobbered if npm itself fails fast.

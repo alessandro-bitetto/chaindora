@@ -14,6 +14,8 @@ lists exact command and inventory coverage.
 | Persistent integrity evidence | Hash history survives approval TTL until cleared. Concurrent writes use unique temporary files. Integrity differences require review of artifact/platform identity. |
 | Bounded archive inspection | Downloads, decoded streams, individual files, entries and nesting have limits. Truncation, corruption, trailing payloads and exhausted limits are incomplete inspection, not approval. |
 | Credential-collection detection | JS/TS and Python rules combine collection and outbound HTTP in the same file. Dedicated npm/PyPI predictive checks run independently of version differences. |
+| Empty resolution and failed inventory | Empty gate trees refuse installation even under relaxed policy. CI parser/traversal failures emit structured findings and exit 2 without updating baselines or applying fixes. |
+| Resolver lifecycle and handoff regressions | Yarn chooses script-disabled commands by major version; Deno 2 disables node_modules during resolution. Dry-run prevents final handoff on all routes. These controls are not a process sandbox. |
 
 The named signatures are `env-var-exfil-shape` and
 `credential-file-exfil-shape`. Each contributes weight 3 to the gate's static
@@ -89,6 +91,12 @@ controls and detection of unchanged suspicious behavior.
 Scope tests cover supported managers, unsupported argument/manager refusal,
 project discovery, ignored inventory formats and safe shim cleanup. Fixtures
 use local HTTP servers and inert source; no malicious payload is executed.
+
+The [environment validation report](environment-testing.md) records real tests
+of all 15 manager names, lifecycle sentinels, complete dependency graphs and
+CLI JSON/SARIF/exit-code contracts. Run `tests/run_environments.py` with the
+documented isolated toolchains; ordinary Go tests intentionally skip that
+opt-in matrix. CI now runs both the ordinary suite and the separate contracts.
 
 Run `go test ./... -race -count=1`, `go vet ./...`, native and cross-platform
 builds, and `npm run build` in `website/`. Browser checks should exercise

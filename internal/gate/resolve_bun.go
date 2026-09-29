@@ -2,7 +2,6 @@ package gate
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,15 +16,13 @@ import (
 // cooldown probe, publisher-change probe, etc. all reuse the
 // existing npm infrastructure.
 //
-// Bun's lockfile (bun.lockb) is binary — there's no first-class
-// way to parse it without bun itself. Approach:
+// Use Bun to resolve and enumerate its own lockfile. Approach:
 //  1. tmpdir with stub package.json.
 //  2. `bun install <pkgs> --ignore-scripts --backend=copyfile`
 //     resolves + downloads .tgz bytes into temp node_modules.
 //     --ignore-scripts is critical: bun runs preinstall/postinstall
 //     by default, exactly the payload class we're trying to gate.
-//  3. `bun pm ls --json` walks the resolved tree and prints JSON
-//     with name, version, and integrity per node.
+//  3. `bun pm ls --all` enumerates the locked tree as text.
 //
 // bunPath is the absolute path to the real `bun` binary so the
 // shim doesn't loop.
@@ -57,7 +54,6 @@ func ResolveBunTree(ctx context.Context, bunPath string, addArgs []string) ([]Pa
 		"install",
 		"--ignore-scripts",
 		"--backend=copyfile",
-		"--no-save",
 	}, addArgs...)
 	cmd := exec.CommandContext(ctx, bun, args...)
 	cmd.Dir = tmp
@@ -67,7 +63,7 @@ func ResolveBunTree(ctx context.Context, bunPath string, addArgs []string) ([]Pa
 		return nil, wrapPMError("bun", "install --ignore-scripts", out, err)
 	}
 
-	// Now enumerate. `bun pm ls --json` outputs a tree of objects.
+	// Keep the generated manifest and lockfile: pm ls requires the lockfile.
 	enumCmd := exec.CommandContext(ctx, bun, "pm", "ls", "--all")
 	enumCmd.Dir = tmp
 	listOut, err := enumCmd.CombinedOutput()
@@ -136,8 +132,3 @@ func parseBunPmLs(out []byte, directs map[string]bool) []PackageRef {
 	}
 	return refs
 }
-
-// bunInfo is unused today — placeholder for a future enrichment
-// pass that fetches integrity from the npm registry directly,
-// since bun pm ls doesn't surface it.
-type bunInfo struct{ ignored json.RawMessage }

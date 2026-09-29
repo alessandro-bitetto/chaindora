@@ -34,6 +34,12 @@ This is a comparison with a saved report, not analysis of a Git diff.
 | 1 | At least one unsuppressed, new finding matches the policy |
 | 2 | Command, input, configuration or operational error |
 
+Unreadable inventory files and lockfile parsing failures emit
+`CHDORA-INVENTORY-INCOMPLETE` in JSON/SARIF and force exit 2. These coverage
+failures cannot be waived with `--fail-on none`, suppressions or a baseline.
+The incomplete run does not apply fixes or update the baseline; valid findings
+from the rest of the project are still reported.
+
 With no baseline, every unsuppressed finding is considered new. A successful
 exit does not guarantee complete inspection; some skipped or failed checks
 produce no findings.

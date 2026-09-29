@@ -73,6 +73,13 @@ inspection failure emits a Low configuration finding; most other predictive
 Unknown results are suppressed. CI severity thresholds alone cannot enforce a
 minimum inspection-coverage requirement. No findings does not mean no attack.
 
+Inventory parsing and traversal failures are an enforced exception: CI emits
+`CHDORA-INVENTORY-INCOMPLETE` and exits 2 even with severity overrides,
+suppressions or a baseline. It does not apply fixes or update baselines after
+an incomplete inventory. An empty gate resolution also refuses installation
+independently of relaxed policy. These checks do not establish full coverage of
+unsupported formats or disabled detectors.
+
 ## Resource and privacy boundaries
 
 Archive inspection caps downloads/decoded streams at 50 MiB, files at 4 MiB,
@@ -94,7 +101,7 @@ part of the project's security data.
 3. Cover common install/restore paths and explicitly report unsupported routes.
 4. Verify installed file contents and authenticate provenance.
 5. Report checked/failed/skipped coverage separately from findings; measure
-   detection against inert attack replays and benign controls.
+detection against inert attack replays and benign controls.
 
 The [hardening assessment](security-hardening.md) includes code-level evidence
 and acceptance tests. New ecosystem names are lower priority than establishing

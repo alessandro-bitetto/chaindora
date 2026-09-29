@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -20,12 +21,9 @@ import (
 // `--ignore-scripts`, parse the generated lockfile, treat the
 // resolved tree as the unit of work for the gate.
 //
-// We detect Berry vs classic by trying Berry's mode first
-// (`yarn add --mode=update-lockfile`) and falling back to
-// classic if yarn refuses the flag — Berry's CLI rejects
-// classic args and vice-versa. This is unfortunately the only
-// reliable detection: `yarn --version` lies inside corepack
-// shims.
+// Detect the version in the resolution directory before selecting a command.
+// Classic accepts Berry's --mode flag without suppressing lifecycle scripts,
+// so trying an install command to detect the version is unsafe.
 //
 // yarnPath is the absolute path to the real yarn binary (not
 // the shim) — same recursion-guard pattern as ResolveNPMTree.
@@ -51,28 +49,49 @@ func ResolveYarnTree(ctx context.Context, yarnPath string, addArgs []string) ([]
 	// Strip flags that would prevent us from getting the lockfile.
 	cleaned := stripYarnNetFlags(addArgs)
 
-	// Berry attempt: --mode=update-lockfile is the Berry idiom
-	// for "resolve, write lockfile, don't install".
-	berryArgs := append([]string{"add", "--mode=update-lockfile"}, cleaned...)
-	berryCmd := exec.CommandContext(ctx, yarn, berryArgs...)
-	berryCmd.Dir = tmp
-	if out, err := berryCmd.CombinedOutput(); err == nil {
-		return parseYarnLock(tmp, addArgs)
-	} else {
-		// Fall through to classic. Surface Berry's error if
-		// classic also fails so the user can see both attempts.
-		_ = out
+	major, err := yarnMajorVersion(ctx, yarn, tmp)
+	if err != nil {
+		return nil, err
 	}
-	// Classic yarn: `yarn add` writes yarn.lock + node_modules.
-	// We pass `--ignore-scripts` for the same reason as npm —
-	// no postinstall during the gate's resolution step.
-	classicArgs := append([]string{"add", "--ignore-scripts", "--no-progress"}, cleaned...)
-	classicCmd := exec.CommandContext(ctx, yarn, classicArgs...)
-	classicCmd.Dir = tmp
-	if out, err := classicCmd.CombinedOutput(); err != nil {
-		return nil, wrapPMError("yarn", "add (Berry and classic both refused)", out, err)
+	for _, arg := range cleaned {
+		flag, _, _ := strings.Cut(arg, "=")
+		if flag == "--" || flag == "--ignore-scripts" || flag == "--mode" {
+			return nil, fmt.Errorf("yarn resolution refuses %q: script execution mode is controlled by the gate", arg)
+		}
+	}
+	args := append([]string{"add"}, cleaned...)
+	if major == 1 {
+		args = append(args, "--ignore-scripts", "--no-progress")
+	} else {
+		args = append(args, "--mode=update-lockfile")
+	}
+	cmd := safeYarnCommand(ctx, yarn, tmp, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, wrapPMError("yarn", "add", out, err)
 	}
 	return parseYarnLock(tmp, addArgs)
+}
+
+func yarnMajorVersion(ctx context.Context, bin, dir string) (int, error) {
+	cmd := exec.CommandContext(ctx, bin, "--version")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return 0, wrapPMError("yarn", "--version", out, err)
+	}
+	majorText, _, _ := strings.Cut(strings.TrimSpace(string(out)), ".")
+	major, err := strconv.Atoi(majorText)
+	if err != nil || major < 1 {
+		return 0, fmt.Errorf("unrecognized Yarn version %q", strings.TrimSpace(string(out)))
+	}
+	return major, nil
+}
+
+func safeYarnCommand(ctx context.Context, bin, dir string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "YARN_ENABLE_SCRIPTS=false", "npm_config_ignore_scripts=true")
+	return cmd
 }
 
 // parseYarnLock reads either yarn.lock format (v1 or Berry) and
@@ -198,7 +217,7 @@ func parseYarnBerryLock(data []byte, addArgs []string) ([]PackageRef, error) {
 	seen := map[string]struct{}{}
 	var refs []PackageRef
 	for key, entry := range raw {
-		if entry.Version == "" {
+		if entry.Version == "" || strings.Contains(entry.Resolution, "@workspace:") {
 			continue
 		}
 		// Key shape: "pkg@npm:^1.0.0, pkg@npm:~1.1.0".
@@ -249,9 +268,7 @@ func yarnBerryName(spec string) string {
 // package.json and yarn.lock into a temp dir and runs yarn in a
 // lockfile-only mode there.
 //
-// Same Berry-vs-classic two-step as ResolveYarnTree: try Berry's
-// `yarn up --mode=update-lockfile` first, fall back to classic
-// `yarn upgrade --silent --ignore-scripts` on rejection.
+// Detect the major version before selecting a script-disabled command.
 func ResolveYarnUpdateAll(ctx context.Context, yarnPath, cwd string) ([]PackageRef, error) {
 	pjPath := filepath.Join(cwd, "package.json")
 	pjBytes, err := os.ReadFile(pjPath)
@@ -278,20 +295,17 @@ func ResolveYarnUpdateAll(ctx context.Context, yarnPath, cwd string) ([]PackageR
 		yarn = "yarn"
 	}
 
-	// Berry: `yarn up '*' --mode=update-lockfile` bumps everything
-	// without writing node_modules.
-	berryCmd := exec.CommandContext(ctx, yarn, "up", "*", "--mode=update-lockfile")
-	berryCmd.Dir = tmp
-	if _, err := berryCmd.CombinedOutput(); err == nil {
-		return parseYarnLock(tmp, nil)
+	major, err := yarnMajorVersion(ctx, yarn, tmp)
+	if err != nil {
+		return nil, err
 	}
-
-	// Classic: `yarn upgrade --silent --ignore-scripts` upgrades every
-	// dep to the newest in-range version and rewrites yarn.lock.
-	classicCmd := exec.CommandContext(ctx, yarn, "upgrade", "--silent", "--ignore-scripts", "--no-progress")
-	classicCmd.Dir = tmp
-	if out, err := classicCmd.CombinedOutput(); err != nil {
-		return nil, wrapPMError("yarn", "upgrade (Berry and classic both refused)", out, err)
+	args := []string{"up", "*", "--mode=update-lockfile"}
+	if major == 1 {
+		args = []string{"upgrade", "--silent", "--ignore-scripts", "--no-progress"}
+	}
+	cmd := safeYarnCommand(ctx, yarn, tmp, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, wrapPMError("yarn", "update-all", out, err)
 	}
 	return parseYarnLock(tmp, nil)
 }
