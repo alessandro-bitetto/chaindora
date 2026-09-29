@@ -117,10 +117,10 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"agent_id":     agent.ID,
-		"api_key":      token,
-		"enrolled_at":  agent.EnrolledAt,
-		"server_note":  "Persist the api_key NOW — it will not be shown again. The server only stores its SHA-256 hash.",
+		"agent_id":    agent.ID,
+		"api_key":     token,
+		"enrolled_at": agent.EnrolledAt,
+		"server_note": "Persist the api_key NOW — it will not be shown again. The server only stores its SHA-256 hash.",
 	})
 }
 
@@ -199,7 +199,7 @@ func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request, agent
 //
 //	{
 //	  "command": "chdora audit --whole-machine",
-//	  "chdora_version": "0.13.0",
+//	  "chdora_version": "0.0.1",
 //	  "findings": [ ... findings.Finding ... ]
 //	}
 //

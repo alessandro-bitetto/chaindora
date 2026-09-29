@@ -36,3 +36,19 @@ Brand colors: black `#000000`, red `#DA2F2F`, white `#FFFFFF`; neutral gray for
 secondary text and rules. Permanent Marker is loaded from Google Fonts. Body
 and monospace text use system font stacks. The original mascot is
 `src/assets/logo-symbol.png`; use existing assets rather than inventing a new mark.
+
+## Navigation and publishing
+
+Internal section links use Angular `RouterLink` fragments. Router scrolling
+handles repeat clicks on the same fragment and offsets the sticky header.
+Check Get Chaindora from the top of the page, after scrolling away from the
+install section, and through the mobile menu.
+
+Cloudflare Workers Builds deploys the connected `main` branch using
+`wrangler.toml` and the `dist/browser` output. After a push, check the deployment
+status and verify [chaindora.dev](https://chaindora.dev). CLI release publishing
+is a separate tag-triggered workflow.
+
+User-facing guidance lives in the [documentation index](../docs/README.md).
+Keep download URLs, source-install version and the five-ecosystem scope aligned
+with that documentation.

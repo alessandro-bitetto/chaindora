@@ -4,7 +4,7 @@ Each `incidents/*.yaml` file describes one supply-chain incident. The detector
 matches the inventory of installed packages and the scanned filesystem against
 these descriptors and emits findings tagged `detector: incident-pack`.
 
-Contributions welcome — see [SHA references in each file](.) for source-of-truth
+Contributions welcome — see [source references in each file](.) for source-of-truth
 links per incident.
 
 ## Fields
@@ -23,8 +23,8 @@ references:                     # at least one URL to an authoritative source
 # Package version matches. Every entry generates one finding per matched
 # (inventory package, version) pair.
 packages:
-  - ecosystem: npm              # npm | PyPI | GitHub Actions | Homebrew | Debian
-                                # | Browser Extension | IDE Extension | Go
+  - ecosystem: npm              # npm | PyPI | NuGet | Go | crates.io
+                                # Shared CI/host labels are separate evidence categories.
     name: "@scope/pkg"
     versions:
       - "1.2.3"
@@ -43,7 +43,7 @@ packages:
 #
 # Supported glob syntax:
 #   **/foo/bar    matches any file whose relative path ends with foo/bar
-#   foo/bar       exact filepath.Match (no recursive ** support)
+#   foo/bar       path.Match with / separators (no recursive ** support)
 #
 # `content_substr` (optional) gates the match: the artifact is only flagged
 # if the file's contents contain that substring. Useful for noisy filenames
@@ -71,8 +71,8 @@ post_compromise:
 
 ## Authoring guidance
 
-- **Be precise about versions.** Listing entire version ranges without
-  justification produces false positives at scale. Cite the upstream advisory.
+- **List exact affected versions.** This matcher accepts literal versions or
+  `"*"`; it does not evaluate semver ranges. Cite the upstream advisory.
 - **Annotate uncertainty.** If you only have package names but not exact
   versions, list the package with a YAML comment pointing to the source —
   better to under-match than to over-match.

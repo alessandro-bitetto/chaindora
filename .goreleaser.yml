@@ -75,5 +75,5 @@ release:
     Each archive has a SHA-256 entry in `chaindora_{{ .Version }}_checksums.txt`.
     Verify your downloaded archive against that entry before installation.
 
-    [Documentation](https://github.com/alessandro-bitetto/chaindora/blob/{{ .Tag }}/README.md)
+    [Documentation](https://github.com/alessandro-bitetto/chaindora/blob/main/docs/README.md)
     · [Threat model](https://github.com/alessandro-bitetto/chaindora/blob/{{ .Tag }}/docs/threat-model.md)

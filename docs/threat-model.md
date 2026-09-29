@@ -39,7 +39,8 @@ pass through. Alternative-manager support is retained, but is not a claim that
 every current manager version, workspace or install form is covered. Deno's
 existing-state resolver and Paket's lockfile-only resolver do not model all
 requested changes. Deno raw HTTPS/JSR imports are outside the registry scope.
-See [command coverage](../README.md#gate-command-coverage).
+Automatic Windows wrapper installation is incomplete; use explicit `gate exec`
+commands there. See [command coverage](../README.md#gate-command-coverage).
 
 Resolution invokes external package managers. Dry-run, lockfile-only and
 ignore-script options do not constitute a sandbox. Python source metadata/build

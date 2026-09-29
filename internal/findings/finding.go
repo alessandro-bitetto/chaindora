@@ -42,14 +42,10 @@ const (
 	ConfidenceLow Confidence = "low"
 )
 
-// Category classifies what kind of question a finding answers. Added in
-// to separate "we found a deliberate supply-chain attack against
-// you" from "your dependency has a known CVE in legitimately-written
-// code." These two things look identical in a Severity-only world but
-// require different defenses, attention levels, and tools — and most of
-// chdora's identity is in the first bucket. The renderer surfaces
-// supply-chain findings prominently and collapses dependency-CVE
-// findings into a secondary section.
+// Category groups findings by the kind of evidence they describe. Malicious
+// package evidence, dependency vulnerabilities, host state, configuration and
+// predictive signals require different investigation and remediation workflows.
+// The text renderer uses these categories to organize its sections.
 type Category string
 
 const (
@@ -84,15 +80,14 @@ const (
 	// installed version looks like an attack-in-progress shape —
 	// published hours ago, publisher just changed, hash has shifted
 	// since the version was last vetted, suspicious cross-version
-	// drift. These are advisory by default (severity=medium) and
-	// don't trip --fail-on=critical,high gates, but escalate to
-	// critical when integrity-based signals fire (republish-guard
-	// detecting a known name@version with different bytes).
+	// drift. Severity depends on the checker: credential-collection
+	// patterns emit High; integrity-history changes emit Critical.
+	// Both can fail the default --fail-on=critical,high policy.
 	CategoryPredictive Category = "predictive"
 )
 
-// Finding is the normalized output of any detector. The shape is designed to
-// map cleanly onto SARIF 2.1.0 results when the SARIF reporter lands in P3.
+// Finding is the normalized output of a detector, shared by the JSON, JSONL
+// and SARIF reporters.
 type Finding struct {
 	Detector  string              `json:"detector"`
 	Category  Category            `json:"category,omitempty"`
@@ -106,7 +101,7 @@ type Finding struct {
 	// Confidence is the detector's self-reported certainty. Empty
 	// (omitted in JSON) means the detector hasn't been migrated to
 	// emit one yet; consumers should treat empty as ConfidenceMedium
-	// for ranking purposes. .
+	// for ranking purposes.
 	Confidence Confidence `json:"confidence,omitempty"`
 	References []string   `json:"references,omitempty"`
 	SourcePath string     `json:"source_path,omitempty"`

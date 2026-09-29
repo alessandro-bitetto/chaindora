@@ -64,10 +64,10 @@ continuous-integration use:
     primary output format.
   - Exits with code 1 if any finding meets the --fail-on threshold
     (default: critical,high). Use 'any' to fail on any finding, 'none' to
-    always exit 0.
+    disable finding-based failure. Operational errors still exit non-zero.
   - --sarif <path> writes a SARIF 2.1.0 sidecar file alongside the chosen
-    primary format, ready for upload to GitHub code-scanning, GitLab security
-    dashboards, etc.
+    primary format, ready for upload to compatible code-scanning services.
+    GitLab SAST JSON and SARIF are different report formats.
   - Quieter than scan by default — use --verbose to restore diagnostic output.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -160,9 +160,9 @@ continuous-integration use:
 		}
 
 		// Predictive layer: gate-style behavioral signals replayed
-		// against installed packages. Defaults to severity=medium so
-		// the default --fail-on=critical,high CI gate stays quiet;
-		// republish-guard (cache-based) escalates to critical.
+		// against the inventory. Credential patterns emit High and
+		// integrity-history changes emit Critical; both can fail
+		// the default --fail-on=critical,high policy.
 		if !ciSkipPredictive && !ciSkipRegistry {
 			tally.Enable("predictive")
 			probes := buildGateProbes()

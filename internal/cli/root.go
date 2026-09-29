@@ -17,11 +17,6 @@ var Version = "0.0.1"
 // from the default "generic error → exit 2" path. Wrapping an
 // underlying err keeps the chain unwrappable for tests that need to
 // assert on the cause.
-//
-// Replaces the previous pattern of calling os.Exit directly from
-// inside RunE handlers, which scattered exit-code knowledge across
-// internal/cli/* files and made unit testing the success/failure
-// paths brittle. .
 type ExitError struct {
 	Code int
 	Err  error

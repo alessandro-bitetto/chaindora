@@ -72,7 +72,9 @@ directories and content-sniffs the shim marker to avoid recursion.
 `gate_retired.go` removes regular files carrying the Chaindora shim marker when
 their manager is outside the supported scope; it preserves supported shims during
 installation, and ignores symlinks, directories and unmarked user files.
-`gate disable` uses the same ownership check for removal.
+`gate disable` uses the same ownership check for removal on macOS/Linux.
+Windows wrapper generation is incomplete; use direct `gate exec` invocations
+instead of relying on automatic interception.
 
 ## Repository map
 

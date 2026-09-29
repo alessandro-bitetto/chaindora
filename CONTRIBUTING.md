@@ -15,6 +15,7 @@ checks remain part of the product.
 
 Read the [threat model](docs/threat-model.md) and
 [security roadmap](docs/security-hardening.md) before proposing a security feature.
+The [documentation index](docs/README.md) maps user guides and technical references.
 
 ## Development
 

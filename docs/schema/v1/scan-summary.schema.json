@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/alessandro-bitetto/chaindora/docs/schema/v1/scan-summary.schema.json",
   "title": "chaindora scan summary",
-  "description": "Terminal record of a scan run. Emitted alongside findings so receivers can tell whether a run completed cleanly. Without this, a scan that crashed midway looks identical to a clean scan that happened to find fewer packages — and the receiver would silently demote the missing packages from 'installed' to 'uninstalled'. Borrowed conceptually from bumblebee's scan_summary record.",
+  "description": "Terminal record of a scan run. Emitted alongside findings so receivers can tell whether a run completed cleanly. Without this, a scan that crashed midway looks identical to a clean scan that happened to find fewer packages — and the receiver would silently demote the missing packages from 'installed' to 'uninstalled'.",
   "type": "object",
   "additionalProperties": false,
   "required": ["status", "finding_count", "started_at", "completed_at"],

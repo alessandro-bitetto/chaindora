@@ -54,6 +54,10 @@ identity and digest normalization should accompany the transaction work below.
 These gaps remain open. The suggested acceptance tests define what “done”
 would mean; this change does not claim to implement them.
 
+On Windows, use explicit `gate exec` invocations. Automatic wrapper generation
+still needs native command wrappers, quoting, activation and removal tests before
+it can be documented as reliable interception.
+
 | Priority | Work | Evidence in current code | Acceptance test |
 |---|---|---|---|
 | P0 | Bind approval to the exact install transaction | `ResolveNPMTree` resolves in a synthetic project; `gate_exec.go` later executes the original arguments in the real project. `StaticScan` asks registry probes for bytes rather than verifying them against `PackageRef.Integrity`. | Swap a registry response, range resolution, mirror, project manifest or lockfile between resolution and execution. Installation must refuse, or consume only the already verified, content-addressed artifacts and frozen resolution. Include transitive dependencies, workspaces and platform artifacts; distinct legitimate wheels must not be mislabeled as republishes. |

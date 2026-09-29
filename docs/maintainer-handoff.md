@@ -1,7 +1,7 @@
 # Maintainer guide
 
 Chaindora 0.0.1 consists of a Go CLI, curated incident data and an Angular
-static website. Start with the [README](../README.md),
+static website. Start with the [documentation index](README.md),
 [architecture](architecture.md) and [threat model](threat-model.md).
 
 ## Release workflow
@@ -20,11 +20,16 @@ permission. No GPG signature is configured; do not describe checksum files as
 signed. Verify uploaded assets, the release page and a downloaded native binary
 before considering publication complete. Commit and publish only when authorized.
 
+Keep published tags and release archives immutable. Documentation corrections
+can be committed to `main`; the release tag retains the documentation shipped
+with the binary. Link ongoing guidance to the documentation on `main`.
+
 ## Website
 
 `website/wrangler.toml` configures Cloudflare static assets from `dist/browser`.
-Build with `npm ci` and `npm run build` in `website/`. GitHub does not currently
-provide a Pages workflow in this repository. Hosting credentials and deployment
+Build with `npm ci` and `npm run build` in `website/`. Cloudflare Workers Builds
+deploys the connected `main` branch; check the `Workers Builds: chaindora` status
+and verify [chaindora.dev](https://chaindora.dev) after a push. Hosting credentials and deployment
 access are separate from the CLI release token; never commit them. The generated
 Infrar build specifications remain available under `.infrar` directories.
 

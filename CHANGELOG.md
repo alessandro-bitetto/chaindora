@@ -5,7 +5,7 @@
 Initial release of Chaindora: supply-chain prevention and detection for npm,
 PyPI, .NET/NuGet, Go modules and Rust/crates.io.
 
-- Fifteen package-manager commands, including Yarn, pnpm, Bun, Deno, Poetry,
+- Fifteen package-manager executable names, including Yarn, pnpm, Bun, Deno, Poetry,
   uv, Pipenv, PDM and Paket. Command coverage is documented in the README.
 - Install-time checks for known malicious packages, release age, publisher and
   maintainer signals, source patterns, version differences and project policy.

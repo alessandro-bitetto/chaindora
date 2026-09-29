@@ -5,11 +5,11 @@
 If you've found a vulnerability in `chaindora` (the scanner — not in
 something it detects), please **do not** open a public GitHub issue.
 
-Use GitHub's private vulnerability reporting flow on this repository:
-
-  https://github.com/alessandro-bitetto/chaindora/security/advisories/new
+Use [GitHub's private vulnerability reporting form](https://github.com/alessandro-bitetto/chaindora/security/advisories/new).
+Private vulnerability reporting is enabled for this repository.
 
 Include:
+
 - A description of the issue and its impact.
 - A minimal reproducer (commit SHA, command line, sample input).
 - Your assessment of severity.
@@ -32,6 +32,9 @@ The following are **not** vulnerabilities in `chaindora`:
   That's coverage we'd love to add — please open a normal issue or, even
   better, an incident-pack PR (see
   [docs/incident-pack.md](./docs/incident-pack.md)).
+  An attack that exploits a defect in Chaindora itself, such as a gate-policy
+  bypass, unsafe archive handling or credential exposure, belongs in private
+  vulnerability reporting.
 - **A finding that turns out to be a false positive.** Open a regular
   issue with the input that triggered it; we'll tighten the detector.
 - **A vulnerability in a dependency `chaindora` reports on.** Report it

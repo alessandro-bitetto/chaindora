@@ -1,338 +1,238 @@
-# CI/CD integration recipes
+# CI integration
 
-Drop-in snippets for the major CI platforms. `chdora ci` autodetects
-most of them from environment variables, so you usually don't need
-extra flags.
+[Documentation](README.md) · [Installation](installation.md) · [Troubleshooting](troubleshooting.md)
 
-## Quality-gate features
+`chdora ci` scans a project and applies a finding policy. It does not intercept
+package installation in the CI job. Run it against the lockfiles and source you
+intend to build, and review the [protection boundaries](threat-model.md).
 
-Beyond basic scanning, `chdora ci` exposes three CI-focused features
-designed to make it work as a PR gate rather than a noisy report:
+## Failure policy
 
-| Feature | Flag | What it does |
+```sh
+chdora ci . --fail-on critical,high --sarif chaindora.sarif
+```
+
+| `--fail-on` | Findings that cause exit 1 |
+|---|---|
+| `critical,high` (default) | Critical or High |
+| `critical,high,medium` | Critical, High or Medium |
+| `medium` | Medium only |
+| `any` | Any severity |
+| `none` | No failure based on findings; operational errors still fail |
+
+The list matches exact severities; it is not a minimum severity. Spell levels
+as `critical`, `high`, `medium`, `low` or `unknown`. Unrecognized tokens do not
+match a finding, so review policy values carefully.
+
+Suppressions are applied first. When `--baseline` is supplied, the policy then
+applies only to findings whose fingerprints are absent from that baseline.
+This is a comparison with a saved report, not analysis of a Git diff.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | No unsuppressed, new finding matches the policy |
+| 1 | At least one unsuppressed, new finding matches the policy |
+| 2 | Command, input, configuration or operational error |
+
+With no baseline, every unsuppressed finding is considered new. A successful
+exit does not guarantee complete inspection; some skipped or failed checks
+produce no findings.
+
+## Predictive findings
+
+| Check | Severity | Interpretation |
 |---|---|---|
-| **Baseline mode** | `--baseline path.json` | First run records fingerprints; subsequent runs apply `--fail-on` only to NEW findings. Pre-existing tech debt doesn't break every PR. Combine with `--update-baseline` after intentional resolution. |
-| **Suppression file** | `.chaindora-ignore.yml` | Per-project ignore list. Each entry MUST have a `reason`. Optional `expires: YYYY-MM-DD` (expired entries still apply but warn). |
-| **PR-comment markdown** | `--format pr-comment` or `--pr-comment <file>` | Sticky-comment-marker output for GitHub PR flows. Severity-colored cards + new-since-baseline section + collapsible suppressed/pre-existing. |
+| `republish-guard` | Critical | An observed integrity string changed for the same package/version; investigate artifact and platform identity |
+| `credential-exfiltration` | High | Credential collection plus outbound HTTP in npm/PyPI source; Medium confidence, not proof of exfiltration |
+| `cooldown`, `version-diff` | Medium | Recent release or suspicious pattern changes |
+| `publisher-change`, `maintainer-trust`, `provenance` | Low | Supporting registry metadata |
+| Incomplete credential inspection | Low, configuration category | The requested source inspection failed |
 
-## Predictive findings in CI
-
-The predictive detector (gate-style behavioral checks replayed
-against installed packages) emits findings at three severity tiers:
-
-| Checker | Severity | Notes |
-|---|---|---|
-| `republish-guard` | Critical | Hard tamper signal — fires when a `name@version` reappears with different bytes |
-| `cooldown` / `version-diff` | Medium | Real time-sensitive / behavioral signals |
-| `publisher-change` / `maintainer-trust` / `provenance` | Low | Advisory — high signal-to-noise per finding, mostly informational |
-
-**Default `--fail-on=critical,high` skips all advisory predictive
-findings.** You only fail the build on real republish-guard hits.
-
-To make predictive `cooldown` + `version-diff` block PRs:
-```sh
-chdora ci . --fail-on critical,high,medium
-```
-
-To skip the predictive detector entirely in CI (saves the registry
-round-trips, halves the scan time):
-```sh
-chdora ci . --skip-predictive
-```
-
-To hide the predictive section from the rendered output without
-disabling the detector (still flows into JSON / SARIF):
-```sh
-chdora ci . --exclude-predictive
-```
+The default policy can fail on both republish and credential-collection findings,
+as well as Critical/High findings from other detectors. Most other predictive
+Unknown results are suppressed. `--skip-predictive` disables those checks;
+`--exclude-predictive` only hides their text-output section. Category display
+filters do not remove results from JSON/SARIF or the CI failure policy.
 
 ## GitHub Actions
 
-### Quick start — SARIF + PR annotations
+This workflow installs the pinned CLI with Go, fetches the incident pack, scans
+the checkout and uploads SARIF even when findings fail the scan step. Save it as
+`.github/workflows/chaindora.yml` in the project being scanned.
 
 ```yaml
-# .github/workflows/chaindora.yml
 name: chaindora
 on: [push, pull_request]
+
+permissions:
+  contents: read
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     permissions:
-      security-events: write   # upload-sarif requires this
       contents: read
+      security-events: write
     steps:
-      - uses: actions/checkout@v4
-      - run: |
-          curl -L https://github.com/alessandro-bitetto/chaindora/releases/download/v0.0.1/chaindora_0.0.1_linux_x86_64.tar.gz | tar xz
-          sudo mv chdora /usr/local/bin/
-      - run: chdora ci . --sarif chaindora.sarif
-      - uses: github/codeql-action/upload-sarif@v3
-        if: always()
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: stable
+          cache: false
+      - name: Install Chaindora
+        run: |
+          go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1
+          chdora update --dest "$RUNNER_TEMP/chaindora-incidents"
+      - name: Scan
+        run: |
+          chdora ci . --incidents "$RUNNER_TEMP/chaindora-incidents" --sarif chaindora.sarif
+      - name: Upload SARIF
+        if: always() && hashFiles('chaindora.sarif') != ''
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           sarif_file: chaindora.sarif
 ```
 
-`chdora ci` autodetects `$GITHUB_ACTIONS=true` and emits inline
-`::error file=…,line=…::` annotations on stdout alongside the SARIF
-sidecar. `if: always()` ensures the upload step runs even when chdora
-exits non-zero.
+The action revisions above are the ones used by this repository's test workflow.
+Review action updates through your dependency-maintenance process. For a fixed
+incident snapshot, select a reviewed incident directory from the release archive
+instead of running `chdora update` against the current upstream pack.
 
-### SonarQube-grade: baseline + suppression + sticky PR comment
-
-```yaml
-- run: chdora ci . \
-    --baseline ./.chdora-baseline.json \
-    --pr-comment ./chdora-comment.md \
-    --sarif chaindora.sarif \
-    --fail-on critical,high
-
-- name: Sticky PR comment
-  if: github.event_name == 'pull_request' && always()
-  uses: marocchino/sticky-pull-request-comment@v2
-  with:
-    path: ./chdora-comment.md
-
-- uses: github/codeql-action/upload-sarif@v3
-  if: always()
-  with:
-    sarif_file: chaindora.sarif
-```
-
-`chdora-comment.md` is GitHub-flavored markdown with the sticky-comment
-marker `<!-- chaindora:pr-comment -->`. The sticky-pull-request-comment
-action looks for that marker and updates in place across pushes — one
-PR comment, not 47.
+GitHub Actions is autodetected through `GITHUB_ACTIONS=true`; its default output
+uses workflow annotations. SARIF upload additionally requires code scanning to
+be available for the repository and appropriate token permissions. See
+[GitHub's SARIF upload guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
+for repository and workflow requirements.
 
 ### Baseline workflow
 
-```sh
-# Once per repo, after the first scan stabilizes:
-chdora ci . --baseline ./.chdora-baseline.json --update-baseline
-git add .chdora-baseline.json
-git commit -m "chore: seed chaindora baseline"
-```
-
-Subsequent PRs only fail on findings *introduced by the PR*. Tech
-debt sits in the baseline; a follow-up PR can refresh:
+First review the full findings report. To record an accepted baseline explicitly:
 
 ```sh
-chdora ci . --baseline ./.chdora-baseline.json --update-baseline
+chdora ci . --baseline .chdora-baseline.json --update-baseline --fail-on none
 ```
 
-### Suppression file
+Review and commit the generated file with your policy change. Normal runs use:
 
-`chaindora-ignore.yml` at the repo root (or any parent of the scan
-path) — chdora walks up like `.gitignore`:
+```sh
+chdora ci . --baseline .chdora-baseline.json --sarif chaindora.sarif
+```
+
+A missing baseline does **not** get created automatically: every current finding
+is new until `--update-baseline` writes the file. Updating the baseline does not
+change the current run's failure decision, which uses the previously loaded
+baseline. `--fail-on none` above makes the intentional acceptance run independent
+of finding severity while preserving operational errors.
+
+Fingerprints use detector, advisory ID, PURL and source path. They do not include
+all evidence or severity fields; an existing fingerprint can acquire new evidence
+without becoming new to the baseline. Keep scan paths consistent and periodically
+review the full findings set without baseline filtering.
+
+### Suppressions
+
+Place `.chaindora-ignore.yml` at the scan root or an ancestor:
 
 ```yaml
 suppress:
-  - vuln_id: GHSA-xxxx-yyyy-zzzz
-    package: some-package
-    reason: "Accepted risk per security review; tracked in JIRA-1234"
-    expires: 2026-12-31
-
-  - fingerprint: 5f3a92...   # from `chdora scan --format json | jq .[].fingerprint`
-    reason: "Test fixture, not production"
+  - vuln_id: GHSA-example-advisory
+    package: example-package
+    version: "1.2.3"
+    reason: "Accepted by the project security review; tracked in issue 123"
+    expires: "2026-12-31"
 ```
 
-Every entry requires `reason` — the parser refuses silent suppression.
+Replace the illustrative identity with an actual finding. `reason` is mandatory;
+`package` and exact `version` narrow an advisory match. An exact `fingerprint`
+can be used instead of `vuln_id`. Obtain it from the finding's SARIF
+`partialFingerprints.primaryLocationLineHash`; ordinary findings JSON does not
+contain a `fingerprint` field.
+
+Discovery also recognizes `.chaindora-ignore.yaml` and `chaindora-ignore.yml`.
+In 0.0.1, `--suppress-file` is passed to directory discovery, so use the default
+filename and directory placement rather than relying on arbitrary file paths.
+Expired suppressions **continue to suppress** and emit a warning. Use
+`--ignore-suppressions` for a full audit.
+
+### Markdown reports for pull requests
+
+```sh
+chdora ci . --baseline .chdora-baseline.json --pr-comment chdora-comment.md --sarif chaindora.sarif
+```
+
+This writes a Markdown file; it does not post to GitHub. `--format pr-comment`
+writes the report to stdout instead. A separate, explicitly configured publishing
+step can use the file. That step needs its own PR-write permission and must handle
+fork-PR restrictions. Keep credentials and sensitive paths out of public reports.
 
 ## GitLab CI
 
+This example gates the job and preserves JSON/SARIF as downloadable artifacts.
+It assumes a Go-capable runner image; pin that image to a reviewed version or
+digest according to your project's build policy.
+
 ```yaml
-# .gitlab-ci.yml
 chaindora-scan:
-  image: golang:1.22
+  image: golang:1
   script:
     - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1
-    - chdora ci . --format json > chaindora.json --sarif chaindora.sarif
+    - chdora update --dest /tmp/chaindora-incidents
+    - chdora ci . --incidents /tmp/chaindora-incidents --format json --sarif chaindora.sarif > chaindora.json
   artifacts:
     when: always
     paths:
       - chaindora.json
-    reports:
-      sast: chaindora.sarif
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      - chaindora.sarif
 ```
 
-`chdora ci` detects `$GITLAB_CI=true` and chooses text output by
-default; we override to JSON above for artifact archival. The SARIF
-sidecar uploads as a GitLab SAST report.
+SARIF is not GitLab's native SAST JSON schema. For security-dashboard ingestion,
+use GitLab's `artifacts:reports:sarif` support where available, following its
+[report-type documentation](https://docs.gitlab.com/ci/yaml/artifacts_reports/).
+GitLab ingests security findings only from a successful producing job; a failing
+policy job should remain separate from a report-ingestion job. The example above
+uses ordinary artifacts and retains the scan's failure status.
 
-## CircleCI
+## Other CI systems
 
-```yaml
-# .circleci/config.yml
-version: 2.1
-jobs:
-  chaindora:
-    docker:
-      - image: cimg/go:1.22
-    steps:
-      - checkout
-      - run: go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1
-      - run: chdora ci . --sarif chaindora.sarif
-      - store_artifacts:
-          path: chaindora.sarif
-workflows:
-  build:
-    jobs:
-      - chaindora
-```
-
-`$CIRCLECI=true` is autodetected.
-
-## Bitbucket Pipelines
-
-```yaml
-# bitbucket-pipelines.yml
-image: golang:1.22
-
-pipelines:
-  default:
-    - step:
-        name: chaindora
-        script:
-          - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1
-          - chdora ci . --format json > chaindora.json
-        artifacts:
-          - chaindora.json
-```
-
-`$BITBUCKET_BUILD_NUMBER` (any non-empty value) triggers Bitbucket-
-appropriate output formatting.
-
-## Azure Pipelines
-
-```yaml
-# azure-pipelines.yml
-trigger: [main]
-
-pool:
-  vmImage: 'ubuntu-latest'
-
-steps:
-- task: GoTool@0
-  inputs:
-    version: '1.22'
-- script: |
-    go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1
-    chdora ci . --sarif $(Build.ArtifactStagingDirectory)/chaindora.sarif
-- task: PublishBuildArtifacts@1
-  condition: always()
-  inputs:
-    pathToPublish: $(Build.ArtifactStagingDirectory)
-    artifactName: chaindora
-```
-
-`$TF_BUILD=True` is the autodetect signal.
-
-## Drone / Woodpecker
-
-```yaml
-# .drone.yml
-kind: pipeline
-type: docker
-name: chaindora
-steps:
-  - name: scan
-    image: golang:1.22
-    commands:
-      - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1
-      - chdora ci . --format json > chaindora.json
-```
-
-`$DRONE=true` triggers Drone-appropriate output.
-
-## Jenkins
-
-```groovy
-// Jenkinsfile
-pipeline {
-  agent any
-  stages {
-    stage('chaindora') {
-      steps {
-        sh '''
-          go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1
-          chdora ci . --sarif chaindora.sarif --format json > chaindora.json
-        '''
-        archiveArtifacts artifacts: 'chaindora.sarif,chaindora.json', fingerprint: true
-      }
-    }
-  }
-}
-```
-
-`$JENKINS_HOME` or `$BUILD_TAG` is the autodetect signal.
-
-## Server / fleet mode
-
-If you're running `chdora server` to aggregate findings across an org,
-the CI step can push directly:
-
-```yaml
-# GitHub Actions: enroll the CI as an agent, then push every run
-- run: |
-    chdora agent enroll \
-      --server https://chaindora.corp:8080 \
-      --name ci-${{ github.repository }}-${{ github.workflow }} \
-      --enrollment-secret ${{ secrets.CHAINDORA_ENROLL }}
-    chdora scan . --format json > findings.json
-    chdora agent push --findings findings.json
-```
-
-The findings land in the fleet dashboard's recent-findings table and
-contribute to the per-repo severity counts. Use `--name` carefully —
-the agent identity persists across runs only if you give it a stable
-name.
-
-For continuous-mode CI nodes (always-on builders), pair `chdora watch`
-with the enrolled agent to push every interval rather than every CI
-run.
-
-## `--fail-on` thresholds
-
-| Value | Meaning |
-|---|---|
-| `critical,high` (default) | Exit 1 on CRITICAL or HIGH findings |
-| `any` | Exit 1 on any finding regardless of severity |
-| `none` | Always exit 0 — informational mode |
-| Custom (e.g. `medium`) | Exit 1 on MEDIUM-or-above |
-
-Combined with `--baseline`, the threshold applies to the NEW findings
-only — pre-existing tech debt doesn't fail the PR.
-
-## Exit codes
-
-| Code | Meaning |
-|---|---|
-| 0 | No findings at or above `--fail-on` (after baseline + suppression) |
-| 1 | At least one finding at the threshold |
-| 2 | Cobra-level error (bad flags, missing files) |
-
-## Common debugging
+Install 0.0.1 using the [installation guide](installation.md), select incident
+data, and run the same command in CircleCI, Bitbucket, Azure Pipelines, Drone or
+Jenkins:
 
 ```sh
-# Inspect the parsed inventory without running detectors
-chdora scan . --skip-osv --skip-incidents --skip-heuristic --format json | jq
-
-# Run baseline mode dry-run — see what would be NEW without writing
-chdora ci . --baseline /tmp/dummy.json --format json
-
-# Print the rendered PR comment locally before pushing
-chdora ci . --baseline ./.chdora-baseline.json --format pr-comment | less
-
-# See which CI env chdora detected
-chdora ci . --verbose 2>&1 | grep "detected env"
+chdora ci . --incidents /path/to/incidents --format json --sarif chaindora.sarif > chaindora.json
 ```
 
-## Pointers
+Configure the platform's artifact publication to run even when the scan fails.
+Keep the original scan exit code; appending `|| true` would disable the finding
+gate. Pin the scanner installation independently of the application's toolchain.
 
-- Configuration schema: [README.md](../README.md)
-- Server mode: [docs/architecture.md](./architecture.md)
-- Threat model: [docs/threat-model.md](./threat-model.md)
-- Underlying gate stack: [docs/architecture.md](./architecture.md)
+Autodetection changes the default output format, not the detection policy:
+
+| Environment | Detection variable | Default output |
+|---|---|---|
+| GitHub Actions | `GITHUB_ACTIONS=true` | GitHub annotations |
+| GitLab | `GITLAB_CI=true` | Text |
+| CircleCI | `CIRCLECI=true` | Text |
+| Bitbucket | nonempty `BITBUCKET_BUILD_NUMBER` | Text |
+| Azure Pipelines | `TF_BUILD=True` | Text |
+| Drone | `DRONE=true` | Text |
+| Jenkins | nonempty `JENKINS_HOME` or `BUILD_TAG` | Text |
+| Other runners | none of the above | Text |
+
+## Output and diagnostics
+
+Use `--format json` for a findings array, `--format jsonl` for individual records,
+or `--sarif path` for a separate SARIF report. An empty JSON result can be `null`;
+JSONL can be empty. These outputs contain findings, not the full dependency inventory.
+
+```sh
+# Local checks only; network-backed coverage is disabled.
+chdora ci . --offline --verbose --format json > chaindora.json
+
+# Review all current findings independently of baseline/suppression policy.
+chdora ci . --ignore-suppressions --fail-on none --format json > review.json
+```
+
+The second command omits `--baseline` intentionally. Diagnostics go to stderr.
+See the [finding schema](schema/v1/finding.schema.json) for record fields and
+[troubleshooting](troubleshooting.md) for common configuration mistakes.

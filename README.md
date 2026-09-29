@@ -1,3 +1,5 @@
+<img src="website/src/assets/logo-symbol.png" width="88" height="88" alt="Chaindora mascot">
+
 # Chaindora
 
 Version **0.0.1**.
@@ -6,21 +8,27 @@ Version **0.0.1**.
 PyPI, .NET/NuGet, Go modules, and Rust/crates.io, including alternative package
 managers. The CLI is `chdora`: one Go binary for macOS, Linux, and Windows.
 
-[Website](https://chaindora.dev) · [Releases](https://github.com/alessandro-bitetto/chaindora/releases)
-· [Threat model](docs/threat-model.md) · [Security disclosure](SECURITY.md)
+[Website](https://chaindora.dev) · [Documentation](docs/README.md)
+· [Download 0.0.1](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.1)
+· [Security reporting](SECURITY.md)
 
 ## Start here
 
-Download a binary from [Releases](https://github.com/alessandro-bitetto/chaindora/releases)
-and verify its published checksum, or install version 0.0.1 from source with Go 1.22+:
+Follow the [installation guide](docs/installation.md) for platform downloads,
+checksum verification and PATH setup. With a supported Go toolchain (minimum
+Go 1.22), install the CLI and fetch its incident data:
 
 ```sh
 go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1
+chdora update
 chdora scan .
 ```
 
 Add your Go binary directory to PATH. To build a checkout, run
 `go build -o chdora ./cmd/chdora` and use `./chdora`.
+`chdora update` refreshes the curated incident pack; it does not upgrade the CLI.
+
+## What you can do
 
 - **Prevent:** `chdora gate exec npm install <package>` checks a resolved install
   tree before handing off to the real package manager.
@@ -39,7 +47,7 @@ checks, reducing coverage.
 
 ## Supported scope
 
-Five dependency ecosystems and **15 package-manager commands** are supported.
+Five dependency ecosystems and **15 package-manager executable names** are supported.
 Alternative managers stay within their registry ecosystem; keeping a shim does
 not imply coverage of every command or lockfile version.
 
@@ -101,7 +109,7 @@ forensics is host evidence, not an additional supported install ecosystem.
 ## Prevention
 
 ```sh
-chdora gate install                # writes shims and a marked shell PATH block
+chdora gate install                # macOS/Linux: shims and a marked shell PATH block
 chdora gate status                 # inspect activation
 chdora gate install --no-persist   # shims only; print PATH setup
 chdora gate disable                # remove managed shims and shell block
@@ -109,7 +117,8 @@ chdora gate disable                # remove managed shims and shell block
 
 Open a new terminal after installation. Shims live in `~/.chaindora/bin`;
 they need to precede the real managers on PATH. Direct invocation works without
-shims. Gate options go **before** the manager; package-manager options follow it:
+shims. On Windows, use `chdora gate exec` directly: automatic wrapper installation
+is incomplete. Gate options go **before** the manager; package-manager options follow it:
 
 ```sh
 chdora gate exec --dry-run npm install lodash@4.17.21
@@ -168,7 +177,8 @@ exfiltration. Failed credential inspection emits a Low configuration finding;
 several other incomplete predictive checks still produce no finding.
 
 Use `--exclude` for directory basenames. `--skip-*` disables detector work;
-`--exclude-*` filters categories from output. Consult each command's `--help`
+`--exclude-*` hides categories in text output, while JSON/SARIF and CI policy
+still include them. Consult each command's `--help`
 and the [CI guide](docs/ci-integration.md) before setting automated policies.
 Fix plans remain reviewable; credential rotation and other sensitive host
 changes remain manual. The optional server/agent workflow aggregates fleet
@@ -201,4 +211,6 @@ npm run build
 
 See [architecture](docs/architecture.md), [contributor notes](CLAUDE.md),
 [incident-pack guide](docs/incident-pack.md), and [website development](website/README.md).
+For operational help, start at the [documentation index](docs/README.md) or
+[troubleshooting guide](docs/troubleshooting.md).
 Licensed under [Apache-2.0](LICENSE).
