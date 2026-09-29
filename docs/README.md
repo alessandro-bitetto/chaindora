@@ -1,6 +1,6 @@
 # Chaindora documentation
 
-Documentation for **Chaindora 0.0.2**. The executable is `chdora`.
+Documentation for **Chaindora 0.0.3**. The executable is `chdora`.
 
 Start with a project scan, review the evidence, then add install policy and CI
 checks where they fit your workflow.
@@ -43,5 +43,5 @@ using a result as an enforcement decision.
 - [Changelog](../CHANGELOG.md)
 
 [Website](https://chaindora.dev) ·
-[Download 0.0.2](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.2) ·
+[Download 0.0.3](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.3) ·
 [Report a bug](https://github.com/alessandro-bitetto/chaindora/issues)

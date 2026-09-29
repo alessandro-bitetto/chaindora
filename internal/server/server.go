@@ -199,7 +199,7 @@ func (s *Server) handleAgentDelete(w http.ResponseWriter, r *http.Request, agent
 //
 //	{
 //	  "command": "chdora audit --whole-machine",
-//	  "chdora_version": "0.0.2",
+//	  "chdora_version": "0.0.3",
 //	  "findings": [ ... findings.Finding ... ]
 //	}
 //

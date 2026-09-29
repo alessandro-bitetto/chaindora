@@ -87,7 +87,7 @@ jobs:
           cache: false
       - name: Install Chaindora
         run: |
-          go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.2
+          go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.3
           chdora update --dest "$RUNNER_TEMP/chaindora-incidents"
       - name: Scan
         run: |
@@ -155,7 +155,7 @@ can be used instead of `vuln_id`. Obtain it from the finding's SARIF
 contain a `fingerprint` field.
 
 Discovery also recognizes `.chaindora-ignore.yaml` and `chaindora-ignore.yml`.
-In 0.0.2, `--suppress-file` is passed to directory discovery, so use the default
+In 0.0.3, `--suppress-file` is passed to directory discovery, so use the default
 filename and directory placement rather than relying on arbitrary file paths.
 Expired suppressions **continue to suppress** and emit a warning. Use
 `--ignore-suppressions` for a full audit.
@@ -181,7 +181,7 @@ digest according to your project's build policy.
 chaindora-scan:
   image: golang:1
   script:
-    - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.2
+    - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.3
     - chdora update --dest /tmp/chaindora-incidents
     - chdora ci . --incidents /tmp/chaindora-incidents --format json --sarif chaindora.sarif > chaindora.json
   artifacts:
@@ -200,7 +200,7 @@ uses ordinary artifacts and retains the scan's failure status.
 
 ## Other CI systems
 
-Install 0.0.2 using the [installation guide](installation.md), select incident
+Install 0.0.3 using the [installation guide](installation.md), select incident
 data, and run the same command in CircleCI, Bitbucket, Azure Pipelines, Drone or
 Jenkins:
 

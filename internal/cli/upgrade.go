@@ -339,8 +339,13 @@ func extractFromZip(archive []byte, binName string) ([]byte, error) {
 // cannot be removed, so the previous binary is renamed to <self>.old and
 // will be cleaned up the next time the user upgrades (best-effort
 // os.Remove on the next call).
-func replaceBinary(self string, body []byte) error {
+func replaceBinary(self string, body []byte) (err error) {
 	dir := filepath.Dir(self)
+	defer func() {
+		if errors.Is(err, os.ErrPermission) {
+			err = fmt.Errorf("cannot replace %q: %w; atomic replacement requires write access to the installation directory %q. For a system installation, rerun the upgrade with administrator privileges, or install chdora in a user-writable directory", self, err, dir)
+		}
+	}()
 	tmp, err := os.CreateTemp(dir, "chaindora-upgrade-*")
 	if err != nil {
 		return err
@@ -408,7 +413,7 @@ func init() {
 	upgradeCmd.Flags().BoolVar(&upgradeForce, "force", false,
 		"upgrade even when versions match, or override the package-manager guard")
 	upgradeCmd.Flags().StringVar(&upgradeVersion, "version", "",
-		"pin to a specific release tag (e.g. v0.0.2); default is /releases/latest")
+		"pin to a specific release tag (e.g. v0.0.3); default is /releases/latest")
 	upgradeCmd.Flags().BoolVar(&upgradeVerbose, "verbose", false,
 		"print per-step progress to stderr")
 	rootCmd.AddCommand(upgradeCmd)

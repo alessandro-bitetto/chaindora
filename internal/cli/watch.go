@@ -67,7 +67,7 @@ The webhook POSTs a JSON body:
   {
     "event": "new-finding",
     "host": "<hostname>",
-    "chdora_version": "0.0.2",
+    "chdora_version": "0.0.3",
     "scanned_at": "2026-05-15T22:00:00Z",
     "finding": { ... full Finding object ... }
   }

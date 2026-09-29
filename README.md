@@ -2,14 +2,14 @@
 
 # Chaindora
 
-Version **0.0.2**.
+Version **0.0.3**.
 
 **Your code. Your rules.** Supply-chain prevention and detection for npm,
 PyPI, .NET/NuGet, Go modules, and Rust/crates.io, including alternative package
 managers. The CLI is `chdora`: one Go binary for macOS, Linux, and Windows.
 
 [Website](https://chaindora.dev) · [Documentation](docs/README.md)
-· [Download 0.0.2](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.2)
+· [Download 0.0.3](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.3)
 · [Security reporting](SECURITY.md)
 
 ## Start here
@@ -19,7 +19,7 @@ checksum verification and PATH setup. With a supported Go toolchain (minimum
 Go 1.22), install the CLI and fetch its incident data:
 
 ```sh
-go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.2
+go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.3
 chdora update
 chdora scan .
 ```

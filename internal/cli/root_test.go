@@ -1,10 +1,59 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
+
+func TestExecuteErrorOutput(t *testing.T) {
+	if mode := os.Getenv("CHAINDORA_TEST_EXECUTE_ERROR"); mode != "" {
+		rootCmd.AddCommand(&cobra.Command{
+			Use: "test-exit",
+			RunE: func(*cobra.Command, []string) error {
+				switch mode {
+				case "silent":
+					return SilentExit(7)
+				case "typed":
+					return &ExitError{Code: 7, Err: errors.New("test failure")}
+				default:
+					return errors.New("test failure")
+				}
+			},
+		})
+		rootCmd.SetArgs([]string{"test-exit"})
+		Execute()
+		os.Exit(0)
+	}
+	for _, tc := range []struct {
+		mode string
+		code int
+		want string
+	}{
+		{"generic", 2, "error: test failure\n"},
+		{"typed", 7, "error: test failure\n"},
+		{"silent", 7, ""},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			command := exec.Command(os.Args[0], "-test.run=^TestExecuteErrorOutput$")
+			command.Env = append(os.Environ(), "CHAINDORA_TEST_EXECUTE_ERROR="+tc.mode)
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			var exit *exec.ExitError
+			if err := command.Run(); !errors.As(err, &exit) || exit.ExitCode() != tc.code {
+				t.Fatalf("expected exit %d, got %v", tc.code, err)
+			}
+			if stdout.Len() != 0 || stderr.String() != tc.want {
+				t.Fatalf("stdout=%q stderr=%q; want only %q on stderr", stdout.String(), stderr.String(), tc.want)
+			}
+		})
+	}
+}
 
 func TestExitError_ErrorString(t *testing.T) {
 	cases := []struct {

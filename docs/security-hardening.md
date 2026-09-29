@@ -1,6 +1,6 @@
 # Security controls and roadmap
 
-Chaindora 0.0.2 focuses on strengthening the install boundary and the evidence
+Chaindora 0.0.3 focuses on strengthening the install boundary and the evidence
 behind detection in npm, PyPI, NuGet, Go modules and crates.io. Alternative
 managers are supported within that scope. The [README](../README.md#supported-scope)
 lists exact command and inventory coverage.

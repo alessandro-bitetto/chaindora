@@ -9,8 +9,8 @@ import (
 )
 
 // Version identifies the chaindora build; embedded in SARIF tool metadata.
-// Override at build time with -ldflags "-X github.com/alessandro-bitetto/chaindora/internal/cli.Version=0.0.2".
-var Version = "0.0.2"
+// Override at build time with -ldflags "-X github.com/alessandro-bitetto/chaindora/internal/cli.Version=0.0.3".
+var Version = "0.0.3"
 
 // ExitError is the typed error a cobra RunE handler returns when it
 // wants the process to exit with a specific non-zero code, distinct
@@ -53,7 +53,7 @@ var rootCmd = &cobra.Command{
 	Short:         "chdora — supply chain compromise scanner (project: chaindora)",
 	Long:          `chdora is the chaindora project's CLI. It detects supply chain attacks across npm, PyPI, .NET, Go and Rust, with shared CI and host checks by combining known-IOC matching, host-state forensics, behavioral heuristics, and static analysis.`,
 	SilenceUsage:  true,
-	SilenceErrors: false,
+	SilenceErrors: true, // Execute renders errors once and handles silent exits.
 }
 
 func init() {

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.3] — 2026-09-30
+
+- Explain upgrade permission failures with the affected installation directory
+  and guidance for administrator or user-writable installations.
+- Print command errors once and keep silent exit codes free of error messages.
+- Document upgrades for manually installed binaries in `/usr/local/bin`.
+- Add regression tests for protected installation directories, preserving the
+  installed binary on failure, and generic, typed and silent CLI exits.
+
 ## [0.0.2] — 2026-09-29
 
 Fix install-gate and inventory failures found by the expanded environment tests.

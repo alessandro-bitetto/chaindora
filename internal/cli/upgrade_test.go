@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -158,7 +159,7 @@ func TestExtractFromTarGz(t *testing.T) {
 func TestExtractFromZip(t *testing.T) {
 	want := []byte("fake-chdora.exe")
 	archive := makeZip(t, map[string][]byte{
-		"LICENSE":       []byte("apache-2.0"),
+		"LICENSE":    []byte("apache-2.0"),
 		"chdora.exe": want,
 	})
 	got, err := extractFromZip(archive, "chdora.exe")
@@ -219,6 +220,42 @@ func TestReplaceBinary(t *testing.T) {
 		if strings.HasPrefix(e.Name(), "chaindora-upgrade-") {
 			t.Errorf("leftover temp file: %s", e.Name())
 		}
+	}
+}
+
+func TestReplaceBinaryReadOnlyDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix directory permissions do not model Windows ACLs")
+	}
+	dir := t.TempDir()
+	self := filepath.Join(dir, "chdora")
+	if err := os.WriteFile(self, []byte("old-body"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	// Privileged test runners may bypass directory permissions.
+	if probe, err := os.CreateTemp(dir, "permission-probe-"); err == nil {
+		probe.Close()
+		os.Remove(probe.Name())
+		t.Skip("runner can write into a read-only directory")
+	}
+	err := replaceBinary(self, []byte("new-body"))
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("expected a preserved permission error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), dir) || !strings.Contains(err.Error(), "administrator privileges") {
+		t.Fatalf("missing directory and recovery guidance: %v", err)
+	}
+	got, readErr := os.ReadFile(self)
+	if readErr != nil || string(got) != "old-body" {
+		t.Fatalf("failed upgrade changed the installed binary: %q, %v", got, readErr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "chdora" {
+		t.Fatalf("unexpected files after failed upgrade: %v, %v", entries, err)
 	}
 }
 

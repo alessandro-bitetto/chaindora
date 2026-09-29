@@ -21,7 +21,7 @@ loop throughout.
 
 ## Supported versions
 
-Version **0.0.2** receives security fixes. Report vulnerabilities against the
+Version **0.0.3** receives security fixes. Report vulnerabilities against the
 current release with the exact command, operating system and a minimal reproducer.
 
 ## Out of scope
