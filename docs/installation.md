@@ -2,22 +2,22 @@
 
 [Documentation](README.md) · [Supported scope](../README.md#supported-scope)
 
-Chaindora 0.0.1 ships as one executable, `chdora`, for macOS, Linux and Windows.
+Chaindora 0.0.2 ships as one executable, `chdora`, for macOS, Linux and Windows.
 The package managers you want to wrap must be installed separately.
 
 ## Download a release
 
-Choose an archive from [release 0.0.1](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.1)
-and download `chaindora_0.0.1_checksums.txt` from the same release.
+Choose an archive from [release 0.0.2](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.2)
+and download `chaindora_0.0.2_checksums.txt` from the same release.
 
 | Platform | Architecture | Archive |
 |---|---|---|
-| macOS | Apple silicon | `chaindora_0.0.1_darwin_arm64.tar.gz` |
-| macOS | Intel | `chaindora_0.0.1_darwin_x86_64.tar.gz` |
-| Linux | ARM64 | `chaindora_0.0.1_linux_arm64.tar.gz` |
-| Linux | x86-64 | `chaindora_0.0.1_linux_x86_64.tar.gz` |
-| Windows | ARM64 | `chaindora_0.0.1_windows_arm64.zip` |
-| Windows | x86-64 | `chaindora_0.0.1_windows_x86_64.zip` |
+| macOS | Apple silicon | `chaindora_0.0.2_darwin_arm64.tar.gz` |
+| macOS | Intel | `chaindora_0.0.2_darwin_x86_64.tar.gz` |
+| Linux | ARM64 | `chaindora_0.0.2_linux_arm64.tar.gz` |
+| Linux | x86-64 | `chaindora_0.0.2_linux_x86_64.tar.gz` |
+| Windows | ARM64 | `chaindora_0.0.2_windows_arm64.zip` |
+| Windows | x86-64 | `chaindora_0.0.2_windows_x86_64.zip` |
 
 Archive names use `darwin` for macOS and `x86_64` for Go's `amd64` architecture.
 Archives include the executable, license, documentation and incident YAML files.
@@ -28,8 +28,8 @@ In the download directory, calculate the archive's SHA-256 and compare it with
 the matching filename in the checksum file. For example, on Apple silicon:
 
 ```sh
-shasum -a 256 chaindora_0.0.1_darwin_arm64.tar.gz
-cat chaindora_0.0.1_checksums.txt
+shasum -a 256 chaindora_0.0.2_darwin_arm64.tar.gz
+cat chaindora_0.0.2_checksums.txt
 ```
 
 On Linux, use `sha256sum` in place of `shasum -a 256`. Both values must match
@@ -42,7 +42,7 @@ in a directory on your PATH. This example installs for the current user:
 ```sh
 mkdir -p chaindora-release
 # Substitute the archive you verified above.
-tar -xzf chaindora_0.0.1_darwin_arm64.tar.gz -C chaindora-release
+tar -xzf chaindora_0.0.2_darwin_arm64.tar.gz -C chaindora-release
 mkdir -p "$HOME/.local/bin"
 install -m 755 chaindora-release/chdora "$HOME/.local/bin/chdora"
 export PATH="$HOME/.local/bin:$PATH"
@@ -50,7 +50,7 @@ chdora --version
 ```
 
 Add the PATH entry to your shell configuration if it is not already present.
-The expected output is `chdora 0.0.1`.
+The expected output is `chdora 0.0.2`.
 
 ### Windows
 
@@ -58,10 +58,10 @@ In PowerShell, compare the SHA-256 value with the matching checksum-file entry,
 then extract the verified ZIP:
 
 ```powershell
-Get-FileHash .\chaindora_0.0.1_windows_x86_64.zip -Algorithm SHA256
-Get-Content .\chaindora_0.0.1_checksums.txt
+Get-FileHash .\chaindora_0.0.2_windows_x86_64.zip -Algorithm SHA256
+Get-Content .\chaindora_0.0.2_checksums.txt
 # Run after the values match; substitute the ARM64 archive when appropriate.
-Expand-Archive .\chaindora_0.0.1_windows_x86_64.zip -DestinationPath .\chaindora-release
+Expand-Archive .\chaindora_0.0.2_windows_x86_64.zip -DestinationPath .\chaindora-release
 .\chaindora-release\chdora.exe --version
 ```
 
@@ -73,7 +73,7 @@ your user PATH. Open a new terminal and check `chdora --version` again.
 Use a supported Go toolchain that satisfies the project's Go 1.22 minimum:
 
 ```sh
-go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1
+go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.2
 chdora --version
 ```
 
@@ -88,6 +88,21 @@ To build a local checkout:
 go build -o chdora ./cmd/chdora
 ./chdora --version
 ```
+
+## Upgrade an existing installation
+
+For a manually installed release binary:
+
+```sh
+chdora upgrade --check
+chdora upgrade --version v0.0.2
+chdora --version
+```
+
+The upgrade verifies the release archive's SHA-256 and replaces the executable.
+It needs write access to the installation directory. For a source installation,
+rerun the version-pinned `go install` command above. If a package manager owns
+the executable, update it through that manager.
 
 ## Load incident data and run a scan
 

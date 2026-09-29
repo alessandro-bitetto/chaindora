@@ -20,7 +20,7 @@ type Ecosystem = {
 })
 export class HomeComponent implements OnDestroy {
   readonly github = 'https://github.com/alessandro-bitetto/chaindora';
-  readonly sourceInstall = 'go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.1';
+  readonly sourceInstall = 'go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.2';
   readonly ecosystems: Ecosystem[] = [
     { name: 'npm', registry: 'JavaScript & TypeScript', managers: 'npm · Yarn · pnpm · Bun · Deno', command: 'chdora gate exec npm install lodash@4.17.21', inventory: 'package-lock.json · yarn.lock · pnpm-lock.yaml · deno.lock', note: 'Registry signals and package-source patterns. Bun has an install resolver but no lockfile inventory parser. Deno coverage is limited to npm dependencies.' },
     { name: 'PyPI', registry: 'Python', managers: 'pip · pip3 · Poetry · uv · Pipenv · PDM', command: 'chdora gate exec pip install requests==2.32.3', inventory: 'requirements.txt · poetry.lock · uv.lock · Pipfile.lock · pdm.lock · pyproject.toml', note: 'Inspect registry artifacts and Python credential-collection patterns. Source builds during resolution still need isolation; the gate is not a sandbox.' },

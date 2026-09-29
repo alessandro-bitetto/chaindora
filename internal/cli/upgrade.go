@@ -408,7 +408,7 @@ func init() {
 	upgradeCmd.Flags().BoolVar(&upgradeForce, "force", false,
 		"upgrade even when versions match, or override the package-manager guard")
 	upgradeCmd.Flags().StringVar(&upgradeVersion, "version", "",
-		"pin to a specific release tag (e.g. v0.0.1); default is /releases/latest")
+		"pin to a specific release tag (e.g. v0.0.2); default is /releases/latest")
 	upgradeCmd.Flags().BoolVar(&upgradeVerbose, "verbose", false,
 		"print per-step progress to stderr")
 	rootCmd.AddCommand(upgradeCmd)

@@ -7,8 +7,9 @@ harmless packages, synthetic incident data, and narrowly scoped marker scripts.
 The assessment started from `74b9efe8955ecfbb124140b6682ceb2e47d551a4`. The fixes
 were published in [commit `13f902e`](https://github.com/alessandro-bitetto/chaindora/commit/13f902e5eaf80a8be7d61888ea6361756b0af578)
 and verified by [GitHub run 36596205619](https://github.com/alessandro-bitetto/chaindora/actions/runs/36596205619).
-These results describe that source commit; the existing `v0.0.1` release archives
-are unchanged and do not contain these fixes.
+The fixes and regression contracts are included in
+[release v0.0.2](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.2).
+The results below validate the fixes at that source commit.
 
 ## Results
 

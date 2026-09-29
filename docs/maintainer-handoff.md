@@ -1,6 +1,6 @@
 # Maintainer guide
 
-Chaindora 0.0.1 consists of a Go CLI, curated incident data and an Angular
+Chaindora 0.0.2 consists of a Go CLI, curated incident data and an Angular
 static website. Start with the [documentation index](README.md),
 [architecture](architecture.md) and [threat model](threat-model.md).
 
@@ -13,7 +13,7 @@ website package metadata, source-install examples and changelog together.
 A `v*` tag triggers `.github/workflows/release.yml`. GoReleaser builds `chdora`
 for Linux/macOS/Windows on amd64 and arm64, packages the binary with the license,
 documentation and incident pack, and publishes SHA-256 checksums. Archive names
-use `x86_64` for amd64. Version 0.0.1 is tagged `v0.0.1`.
+use `x86_64` for amd64. Version 0.0.2 is tagged `v0.0.2`.
 
 The workflow uses the repository-scoped `GITHUB_TOKEN` with contents-write
 permission. No GPG signature is configured; do not describe checksum files as
