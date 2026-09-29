@@ -1,33 +1,38 @@
 # Environment validation — 2026-09-29
 
-**The reported failures are fixed in the working tree and the expanded contracts
-pass.** No malicious package was installed or executed. Tests use generated
+**The reported failures are fixed on `main` and the expanded contracts pass in
+GitHub CI.** No malicious package was installed or executed. Tests use generated
 harmless packages, synthetic incident data, and narrowly scoped marker scripts.
 
-The assessment started from `74b9efe8955ecfbb124140b6682ceb2e47d551a4`; the results
-below include the subsequent resolver, parser, CLI and regression-test changes.
-They describe this checkout, not a newly published release artifact.
+The assessment started from `74b9efe8955ecfbb124140b6682ceb2e47d551a4`. The fixes
+were published in [commit `13f902e`](https://github.com/alessandro-bitetto/chaindora/commit/13f902e5eaf80a8be7d61888ea6361756b0af578)
+and verified by [GitHub run 36596205619](https://github.com/alessandro-bitetto/chaindora/actions/runs/36596205619).
+These results describe that source commit; the existing `v0.0.1` release archives
+are unchanged and do not contain these fixes.
 
 ## Results
 
 | Validation | Result |
 |---|---|
 | All 15 real manager names, including both Yarn variants, Linux arm64 | **16/16 resolver configurations passed** |
-| Lifecycle suppression: npm, Yarn Classic/Berry, pnpm, Bun, Deno | **6/6 passed** |
+| All 15 real manager names, including both Yarn variants, Linux amd64 in GitHub CI | **16/16 resolver configurations passed** |
+| Lifecycle suppression: npm, Yarn Classic/Berry, pnpm, Bun, Deno | **6/6 passed on Linux arm64 and amd64** |
 | Offline CLI contracts, Linux arm64 | **28/28 passed** |
+| Offline CLI contracts, Linux amd64 in GitHub CI | **28/28 passed**, on the host and in an isolated container |
 | Offline CLI contracts, native macOS arm64 | **28/28 passed** |
+| Offline CLI contracts, macOS arm64 in GitHub CI | **28/28 passed** |
+| Offline CLI contracts, Windows amd64 in GitHub CI | **22/22 passed**; six POSIX-only manager-double checks are excluded |
 | Native macOS real npm, Yarn Classic, pnpm and Go, with race detection | **4/4 passed** |
 | Full ordinary Go race suite, native macOS and Linux container | **Passed on both**; 668 test/subtest pass events per OS, two opt-in tests skipped |
-| `go vet ./...` | **Passed** |
-| Windows amd64 CLI and gate/CLI/inventory test binaries | **Cross-compilation passed; runtime pending** |
+| Full ordinary Go race suite, GitHub Ubuntu/macOS/Windows | **Passed on all three** with Go 1.27.1 |
+| `go vet ./...` and CLI build | **Passed locally and on all three GitHub hosts** |
+| Chaindora repository self-scan | **Passed in GitHub CI** |
 
 The ordinary Go suite skips external-tool integration unless explicitly enabled.
 Its green result is separate from the real-manager and lifecycle results above.
-The existing GitHub matrix passed on Ubuntu, macOS and Windows at the starting
-commit, but does not validate these new changes. The updated workflow now runs
-CLI contracts on all three hosts, real-manager contracts in isolated Linux
-containers, and retains evidence as artifacts. That workflow has not yet run
-for this working tree.
+All five jobs passed for the published fixes. The workflow retains three
+`offline-cli-*` artifacts with per-contract JSON/SARIF evidence and an
+`environment-contracts-linux` artifact with manager logs, image IDs and results.
 
 ## Real package-manager matrix
 
@@ -36,7 +41,7 @@ It checks exact identities, direct/transitive labels where implemented, availabl
 checksums, and delivery of a synthetic transitive denial to gate policy. It is
 not a claim to cover every command, project layout or manager version.
 
-| Manager | Linux version tested | Result |
+| Manager | Linux arm64 and amd64 version tested | Result |
 |---|---|---|
 | npm | 11.19.0 | Pass |
 | Yarn Classic | 1.22.22 | Pass |
@@ -174,7 +179,8 @@ optional/peer combinations, Python markers, .NET targets, updates or tool versio
 Deno remains an existing-project resolver and Paket remains lockfile-only;
 raw Deno HTTPS/JSR entries and Bun inventory remain outside declared coverage.
 
-Real-manager execution on Windows and Linux amd64 remains pending. Windows
-cross-compilation is not runtime validation. The new CI jobs are configured to
-retain future runtime evidence; the passing rows above are not proof that
-arbitrary packages are safe to install.
+The full real-manager matrix is verified on Linux arm64 and amd64. Windows has
+native Go race tests and CLI contracts, but real-manager execution on Windows
+remains pending. macOS real-manager coverage is limited to npm, Yarn Classic,
+pnpm and Go. The passing rows above are not proof that arbitrary packages are
+safe to install.
