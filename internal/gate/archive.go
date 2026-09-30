@@ -8,8 +8,52 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+
+	"github.com/alessandro-bitetto/chaindora/internal/artifacts"
 )
+
+func fetchPackageArchive(ctx context.Context, probe VersionProbe, ref PackageRef, limit int64) ([]byte, error) {
+	var data []byte
+	var err error
+	if ref.ArtifactPath != "" {
+		var f *os.File
+		f, err = os.Open(ref.ArtifactPath)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = f.Close() }()
+		if limit <= 0 {
+			limit = defaultArchiveLimit
+		}
+		data, err = io.ReadAll(io.LimitReader(f, limit+1))
+		if int64(len(data)) > limit {
+			return nil, fmt.Errorf("artifact snapshot exceeds limit")
+		}
+	} else {
+		var url string
+		if selector, ok := probe.(interface {
+			ArtifactURL(context.Context, string, string, string) (string, error)
+		}); ok && ref.Integrity != "" {
+			url, err = selector.ArtifactURL(ctx, ref.Name, ref.Version, ref.Integrity)
+		} else {
+			url, err = probe.TarballURL(ctx, ref.Name, ref.Version)
+		}
+		if err == nil {
+			data, err = fetchArchive(ctx, probe, url, limit)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if ref.Integrity != "" {
+		if err := artifacts.VerifyIntegrity(data, ref.Integrity); err != nil {
+			return nil, err
+		}
+	}
+	return data, nil
+}
 
 const (
 	defaultArchiveLimit = 50 << 20
@@ -89,7 +133,7 @@ func scanGzipTarBudget(data []byte, budget *archiveBudget, depth int) ([]StaticF
 	if err != nil {
 		return nil, fmt.Errorf("gunzip: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	return scanTarStream(gz, budget, depth)
 }
 

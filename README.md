@@ -2,14 +2,13 @@
 
 # Chaindora
 
-Version **0.0.3**.
+Latest version: **0.0.4**, including the audit hardening and recovery fixes.
 
-**Your code. Your rules.** Supply-chain prevention and detection for npm,
-PyPI, .NET/NuGet, Go modules, and Rust/crates.io, including alternative package
-managers. The CLI is `chdora`: one Go binary for macOS, Linux, and Windows.
+**Your code. Your rules.** Supply-chain detection for npm, PyPI, .NET/NuGet,
+Go modules and Rust/crates.io, plus verified frozen npm installs. The CLI is `chdora`: one Go binary for macOS, Linux, and Windows.
 
 [Website](https://chaindora.dev) · [Documentation](docs/README.md)
-· [Download 0.0.3](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.3)
+· [Download 0.0.4](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.4)
 · [Security reporting](SECURITY.md)
 
 ## Start here
@@ -19,7 +18,7 @@ checksum verification and PATH setup. With a supported Go toolchain (minimum
 Go 1.22), install the CLI and fetch its incident data:
 
 ```sh
-go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.3
+go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.4
 chdora update
 chdora scan .
 ```
@@ -30,10 +29,11 @@ Add your Go binary directory to PATH. To build a checkout, run
 
 ## What you can do
 
-- **Prevent:** `chdora gate exec npm install <package>` checks a resolved install
-  tree before handing off to the real package manager.
+- **Prevent:** `chdora gate exec npm ci` checks an existing lockfile and its
+  exact artifacts, installs offline with lifecycle scripts disabled, verifies
+  staged files, then replaces `node_modules`.
 - **Detect:** `chdora scan .` combines package advisories, incident evidence,
-  source heuristics, predictive checks, and integrity metadata checks.
+  source heuristics, predictive checks, and npm installed-file verification.
 - **Investigate:** `chdora audit` combines project discovery and host forensics;
   `chdora forensics` inspects host state. Findings are evidence for review,
   not proof that the machine is clean or compromised.
@@ -47,9 +47,9 @@ checks, reducing coverage.
 
 ## Supported scope
 
-Five dependency ecosystems and **15 package-manager executable names** are supported.
-Alternative managers stay within their registry ecosystem; keeping a shim does
-not imply coverage of every command or lockfile version.
+Scanning covers five dependency ecosystems. **15 package-manager shim names**
+remain recognized, but the install gate currently accepts only frozen npm
+restores on macOS/Linux. Other acquisition and execution commands refuse explicitly.
 
 | Ecosystem | Managers | Scan inventory |
 |---|---|---|
@@ -61,47 +61,37 @@ not imply coverage of every command or lockfile version.
 
 Manifest fallbacks cannot provide the precision of resolved lockfiles; exact
 PyPI `==` pins are normalized for version-specific matching. Bun has
-an install resolver but no Bun lockfile inventory parser. Deno coverage is for
+no lockfile inventory parser. Deno coverage is for
 npm dependencies; raw HTTPS and JSR dependencies are outside the supported scope.
 
 ### Gate command coverage
 
-This is the current dispatcher, not a promise of complete mediation. Explicit
-package requests are checked for the following forms:
-
-| Manager | Recognized forms |
+| Command | Behavior |
 |---|---|
-| npm | `install`, `i`, `add`; `update`, `up`, `upgrade` |
-| Yarn | `add`; `upgrade`, `upgrade-interactive`, `up` |
-| pnpm | `add`; `update`, `up`, `upgrade` |
-| Bun | `add`, `install`, `i` |
-| pip / pip3 | `install`, including `--upgrade` |
-| Poetry | `add`, `update` |
-| uv | `add`, `lock` |
-| Pipenv | `install` |
-| PDM | `add` |
-| dotnet | `add package` |
-| Go | `get`, `install` |
-| Cargo | `add`, `install`, `update` |
-| Deno | `cache`, `add`, `install` dispatch to a resolver of existing project state |
-| Paket | `install`, `update`, `restore` inspect the existing `paket.lock` |
+| `npm ci`, bare `npm install` and their install aliases | Restore an existing v2/v3 `package-lock.json` using verified artifacts; no version resolution or lifecycle scripts |
+| Exact `--version`, `-v`, `--help`, `-h` | Uninspected help/version handoff; dry-run never executes it |
+| Package additions, updates, `npm run`/`test`, flags before verbs, custom registries, workspaces | Refused before any package-manager subprocess |
+| Yarn, pnpm, Bun, Deno, pip/pip3, Poetry, uv, Pipenv, PDM, dotnet, Paket, Go and Cargo commands other than exact help/version | Refused until a verified transaction adapter exists |
+| Unknown managers | Refused before binary lookup |
 
-Bare update-all resolution exists for npm, Yarn, pnpm and Cargo. Other recognized
-bare update verbs are refused when no update-all resolver exists. Deno and Paket
-operate on existing project state: they do not reliably model a newly requested
-dependency or subsequent update. Deno 2 resolves existing project dependencies
-without a local `node_modules` directory; npm entries in lockfile versions 3–5
-are understood. Empty or failed resolutions refuse installation.
+The frozen adapter requires public `https://registry.npmjs.org` artifacts with
+lockfile digests. It rejects project `.npmrc`, shrinkwraps, workspace/local/git
+links, bundled dependencies and arbitrary npm flags. Only
+`--ignore-scripts`, `--no-audit` and `--no-fund` may follow the restore verb.
+Bare `npm install` deliberately behaves as `npm ci`: it cannot add or update
+packages or rewrite the lockfile. Create and review lockfile changes separately;
+that external workflow is outside the gate's protection. Packages requiring
+install/build scripts may be unusable after this script-disabled restore.
 
-**Known gaps:** bare installs such as `npm install`, `npm ci`, `uv pip install`,
-`uv sync`, restore/build/run commands, and unrecognized verbs can pass through
-ungated. Flags before verbs and flags-only forms also need better coverage.
-Recognized commands can still have resolver limitations. Use the
-[threat model](docs/threat-model.md) when deciding where to rely on the gate.
+Gated restores hold a project lock through cleanup. After a process interruption,
+the next restore recovers the previous tree or finishes an already-promoted
+verified installation using private records in `~/.chaindora/install-transactions`.
+Ambiguous states preserve data and refuse recovery; see [troubleshooting](docs/troubleshooting.md).
 
-Dependency registries outside this scope are unsupported. Explicit `gate exec`
-requests for other managers are refused. Gate installation writes wrappers only
-for the managers listed above.
+Automatic shims retain all 15 names to make refusals visible. This is a breaking
+change from 0.0.3's partial command interception. `gate check` and scanning still
+cover all five registries. Windows supports scanning and package checks; frozen
+installation and automatic wrapper installation are not supported there.
 
 Shared GitHub/GitLab/Gitea Actions, CircleCI, Bitbucket, Azure Pipeline and
 Docker-reference checks remain, along with host persistence, trust-anchor,
@@ -119,17 +109,16 @@ chdora gate disable                # remove managed shims and shell block
 
 Open a new terminal after installation. Shims live in `~/.chaindora/bin`;
 they need to precede the real managers on PATH. Direct invocation works without
-shims. On Windows, use `chdora gate exec` directly: automatic wrapper installation
-is incomplete. Gate options go **before** the manager; package-manager options follow it:
+shims. Frozen installation requires macOS or Linux. Gate options go **before** the manager; package-manager options follow it:
 
 ```sh
-chdora gate exec --dry-run npm install lodash@4.17.21
+chdora gate exec --dry-run npm ci
 chdora gate check requests@2.32.3 --ecosystem pypi
 chdora gate check golang.org/x/text@v0.28.0 --ecosystem go
 ```
 
-`gate exec --dry-run` never hands off the final command, including commands that
-would otherwise pass through ungated. Resolution still invokes a package manager.
+`gate exec --dry-run` verifies and checks the frozen artifacts without executing
+a package manager. Registry checks can still use the network.
 
 Versions here illustrate syntax, not safety recommendations.
 
@@ -154,8 +143,12 @@ deny:
     - "example-untrusted-package"
 ```
 
-`allow` entries bypass checks and should be narrowly scoped. Cache approvals are
-integrity history: current checks rerun every time. A changed integrity string
+`allow` entries are explicit exceptions to the signal checks and should be
+narrowly scoped. Deny entries and changed-integrity history take precedence.
+Exceptions never bypass artifact hashes, package identity, transaction validation
+or staged-file verification, and are not saved as ordinary cached approvals.
+Invalid or unknown configuration fields refuse execution. Cache approvals are
+integrity history: current checks rerun every time absent an explicit exception. A changed integrity string
 for a previously approved version triggers republish review. Missing hashes
 prevent that comparison; legitimate platform artifacts can also differ.
 `chdora gate cache clear` removes that evidence.
@@ -178,12 +171,27 @@ version differences, so unchanged suspicious behavior is still inspected.
 
 Findings include severity, confidence and evidence. Predictive credential hits
 are High severity / Medium confidence: a suspicious combination, not proven
-exfiltration. Failed credential inspection emits a Low configuration finding;
-several other incomplete predictive checks still produce no finding.
+exfiltration. Failed predictive inspections emit Low configuration findings with
+`CHDORA-PREDICTIVE-INCOMPLETE`; they are no longer silently omitted.
 
-CI reports failed inventory parsing as `CHDORA-INVENTORY-INCOMPLETE` in JSON and
-SARIF and exits 2, regardless of severity policy, suppressions or baselines.
-Incomplete runs do not apply fixes or update baselines.
+For installed npm v2/v3 lockfiles, published files are compared with manifests
+from digest-verified archives. Changed, missing and unexpected files are reported
+at their exact paths. Offline verification requires cached artifacts in
+`~/.chaindora/artifacts`; missing or unsupported evidence is
+`CHDORA-INTEGRITY-INCOMPLETE`. Native/generated files can differ legitimately:
+review them rather than treating a mismatch as proof of malware.
+
+CI reports inventory, incident-pack, installed-file and predictive inspection failures in
+JSON/SARIF and exits 2 regardless of severity, suppressions or baselines.
+Incomplete runs do not apply fixes or update baselines. Explicit `--skip-integrity`
+and `--skip-predictive` reduce coverage. Missing, empty or malformed incident packs
+fail requested inspection: fetch one with `chdora update`, select one with
+`--incidents`, or explicitly disable that layer with `--skip-incidents`.
+Offline/skip-registry overrides `--fresh-popular` and its network requests.
+
+Invalid CI `--fail-on` values and malformed suppression files fail before policy
+evaluation. Suppression expiry dates must use `YYYY-MM-DD`; expired entries stop
+suppressing after that UTC calendar day.
 
 Use `--exclude` for directory basenames. `--skip-*` disables detector work;
 `--exclude-*` hides categories in text output, while JSON/SARIF and CI policy
@@ -195,17 +203,19 @@ reports; see [architecture](docs/architecture.md) and command help.
 
 ## Protection boundaries and next work
 
-Chaindora reduces risk; it is **not a sandbox, antivirus replacement or guarantee
-against compromise**. Resolution can execute package-manager/plugin/build code.
-The eventual install is not yet bound to the exact artifacts checked. Static
-rules do not analyze arbitrary bytecode or every source language. Installed
-integrity checks do not recompute all file contents against verified artifacts.
+The accepted npm path binds inspected bytes to the staged installation and
+executes no package code before the verdict. It assumes a trusted local OS,
+package manager, lockfile review and operator policy; it is not a runtime sandbox.
+PATH shims can be bypassed. The gate cannot make a malicious but correctly hashed
+package safe, and script-disabled packages may require a separate reviewed build.
 
-The next priorities are exact install-transaction binding, safe resolution,
-complete install/restore coverage, installed-file verification and authenticated
-provenance. Concrete gaps and acceptance tests are in the
-[security roadmap](docs/security-hardening.md). Depth in the five supported
-ecosystems comes before new integrations.
+Installed-file verification currently covers public-registry npm v2/v3 lockfiles.
+Other ecosystems retain metadata and source checks, not equivalent installed-file
+coverage. Provenance is a presence signal, not signature/identity verification.
+Static rules do not analyze arbitrary bytecode or every source language, and
+synthetic test results do not establish real-world detection rates. See the
+[hardening assessment](docs/security-hardening.md) for completed fixes, validation
+and the remaining expansion work.
 
 ## Development
 

@@ -137,3 +137,44 @@ func TestFilterSuppressed_NilSuppressionsPassthrough(t *testing.T) {
 		t.Errorf("nil suppressions should pass everything through; got kept=%d supp=%d", len(kept), len(supp))
 	}
 }
+
+func TestExpiredSuppressionDoesNotHideFinding(t *testing.T) {
+	f := Finding{VulnID: "MAL-fixture", Severity: SeverityCritical}
+	expiry := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name           string
+		now            time.Time
+		wantSuppressed bool
+	}{
+		{"start of date", expiry, true}, {"end of date", expiry.Add(24*time.Hour - time.Nanosecond), true}, {"following midnight", expiry.Add(24 * time.Hour), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rules := &Suppressions{Suppress: []Suppression{{VulnID: f.VulnID, Reason: "fixture", Expires: "2026-09-30"}}}
+			kept, hidden := FilterSuppressed([]Finding{f}, rules, tc.now)
+			if (len(hidden) == 1) != tc.wantSuppressed || len(kept)+len(hidden) != 1 {
+				t.Fatalf("kept=%v hidden=%v", kept, hidden)
+			}
+		})
+	}
+	rules := &Suppressions{Suppress: []Suppression{{VulnID: f.VulnID, Expires: "bad-date"}}}
+	if kept, _ := FilterSuppressed([]Finding{f}, rules, expiry); len(kept) != 1 {
+		t.Fatal("invalid in-memory expiry suppressed a finding")
+	}
+}
+
+func TestSuppressionPolicyRejectsMalformedAndAmbiguousInput(t *testing.T) {
+	for _, body := range []string{
+		"suppress:\n  - vuln_id: X\n    reason: fixture\n    expires: tomorrow\n",
+		"suppress:\n  - vuln_id: X\n    reason: fixture\n    expires: 2026-02-30\n",
+		"suppress:\n  - vuln_id: X\n    reason: fixture\n    expiers: 2026-01-01\n",
+		"suppress: []\n---\nsuppress: []",
+	} {
+		path := filepath.Join(t.TempDir(), "policy.yml")
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ReadSuppressions(path); err == nil {
+			t.Fatalf("accepted %q", body)
+		}
+	}
+}

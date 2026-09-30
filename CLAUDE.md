@@ -62,12 +62,18 @@ progress and diagnostics belong on stderr. The static website output is
   Warning and Unknown policy overrides are independent. Block always wins.
 - Empty resolved trees refuse installation even with relaxed policy. Dry-run
   prevents final handoff on passthrough and flags-only routes as well.
-- CI inventory errors remain visible in JSON/SARIF and force exit 2 independent
+- CI inventory and incident-pack errors remain visible in JSON/SARIF and force exit 2 independent
   of suppressions, baselines and severity policy; incomplete runs cannot update
   baselines or apply fixes.
+- Reject invalid CI severity tokens and suppression dates/YAML. Expired
+  suppressions do not apply; their expiry date is inclusive through that UTC day.
+- Offline/skip-registry overrides fresh-popular and all registry heuristics.
+  Explicit incident paths never fall back; missing/empty/invalid packs fail
+  requested coverage unless incident checks are explicitly skipped.
 - Preserve `*gate.PMError` output and exit codes for package-manager failures.
   Use `wrapPMError` in resolvers; CLI internal errors remain distinct.
-- `CachedRun` checks republish history and always runs the current stack.
+- `CachedRun` checks republish history and runs the current stack unless an
+  explicit allow/deny rule terminates evaluation. Exceptions are not cached.
   Only nonempty Approve results with integrity are stored. Historical approvals
   never bypass current policy, intelligence or requested checks. History survives
   approval TTL; unique temporary files protect concurrent writes.
@@ -79,15 +85,20 @@ progress and diagnostics belong on stderr. The static website output is
 - `pmClassifiers` and `shimManagers` must agree. Retired managers are refused
   before binary lookup. Migration deletes only regular managed shim files,
   preserving custom files and symlinks.
-- Command coverage is incomplete. Bare restores, npm ci and several alternative
-  manager forms pass through; do not describe them as previously vetted.
-  npm/yarn/pnpm/cargo have update-all resolvers; Deno/Paket inspect project state.
+- Only frozen public-registry npm restores on macOS/Linux may install. Bind
+  hashes, inspected snapshots and staged files; disable scripts and install
+  offline. All other commands except exact help/version must refuse before
+  subprocess execution. Legacy resolvers must not be re-enabled unsafely.
+- Hold the project install lock through preparation, npm execution and cleanup.
+  Never unlink its inode; children inherit it to cover parent crashes. Recovery
+  authority belongs in private per-user storage, never in repository files.
+  Persist swap phases, recover before preparing, and preserve ambiguous states.
 - Static scores deduplicate pattern names. Downloads, decompression, files,
   entries and nesting are bounded; incomplete inspection is Unknown. These
   heuristics are not a sandbox, AST analysis or complete language coverage.
 - Predictive npm/PyPI credential checks run independently of version-diff.
-  Their failed inspections emit configuration findings. Other predictive Unknown
-  results are often suppressed; do not equate no findings with full coverage.
+  All predictive Unknown results emit configuration findings and force CI exit 2,
+  as do incomplete installed-file checks. Skip flags explicitly reduce coverage.
 
 ## Inventory and detector conventions
 

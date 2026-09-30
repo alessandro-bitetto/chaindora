@@ -42,10 +42,11 @@ type pypiPackageDoc struct {
 }
 
 type pypiReleaseFile struct {
-	UploadTime  string `json:"upload_time_iso_8601"`
-	URL         string `json:"url"`
-	Filename    string `json:"filename"`
-	Packagetype string `json:"packagetype"` // "sdist" or "bdist_wheel"
+	UploadTime  string            `json:"upload_time_iso_8601"`
+	URL         string            `json:"url"`
+	Filename    string            `json:"filename"`
+	Packagetype string            `json:"packagetype"` // "sdist" or "bdist_wheel"
+	Digests     map[string]string `json:"digests"`
 	// Provenance: PyPI's PEP 740 "Index API" exposes
 	// per-file attestations under `provenance` (URL pointer
 	// to the Sigstore bundle). Presence + non-empty value
@@ -157,6 +158,29 @@ func (p *PyPI) TarballURL(ctx context.Context, name, version string) (string, er
 		}
 	}
 	return rel[0].URL, nil
+}
+
+// ArtifactURL selects the file named by a lockfile digest. A wheel's digest
+// cannot be compared with an arbitrarily selected sdist for the same version.
+// The consumer must still hash the downloaded bytes; metadata alone is evidence
+// for selection, never successful artifact authentication.
+func (p *PyPI) ArtifactURL(ctx context.Context, name, version, integrity string) (string, error) {
+	status, doc, err := p.fetchPackage(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK || doc == nil {
+		return "", fmt.Errorf("pypi artifact selection: HTTP %d", status)
+	}
+	for _, file := range doc.Releases[version] {
+		for _, digest := range strings.Fields(integrity) {
+			want := strings.TrimPrefix(strings.TrimPrefix(digest, "sha256:"), "sha256=")
+			if len(want) == 64 && strings.EqualFold(file.Digests["sha256"], want) && file.URL != "" {
+				return file.URL, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no PyPI artifact matches the locked digest for %s@%s", name, version)
 }
 
 // PublisherOfVersion returns the project-level maintainer email

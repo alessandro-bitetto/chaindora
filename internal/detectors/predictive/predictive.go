@@ -34,6 +34,8 @@ type Detector struct {
 	cache             *gate.Cache
 }
 
+const IncompleteID = "CHDORA-PREDICTIVE-INCOMPLETE"
+
 // New returns a predictive Detector wired with the given probe table,
 // cooldown threshold, and (optional) verdict cache. cache can be nil —
 // without it, the republish-guard signal won't fire but the other
@@ -98,13 +100,6 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 			if r.Verdict == gate.VerdictApprove {
 				continue
 			}
-			// Most predictive Unknown results are suppressed to keep unavailable
-			// metadata from overwhelming actionable findings. Credential
-			// inspection failures remain explicit configuration findings.
-			// Gate policy still refuses Unknown under Strict.
-			if r.Verdict == gate.VerdictUnknown && r.Checker != "credential-exfiltration" {
-				continue
-			}
 			f := findings.Finding{
 				Detector:   "predictive:" + r.Checker,
 				Category:   findings.CategoryPredictive,
@@ -122,9 +117,10 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 				// version on this machine.
 				Integrity: invPkg.Integrity,
 			}
-			if r.Checker == "credential-exfiltration" && r.Verdict == gate.VerdictUnknown {
+			if r.Verdict == gate.VerdictUnknown {
 				f.Category = findings.CategoryConfiguration
-				f.Summary = "Credential-exfiltration inspection incomplete: " + f.Summary
+				f.VulnID = IncompleteID
+				f.Summary = r.Checker + " inspection incomplete: " + f.Summary
 			}
 			out = append(out, f)
 		}

@@ -27,6 +27,14 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test ./... -race -count=1
+      - name: Real frozen npm restore (inert archives; offline npm)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export CHAINDORA_TEST_NPM="$(command -v npm)"
+          go test ./internal/gate -run 'TestNPMFrozenInstall.*RealOffline' -count=1 -v
+      - name: Versioned credential-shape corpus
+        run: go test ./internal/gate -run '^TestCredentialPatterns$' -count=1 -v
       - name: go build
         run: go build -o chdora-test-cli.exe ./cmd/chdora
       - name: Offline CLI regression contracts (inert fixtures only)

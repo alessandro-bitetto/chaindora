@@ -4,16 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/hostforensics"
-	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/integrity"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/trustdrift"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
-	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 )
 
@@ -122,6 +119,7 @@ func runForensicsFlow(ctx context.Context) error {
 		// resolution and on-disk storage.
 		if !forensicsSkipIntegrity && forensicsScanProjects != "" {
 			intDet := integrity.New([]string{forensicsScanProjects})
+			intDet.Offline = forensicsSkipRegistry
 			intResults, ierr := intDet.Detect(ctx)
 			if ierr != nil {
 				fmt.Fprintf(os.Stderr, "warn: integrity: %v\n", ierr)
@@ -136,30 +134,13 @@ func runForensicsFlow(ctx context.Context) error {
 			if huntRoot == "" {
 				huntRoot = home
 			}
-			dir := incidents.ResolveDir([]string{
-				forensicsIncidentsDir,
-				"incidents",
-				filepath.Join(home, ".chaindora", "incidents"),
-			})
-			if dir == "" {
-				fmt.Fprintln(os.Stderr, "warn: no incident pack found; skipping artifact hunt")
-			} else {
-				incs, err := incidents.LoadDir(dir)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "warn: incident pack load failed:", err)
-				} else {
-					fmt.Fprintf(os.Stderr, "hunting %d incidents' file_artifacts under %s\n", len(incs), huntRoot)
-					tally.Enable("incident-pack")
-					iDet := incident.New(incs, forensicsExcludes...)
-					empty := &inventory.Inventory{}
-					ires, err := iDet.Detect(ctx, empty, huntRoot)
-					if err != nil {
-						return fmt.Errorf("incident-pack hunt: %w", err)
-					}
-					tally.AbsorbFindings(ires)
-					all = append(all, ires...)
-				}
+			tally.Enable("incident-pack")
+			results, err := scanIncidents(ctx, &inventory.Inventory{}, huntRoot, forensicsIncidentsDir, forensicsExcludes)
+			if err != nil {
+				results = []findings.Finding{incidentCoverageFailure(huntRoot, err)}
 			}
+			tally.AbsorbFindings(results)
+			all = append(all, results...)
 		}
 
 		// Shared registry probes for every per-project + per-source
@@ -179,6 +160,7 @@ func runForensicsFlow(ctx context.Context) error {
 				SkipIncidents: false,
 				SkipHeuristic: forensicsSkipHeur,
 				SkipRegistry:  forensicsSkipRegistry,
+				SkipIntegrity: true, // already checked once by the root integrity detector above
 				FreshPopular:  false,
 				Verbose:       forensicsVerbose,
 				Excludes:      forensicsExcludes,

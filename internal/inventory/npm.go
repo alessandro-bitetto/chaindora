@@ -14,6 +14,7 @@ type npmLockfile struct {
 }
 
 type npmPackageEntry struct {
+	Name             string `json:"name"`
 	Version          string `json:"version"`
 	HasInstallScript bool   `json:"hasInstallScript"`
 	Resolved         string `json:"resolved"`
@@ -22,6 +23,8 @@ type npmPackageEntry struct {
 
 type npmDependencyEntry struct {
 	Version      string                        `json:"version"`
+	Resolved     string                        `json:"resolved"`
+	Integrity    string                        `json:"integrity"`
 	Dependencies map[string]npmDependencyEntry `json:"dependencies"`
 }
 
@@ -50,6 +53,9 @@ func parseNPMPackageLock(path string) ([]Package, error) {
 			continue
 		}
 		name := k[idx+len("node_modules/"):]
+		if v.Name != "" {
+			name = v.Name
+		}
 		key := name + "@" + v.Version
 		if _, ok := seen[key]; ok {
 			continue
@@ -75,16 +81,24 @@ func parseNPMPackageLock(path string) ([]Package, error) {
 
 func walkNPMv1(deps map[string]npmDependencyEntry, source string, seen map[string]struct{}, out *[]Package) {
 	for name, dep := range deps {
+		if strings.HasPrefix(dep.Version, "npm:") {
+			spec := strings.TrimPrefix(dep.Version, "npm:")
+			if at := strings.LastIndexByte(spec, '@'); at > 0 {
+				name, dep.Version = spec[:at], spec[at+1:]
+			}
+		}
 		if dep.Version != "" {
 			key := name + "@" + dep.Version
 			if _, ok := seen[key]; !ok {
 				seen[key] = struct{}{}
 				*out = append(*out, Package{
-					Ecosystem:  EcosystemNPM,
-					Name:       name,
-					Version:    dep.Version,
-					PURL:       PURL(EcosystemNPM, name, dep.Version),
-					SourcePath: source,
+					Ecosystem:   EcosystemNPM,
+					Name:        name,
+					Version:     dep.Version,
+					PURL:        PURL(EcosystemNPM, name, dep.Version),
+					SourcePath:  source,
+					ResolvedURL: dep.Resolved,
+					Integrity:   dep.Integrity,
 				})
 			}
 		}

@@ -9,8 +9,8 @@ import (
 )
 
 // Version identifies the chaindora build; embedded in SARIF tool metadata.
-// Override at build time with -ldflags "-X github.com/alessandro-bitetto/chaindora/internal/cli.Version=0.0.3".
-var Version = "0.0.3"
+// Override at build time with -ldflags "-X github.com/alessandro-bitetto/chaindora/internal/cli.Version=0.0.4".
+var Version = "0.0.4"
 
 // ExitError is the typed error a cobra RunE handler returns when it
 // wants the process to exit with a specific non-zero code, distinct

@@ -29,12 +29,6 @@ file_artifacts:
 	if err := os.WriteFile(filepath.Join(tmp, "good.yaml"), []byte(good), 0644); err != nil {
 		t.Fatal(err)
 	}
-	noID := `schema: 1
-name: missing-id
-`
-	if err := os.WriteFile(filepath.Join(tmp, "no-id.yaml"), []byte(noID), 0644); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(tmp, "readme.md"), []byte("# ignore"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -65,5 +59,17 @@ func TestResolveDir(t *testing.T) {
 	}
 	if got := ResolveDir([]string{"", "/none/here/either"}); got != "" {
 		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestLoadDirRejectsInvalidRecords(t *testing.T) {
+	for _, body := range []string{"id: [", "schema: 1\nname: missing-id", "id: fixture\npackges: []", "id: one\n---\nid: two"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadDir(dir); err == nil {
+			t.Fatalf("silently ignored invalid record: %s", body)
+		}
 	}
 }

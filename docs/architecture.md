@@ -1,104 +1,122 @@
 # Architecture
 
-Chaindora is a Go CLI (`cmd/chdora`) with an Angular static landing page
-(`website`). The maintained dependency scope is npm, PyPI, NuGet, Go modules
-and crates.io. See the [exact inventory and command matrix](../README.md#supported-scope).
+Chaindora is a Go CLI (`cmd/chdora`) with an Angular static site (`website`).
+Scanning and single-package checks cover npm, PyPI, NuGet, Go modules and crates.io.
+The hardened install path in 0.0.4 covers frozen npm restores on macOS/Linux.
+See the [command matrix](../README.md#gate-command-coverage).
 
-## Detection pipeline
+## Detection
 
-`internal/inventory.Scan` walks a project, applies shared directory exclusions,
-and parses supported lockfiles and manifest fallbacks. Packages carry identity,
-source path and integrity evidence when available. Python and .NET manifest
-fallbacks yield to nearby lockfiles. CI/container references use separate
-inventory categories, not additional dependency registries.
+`internal/inventory.Scan` parses lockfiles and manifest fallbacks with shared
+exclusions. Packages carry canonical registry identity, source paths and hashes.
+For npm aliases, the registry name takes precedence over the installation alias.
+OSV `MAL-` IDs are Critical even without CVSS or successful advisory hydration.
 
-`internal/cli/scanprojects.go` runs OSV, incident, heuristic and predictive
-layers and discovers project roots for audit/forensics. Discovery recognizes
-alternative lockfiles and .NET project suffixes. Predictive detection reuses
-gate registry probes and behavioral checks. Dedicated npm/PyPI credential
-inspection runs independently from version-diff and emits an explicit Low
-finding if inspection fails. Other predictive Unknown results retain their
-existing, often silent treatment.
+The CLI combines OSV, incidents, source heuristics and registry predictors.
+Predictive Unknown results emit `CHDORA-PREDICTIVE-INCOMPLETE` configuration
+findings. Missing, empty or invalid incident packs emit
+`CHDORA-INCIDENTS-INCOMPLETE`; an explicit pack path never falls back to defaults.
+Offline/skip-registry settings disable all registry heuristic requests, including
+fresh-popular checks. Host persistence, credentials, trust anchors and browser/IDE extensions
+remain separate detectors. These layers provide evidence, not runtime containment.
 
-`internal/detectors` includes host persistence, trust-anchor, credential,
-browser/IDE extension and integrity metadata checks. Host-level OS package
-enumeration stays separate from dependency gate support. `internal/findings`
-provides shared evidence, severity, confidence, categories and fingerprints.
-JSON/SARIF and CI policies consume those findings. The optional server/agent
-path stores and aggregates explicitly submitted fleet reports.
+`internal/artifacts` verifies archive digests and constructs npm file manifests
+without extracting or executing package code. The integrity detector compares
+installed regular files with these manifests, including alias paths. Missing
+cache entries, unsupported locks or failed verification produce
+`CHDORA-INTEGRITY-INCOMPLETE`; offline mode never fetches artifacts.
 
-## Gate pipeline
+CI treats inventory and these inspection failures as operational errors: JSON
+and SARIF retain them, exit status is 2, suppressions/baselines cannot waive them,
+and fixes/baseline updates do not run. Explicit skip flags reduce coverage.
+CI validates severity-policy tokens before scanning. Suppression YAML uses known
+fields and one document; dates are validated and expired exceptions do not apply.
 
-1. `internal/cli/gate_exec.go` recognizes one of 15 managers and classifies the
-   command. Unsupported managers are refused before binary lookup. Some forms
-   of supported-manager commands pass through; see the README matrix.
-2. A resolver in `internal/gate/resolve_*.go` uses package-manager output or
-   project lock state to construct `PackageRef` values. Many paths use a
-   temporary synthetic project; update-all variants copy project state.
-   Deno and Paket are special existing-project paths with limited coverage.
-3. `buildGateProbes` supplies only npm, PyPI, NuGet, Go and crates registry
-   clients. `buildCheckerStack` assembles policy, cooldown, known-malicious OSV,
-   publisher, maintainer, source, version-diff, provenance and git URL checks.
-4. `CachedRun` checks integrity history, runs the current stack with bounded
-   concurrency, and records eligible approvals. Historical approvals never
-   authorize a new install by themselves. Hash history survives approval TTL.
-5. `Policy.Decide` evaluates every result independently. Block always refuses;
-   warning and unknown overrides are separate. Empty evidence is Unknown.
-   An empty resolved tree refuses installation before overrides are considered.
-6. Only after policy approval does `execReal` invoke the original command.
-   That invocation can resolve different bytes: transaction binding is open work.
+## Frozen npm installation
 
-`gate check` assesses one package. `gate exec --dry-run` resolves and reports
-without handing off any command, including passthrough routes; it is not a
-sandbox for resolver subprocesses. Yarn's major version is detected before
-selecting a script-disabled command. Deno 2 resolves with no `node_modules`
-directory and preserves subprocess failures; inventory and the gate share its
-v3–v5 npm lock parser and Paket's indentation-aware NuGet parser.
-Gate flags precede the manager name; the rest belong to the manager.
+1. Parse gate arguments and project configuration. Invalid YAML or unknown
+   fields refuse the command. Unsupported commands refuse before binary lookup.
+   Exact help/version arguments are the only uninspected handoff.
+2. `PrepareNPMTransaction` obtains an exclusive project lock and recovers an
+   interrupted transaction before reading the actual project's manifest and v2/v3
+   lockfile. It validates paths and public-registry URLs, and rejects unsupported
+   workspace/config/link cases. No resolver subprocess is started.
+3. Download each locked artifact with bounded I/O or reuse its verified cache
+   entry. Check the digest, archive paths and package name/version; retain a
+   private immutable-by-convention snapshot in the staging directory.
+4. Run current checks against canonical names and those snapshots. Integrity
+   history and explicit deny rules take precedence over allow exceptions.
+   Exceptions bypass signal checks, are not stored as ordinary approvals, and
+   never bypass artifact/transaction verification.
+5. If all packages satisfy policy, recheck manifest/lock/snapshot bytes. Seed a
+   private npm cache, then run trusted npm offline with scripts disabled, empty
+   user/global config and a restricted environment. No original command is replayed.
+6. Compare npm's installed graph and the staged package files with the approved
+   graph and verified manifests; verify npm did
+   not rewrite the manifest/lock and that project inputs have not changed. Only
+   then replace `node_modules`, retaining the previous tree until replacement
+   succeeds. A write-ahead recovery journal records each transition.
 
-CI inventory failures emit a structured `CHDORA-INVENTORY-INCOMPLETE` finding
-and exit 2 independently of severity, suppressions and baselines. Incomplete
-runs cannot apply fixes or replace the baseline.
+The OS lock covers preparation through cleanup, survives in an inherited npm
+descriptor if the CLI dies, and releases when all holders exit. The lock file is
+never unlinked. Recovery journals live in private per-user storage under
+`~/.chaindora/install-transactions`, keyed by the canonical project path; project
+files cannot authorize recovery. The next transaction restores the previous
+installation or completes an already-promoted verified tree. Cleanup is
+restartable, and ambiguous states preserve data and refuse the operation.
 
-## Archive and source inspection
+The two renames are not a single atomic operation; recovery covers process
+interruptions, not arbitrary storage corruption or full power-loss durability.
+Direct package-manager commands do not participate in the lock. Concurrent edits
+by a privileged local attacker are outside the trust boundary. Build hooks remain
+disabled, so some packages will need a separately reviewed build.
 
-`archive.go` bounds downloaded and decoded bytes, individual files, entries and
-nested payloads. Malformed/truncated archives, checksum errors, hidden trailing
-payloads and exhausted budgets produce errors, mapped to Unknown. Archive
-support is a shared reader for tar/gzip/ZIP, independent of registry support.
+`gate exec --dry-run` stops before invoking npm. `gate check` only evaluates a
+single package; it never installs. Legacy `resolve_*.go` adapters remain tested
+for future work but are not reachable from the install dispatcher. They are not
+a sandbox and must not be re-enabled without artifact/graph binding.
 
-`static.go` scans JS/TS patterns, Go initialization and Rust build/source shapes.
-`credential_patterns.go` adds JS/TS and Python collection-plus-HTTP signatures.
-Scores deduplicate pattern names rather than multiplying repeated occurrences.
-`versiondiff.go` compares pattern counts across registry versions. These are
-heuristics, not AST/data-flow analysis or executable/bytecode emulation.
+## Source inspection
 
-## Shims and cleanup
+Archive readers cap downloads and decoded streams at 50 MiB, individual files at
+4 MiB, entries at 10,000 and nested payload depth at three. Frozen transactions
+also cap unique compressed artifacts at 512 MiB. Failures produce Unknown or
+refusal, never successful inspection. Supplied SRI, SHA-256 hex and Go h1 hashes
+are verified before scanning; unsupported representations are explicit failures.
+A package check without a lock digest does not authenticate a project artifact.
 
-`gate install` writes per-user wrappers under `~/.chaindora/bin` and optionally
-a marked PATH block in shell configuration. The binary lookup excludes shim
-directories and content-sniffs the shim marker to avoid recursion.
-`gate_retired.go` removes regular files carrying the Chaindora shim marker when
-their manager is outside the supported scope; it preserves supported shims during
-installation, and ignores symlinks, directories and unmarked user files.
-`gate disable` uses the same ownership check for removal on macOS/Linux.
-Windows wrapper generation is incomplete; use direct `gate exec` invocations
-instead of relying on automatic interception.
+JS/TS, Python credential collection, Go init and Rust build/source rules are
+heuristics. Scores deduplicate pattern names; version-diff compares source
+signals across releases. Provenance metadata does not authenticate signatures.
 
-## Repository map
+## Fleet service
+
+The listener defaults to `127.0.0.1:8080`. Dashboard/API reads require a separate
+operator credential: Bearer authentication or browser Basic authentication with
+username `viewer`. The CLI generates a private `read-token` file in its data
+directory, or loads `--read-token-file`. Only health/version reads are public.
+Enrollment is disabled without a secret. Enrolled agents use per-agent write
+credentials; these cannot read fleet data. Upload/enrollment bodies are bounded.
+Terminate TLS in a reverse proxy before exposing the service remotely.
+
+## Shims and repository map
+
+`gate install` writes managed wrappers under `~/.chaindora/bin` on macOS/Linux.
+All 15 names remain to provide explicit refusal; keeping a shim does not imply
+an install adapter. Binary lookup excludes shim paths and marker signatures.
+Cleanup removes only regular managed files. Windows scanning is supported;
+Windows frozen installs and automatic wrappers are not currently supported.
 
 | Path | Responsibility |
 |---|---|
-| `cmd/chdora`, `internal/cli` | Commands, orchestration, exit codes, reporting |
-| `internal/inventory` | Five-ecosystem dependency inventory and shared CI references |
-| `internal/registries`, `internal/osv` | Network evidence and service caching |
-| `internal/gate` | Install resolution, checks, policy and integrity history |
-| `internal/detectors` | Project and host detection |
-| `internal/findings`, `internal/fixplan` | Evidence and reviewable remediation plans |
-| `incidents`, `testdata` | Curated intelligence and inert fixtures |
-| `website` | Static Angular landing page |
+| `cmd/chdora`, `internal/cli` | Commands, policy orchestration and output |
+| `internal/inventory` | Lockfile/manifests and shared CI references |
+| `internal/artifacts` | Verified archive cache, hashes and file manifests |
+| `internal/gate` | Frozen transaction, signal checks and integrity history |
+| `internal/detectors`, `internal/registries`, `internal/osv` | Detection and evidence |
+| `internal/findings`, `internal/fixplan` | Reports and remediation plans |
+| `internal/server` | Authenticated optional fleet service |
+| `incidents`, `testdata`, `tests` | Intelligence, inert fixtures and contracts |
+| `website` | Angular static site |
 
-The [threat model](threat-model.md) defines boundaries. The
-[hardening assessment](security-hardening.md) records remaining gaps and
-acceptance tests. Read those before interpreting a successful scan or gate
-approval as complete inspection.
+See the [threat model](threat-model.md) and [hardening assessment](security-hardening.md).

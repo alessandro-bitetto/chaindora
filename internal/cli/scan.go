@@ -4,38 +4,35 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"time"
 
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/heuristic"
-	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/osvioc"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/predictive"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/gate"
-	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 	"github.com/alessandro-bitetto/chaindora/internal/osv"
 )
 
 var (
-	jsonOut          bool
-	scanFormat       string
-	incidentsDir     string
-	skipOSV          bool
-	skipIncidents    bool
-	skipHeuristic    bool
-	scanFreshPopular bool
-	scanExcludes     []string
-	scanFixPlan      bool
-	scanFix          bool
-	scanYes          bool
-	scanAggressive   bool
-	scanSavePlan     bool
-	scanSkipRegistry bool
+	jsonOut               bool
+	scanFormat            string
+	incidentsDir          string
+	skipOSV               bool
+	skipIncidents         bool
+	skipHeuristic         bool
+	scanFreshPopular      bool
+	scanExcludes          []string
+	scanFixPlan           bool
+	scanFix               bool
+	scanYes               bool
+	scanAggressive        bool
+	scanSavePlan          bool
+	scanSkipRegistry      bool
 	scanExcludeCVEs       bool
 	scanExcludeSupply     bool
 	scanExcludeConfig     bool
@@ -43,6 +40,7 @@ var (
 	scanExcludePredictive bool
 	scanOffline           bool
 	scanSkipPredictive    bool
+	scanSkipIntegrity     bool
 )
 
 var scanCmd = &cobra.Command{
@@ -75,6 +73,7 @@ var scanCmd = &cobra.Command{
 
 		ctx := context.Background()
 		var all []findings.Finding
+		incidentIncomplete := false
 		tally := newDetectorTally()
 
 		if !skipOSV {
@@ -90,28 +89,14 @@ var scanCmd = &cobra.Command{
 		}
 
 		if !skipIncidents {
-			dir := incidents.ResolveDir([]string{
-				incidentsDir,
-				"incidents",
-				filepath.Join(os.Getenv("HOME"), ".chaindora", "incidents"),
-			})
-			if dir == "" {
-				fmt.Fprintln(os.Stderr, "warn: no incident pack directory found (use --incidents to specify)")
+			tally.Enable("incident-pack")
+			results, err := scanIncidents(ctx, inv, root, incidentsDir, scanExcludes)
+			if err != nil {
+				incidentIncomplete = true
+				all = append(all, incidentCoverageFailure(root, err))
 			} else {
-				incs, err := incidents.LoadDir(dir)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "warn: incident pack load failed:", err)
-				} else {
-					fmt.Fprintf(os.Stderr, "loaded %d incidents from %s\n", len(incs), dir)
-					tally.Enable("incident-pack")
-					det := incident.New(incs, scanExcludes...)
-					results, err := det.Detect(ctx, inv, root)
-					if err != nil {
-						return fmt.Errorf("incident detector: %w", err)
-					}
-					tally.AbsorbFindings(results)
-					all = append(all, results...)
-				}
+				tally.AbsorbFindings(results)
+				all = append(all, results...)
 			}
 		}
 
@@ -119,6 +104,7 @@ var scanCmd = &cobra.Command{
 			tally.Enable("heuristic")
 			npm, pypi := buildRegistryProbes(scanSkipRegistry)
 			det := heuristic.New(heuristic.Config{
+				Offline:      scanSkipRegistry,
 				FreshPopular: heuristic.FreshPopularConfig{Enabled: scanFreshPopular},
 				Excludes:     scanExcludes,
 				NPMProbe:     npm,
@@ -151,6 +137,12 @@ var scanCmd = &cobra.Command{
 			all = append(all, results...)
 		}
 
+		if !scanSkipIntegrity {
+			tally.Enable("integrity:files")
+			results := installedIntegrity(ctx, inv, scanSkipRegistry)
+			tally.AbsorbFindings(results)
+			all = append(all, results...)
+		}
 		tally.Print(os.Stderr)
 
 		ExcludeCVEs = scanExcludeCVEs
@@ -160,6 +152,10 @@ var scanCmd = &cobra.Command{
 		ExcludePredictive = scanExcludePredictive
 		if err := renderFindings(os.Stdout, all, effectiveFormat(scanFormat, jsonOut)); err != nil {
 			return err
+		}
+
+		if incidentIncomplete {
+			return SilentExit(2)
 		}
 
 		plans := buildAllFixPlans(all)
@@ -203,6 +199,7 @@ var scanCmd = &cobra.Command{
 }
 
 func init() {
+	scanCmd.Flags().BoolVar(&scanSkipIntegrity, "skip-integrity", false, "skip installed npm file verification against authenticated artifacts")
 	scanCmd.Flags().BoolVar(&jsonOut, "json", false, "deprecated; shortcut for --format=json")
 	scanCmd.Flags().StringVar(&scanFormat, "format", "text", "output format: text|json|jsonl|sarif|github")
 	scanCmd.Flags().StringVar(&incidentsDir, "incidents", "", "path to incident-pack YAML directory (default: ./incidents or ~/.chaindora/incidents)")

@@ -2,22 +2,22 @@
 
 [Documentation](README.md) · [Supported scope](../README.md#supported-scope)
 
-Chaindora 0.0.3 ships as one executable, `chdora`, for macOS, Linux and Windows.
+Chaindora 0.0.4 ships as one executable, `chdora`, for macOS, Linux and Windows.
 The package managers you want to wrap must be installed separately.
 
 ## Download a release
 
-Choose an archive from [release 0.0.3](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.3)
-and download `chaindora_0.0.3_checksums.txt` from the same release.
+Choose an archive from [release 0.0.4](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.4)
+and download `chaindora_0.0.4_checksums.txt` from the same release.
 
 | Platform | Architecture | Archive |
 |---|---|---|
-| macOS | Apple silicon | `chaindora_0.0.3_darwin_arm64.tar.gz` |
-| macOS | Intel | `chaindora_0.0.3_darwin_x86_64.tar.gz` |
-| Linux | ARM64 | `chaindora_0.0.3_linux_arm64.tar.gz` |
-| Linux | x86-64 | `chaindora_0.0.3_linux_x86_64.tar.gz` |
-| Windows | ARM64 | `chaindora_0.0.3_windows_arm64.zip` |
-| Windows | x86-64 | `chaindora_0.0.3_windows_x86_64.zip` |
+| macOS | Apple silicon | `chaindora_0.0.4_darwin_arm64.tar.gz` |
+| macOS | Intel | `chaindora_0.0.4_darwin_x86_64.tar.gz` |
+| Linux | ARM64 | `chaindora_0.0.4_linux_arm64.tar.gz` |
+| Linux | x86-64 | `chaindora_0.0.4_linux_x86_64.tar.gz` |
+| Windows | ARM64 | `chaindora_0.0.4_windows_arm64.zip` |
+| Windows | x86-64 | `chaindora_0.0.4_windows_x86_64.zip` |
 
 Archive names use `darwin` for macOS and `x86_64` for Go's `amd64` architecture.
 Archives include the executable, license, documentation and incident YAML files.
@@ -28,8 +28,8 @@ In the download directory, calculate the archive's SHA-256 and compare it with
 the matching filename in the checksum file. For example, on Apple silicon:
 
 ```sh
-shasum -a 256 chaindora_0.0.3_darwin_arm64.tar.gz
-cat chaindora_0.0.3_checksums.txt
+shasum -a 256 chaindora_0.0.4_darwin_arm64.tar.gz
+cat chaindora_0.0.4_checksums.txt
 ```
 
 On Linux, use `sha256sum` in place of `shasum -a 256`. Both values must match
@@ -42,7 +42,7 @@ in a directory on your PATH. This example installs for the current user:
 ```sh
 mkdir -p chaindora-release
 # Substitute the archive you verified above.
-tar -xzf chaindora_0.0.3_darwin_arm64.tar.gz -C chaindora-release
+tar -xzf chaindora_0.0.4_darwin_arm64.tar.gz -C chaindora-release
 mkdir -p "$HOME/.local/bin"
 install -m 755 chaindora-release/chdora "$HOME/.local/bin/chdora"
 export PATH="$HOME/.local/bin:$PATH"
@@ -50,7 +50,7 @@ chdora --version
 ```
 
 Add the PATH entry to your shell configuration if it is not already present.
-The expected output is `chdora 0.0.3`.
+The expected output is `chdora 0.0.4`.
 
 ### Windows
 
@@ -58,10 +58,10 @@ In PowerShell, compare the SHA-256 value with the matching checksum-file entry,
 then extract the verified ZIP:
 
 ```powershell
-Get-FileHash .\chaindora_0.0.3_windows_x86_64.zip -Algorithm SHA256
-Get-Content .\chaindora_0.0.3_checksums.txt
+Get-FileHash .\chaindora_0.0.4_windows_x86_64.zip -Algorithm SHA256
+Get-Content .\chaindora_0.0.4_checksums.txt
 # Run after the values match; substitute the ARM64 archive when appropriate.
-Expand-Archive .\chaindora_0.0.3_windows_x86_64.zip -DestinationPath .\chaindora-release
+Expand-Archive .\chaindora_0.0.4_windows_x86_64.zip -DestinationPath .\chaindora-release
 .\chaindora-release\chdora.exe --version
 ```
 
@@ -73,7 +73,7 @@ your user PATH. Open a new terminal and check `chdora --version` again.
 Use a supported Go toolchain that satisfies the project's Go 1.22 minimum:
 
 ```sh
-go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.3
+go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.4
 chdora --version
 ```
 
@@ -95,7 +95,7 @@ For a manually installed release binary:
 
 ```sh
 chdora upgrade --check
-chdora upgrade --version v0.0.3
+chdora upgrade --version v0.0.4
 chdora --version
 ```
 
@@ -109,7 +109,7 @@ On macOS/Linux, `/usr/local/bin` is often owned by root. Even if you own the
 a manually installed binary at that location, run:
 
 ```sh
-sudo /usr/local/bin/chdora upgrade --version v0.0.3
+sudo /usr/local/bin/chdora upgrade --version v0.0.4
 chdora --version
 ```
 
@@ -152,11 +152,12 @@ interpreting the result.
 Start with an explicit invocation; gate flags precede the manager name:
 
 ```sh
-chdora gate exec --dry-run npm install lodash@4.17.21
+chdora gate exec --dry-run npm ci
 ```
 
-This example demonstrates syntax. It still runs dependency resolution and is
-not a sandbox. It prints the gate result without executing the final install.
+The hardened adapter requires an existing v2/v3 public-registry npm
+lockfile and macOS/Linux. Dry-run verifies artifacts and prints policy results without
+executing a package manager. Accepted installs run offline with scripts disabled.
 
 On macOS/Linux, optionally install the shell wrappers:
 
@@ -166,11 +167,11 @@ chdora gate install
 chdora gate status
 ```
 
-On Windows, use `chdora gate exec <manager> <arguments>` directly. Automatic
-Windows wrapper installation is incomplete: the generated files are not native
-`.cmd`/PowerShell wrappers that can be relied on for interception.
+Windows supports scanning and `gate check`; frozen installation and automatic
+wrappers are currently unsupported.
 
 See [command coverage and policy](../README.md#prevention) before enabling the
-gate. Bare installs and several restore/build paths can pass through ungated.
+gate. Package additions, updates, run/build commands and other manager installs
+are explicitly refused. Bare npm installs restore the existing frozen lockfile.
 To remove managed shell integration on macOS/Linux, run `chdora gate disable`
 and open a fresh terminal.

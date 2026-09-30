@@ -104,12 +104,12 @@ Examples:
 		cwd, _ := os.Getwd()
 		cfg, err := gate.LoadConfig(cwd)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: chaindora.yml: %v\n", err)
+			return fmt.Errorf("gate configuration: %w", err)
 		}
 
 		// Build the checker stack.
 		threshold := cfg.CooldownThreshold(gateCheckCooldown)
-		if gateCheckCooldown != 0 {
+		if cmd.Flags().Changed("cooldown") {
 			threshold = gateCheckCooldown
 		}
 		probes := buildGateProbes()

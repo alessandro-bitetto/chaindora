@@ -9,6 +9,10 @@ import (
 // to the JSON API via plain fetch(). No frameworks, no build
 // step — vendored into the binary as a string literal.
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return

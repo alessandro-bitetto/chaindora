@@ -133,14 +133,8 @@ func TestPredictive_NoFindingsWhenPackageIsMature(t *testing.T) {
 	}
 }
 
-// TestPredictive_SkipsUnknownVerdicts verifies the
-// regression: when a checker returns Verdict=Unknown (typically
-// because no registry probe is registered for the ecosystem —
-// NuGet / Packagist / Pub / Hex / ... ), the
-// predictive detector silences the finding. Pre-a typical
-// .NET project produced 22+ "no registry probe for nuget" Low
-// findings that drowned out the real signal.
-func TestPredictive_SkipsUnknownVerdicts(t *testing.T) {
+// Missing metadata remains explicit coverage evidence.
+func TestPredictive_ReportsUnknownVerdicts(t *testing.T) {
 	// Build a probe table with ONLY npm registered; the inventory
 	// has a NuGet package which will hit "no probe" Unknown for
 	// every NuGet-targeted checker.
@@ -162,10 +156,17 @@ func TestPredictive_SkipsUnknownVerdicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Detect: %v", err)
 	}
+	found := false
 	for _, f := range out {
 		if strings.Contains(f.Summary, "no registry probe") {
-			t.Errorf("did not expect 'no registry probe' finding to leak through: %+v", f)
+			found = true
+			if f.VulnID != IncompleteID || f.Category != findings.CategoryConfiguration {
+				t.Fatalf("missing structured coverage status: %+v", f)
+			}
 		}
+	}
+	if !found {
+		t.Fatal("missing probe silently treated as complete")
 	}
 }
 

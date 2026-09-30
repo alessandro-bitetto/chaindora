@@ -5,6 +5,7 @@
 `chdora ci` scans a project and applies a finding policy. It does not intercept
 package installation in the CI job. Run it against the lockfiles and source you
 intend to build, and review the [protection boundaries](threat-model.md).
+The behavior below applies to 0.0.4; version 0.0.3 predates the audit fixes.
 
 ## Failure policy
 
@@ -22,7 +23,9 @@ chdora ci . --fail-on critical,high --sarif chaindora.sarif
 
 The list matches exact severities; it is not a minimum severity. Spell levels
 as `critical`, `high`, `medium`, `low` or `unknown`. Unrecognized tokens do not
-match a finding, so review policy values carefully.
+pass validation: typos, empty values/list entries, and combining `any` or `none`
+with other values return exit 2 before scanning. Case and surrounding whitespace
+are ignored.
 
 Suppressions are applied first. When `--baseline` is supplied, the policy then
 applies only to findings whose fingerprints are absent from that baseline.
@@ -35,14 +38,26 @@ This is a comparison with a saved report, not analysis of a Git diff.
 | 2 | Command, input, configuration or operational error |
 
 Unreadable inventory files and lockfile parsing failures emit
-`CHDORA-INVENTORY-INCOMPLETE` in JSON/SARIF and force exit 2. These coverage
+`CHDORA-INVENTORY-INCOMPLETE` in JSON/SARIF. Failed npm installed-file
+verification (`CHDORA-INTEGRITY-INCOMPLETE`), predictive inspection
+(`CHDORA-PREDICTIVE-INCOMPLETE`) and incident-pack loading
+(`CHDORA-INCIDENTS-INCOMPLETE`) also force exit 2. These coverage
 failures cannot be waived with `--fail-on none`, suppressions or a baseline.
 The incomplete run does not apply fixes or update the baseline; valid findings
 from the rest of the project are still reported.
 
 With no baseline, every unsuppressed finding is considered new. A successful
-exit does not guarantee complete inspection; some skipped or failed checks
-produce no findings.
+exit does not guarantee complete inspection: explicit skip flags and unsupported
+formats reduce coverage. `--offline` skips registry predictors but still checks
+installed npm files using verified cached artifacts. Cache misses refuse CI;
+`--skip-integrity` explicitly disables that layer. Online runs populate
+`~/.chaindora/artifacts`, and cached bytes are rehashed on every read.
+
+`--offline` and `--skip-registry` override `--fresh-popular`, including its
+registry requests. Incident checks still use a local pack. Run `chdora update`
+before an offline job, select a reviewed pack with `--incidents`, or explicitly
+disable this layer with `--skip-incidents`. Missing, empty or malformed packs
+fail the run; an explicit path never falls back to another pack.
 
 ## Predictive findings
 
@@ -52,13 +67,18 @@ produce no findings.
 | `credential-exfiltration` | High | Credential collection plus outbound HTTP in npm/PyPI source; Medium confidence, not proof of exfiltration |
 | `cooldown`, `version-diff` | Medium | Recent release or suspicious pattern changes |
 | `publisher-change`, `maintainer-trust`, `provenance` | Low | Supporting registry metadata |
-| Incomplete credential inspection | Low, configuration category | The requested source inspection failed |
+| Incomplete predictive inspection | Low, configuration category | An enabled check failed; CI exits 2 |
 
 The default policy can fail on both republish and credential-collection findings,
-as well as Critical/High findings from other detectors. Most other predictive
-Unknown results are suppressed. `--skip-predictive` disables those checks;
+as well as Critical/High findings from other detectors. All predictive
+Unknown results are retained as incomplete inspection. `--skip-predictive` disables those checks;
 `--exclude-predictive` only hides their text-output section. Category display
 filters do not remove results from JSON/SARIF or the CI failure policy.
+
+OSV IDs beginning with `MAL-` always emit Critical severity, even if the advisory
+has no CVSS score or full advisory hydration fails. npm aliases match their
+canonical registry identities. Installed-file mismatches emit Critical, with the
+exact affected path; a legitimate generated output still needs contextual review.
 
 ## GitHub Actions
 
@@ -87,7 +107,7 @@ jobs:
           cache: false
       - name: Install Chaindora
         run: |
-          go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.3
+          go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.4
           chdora update --dest "$RUNNER_TEMP/chaindora-incidents"
       - name: Scan
         run: |
@@ -155,10 +175,12 @@ can be used instead of `vuln_id`. Obtain it from the finding's SARIF
 contain a `fingerprint` field.
 
 Discovery also recognizes `.chaindora-ignore.yaml` and `chaindora-ignore.yml`.
-In 0.0.3, `--suppress-file` is passed to directory discovery, so use the default
-filename and directory placement rather than relying on arbitrary file paths.
-Expired suppressions **continue to suppress** and emit a warning. Use
-`--ignore-suppressions` for a full audit.
+In 0.0.4, `--suppress-file` reads the specified file directly.
+Suppression files must contain one YAML document with known fields; a supplied
+`expires` must be a valid `YYYY-MM-DD` date. An exception remains active through
+that date in UTC. Afterward it is ignored with a warning, and the finding returns
+to ordinary policy and baseline evaluation. Invalid dates fail the run. Use
+`--ignore-suppressions` for a full audit. Published 0.0.3 predates these fixes.
 
 ### Markdown reports for pull requests
 
@@ -181,7 +203,7 @@ digest according to your project's build policy.
 chaindora-scan:
   image: golang:1
   script:
-    - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.3
+    - go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.4
     - chdora update --dest /tmp/chaindora-incidents
     - chdora ci . --incidents /tmp/chaindora-incidents --format json --sarif chaindora.sarif > chaindora.json
   artifacts:
@@ -200,7 +222,7 @@ uses ordinary artifacts and retains the scan's failure status.
 
 ## Other CI systems
 
-Install 0.0.3 using the [installation guide](installation.md), select incident
+Install 0.0.4 using the [installation guide](installation.md), select incident
 data, and run the same command in CircleCI, Bitbucket, Azure Pipelines, Drone or
 Jenkins:
 

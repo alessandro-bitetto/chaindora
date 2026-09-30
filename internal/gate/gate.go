@@ -95,6 +95,9 @@ type PackageRef struct {
 	Version   string `json:"version"`
 	Direct    bool   `json:"direct"`
 	Integrity string `json:"integrity,omitempty"`
+	// ArtifactPath is a private, verified transaction snapshot. It is never
+	// accepted from serialized package input or persisted in gate history.
+	ArtifactPath string `json:"-"`
 }
 
 // String produces the "<eco>:<name>@<ver>" form used in user-facing
@@ -265,6 +268,11 @@ func Run(ctx context.Context, checkers []Checker, packages []PackageRef) []Packa
 			defer wg.Done()
 			defer func() { <-sem }()
 			pc := PackageCheck{Package: r}
+			if result, ok := explicitPackagePolicy(checkers, r); ok {
+				pc.Results = []CheckResult{result}
+				out[idx] = pc
+				return
+			}
 			for _, c := range checkers {
 				if ctx.Err() != nil {
 					pc.Results = append(pc.Results, CheckResult{
@@ -329,6 +337,12 @@ func CachedRun(ctx context.Context, checkers []Checker, packages []PackageRef, c
 
 			// Always evaluate current evidence and policy.
 			pc := PackageCheck{Package: r}
+			if result, ok := explicitPackagePolicy(checkers, r); ok {
+				pc.Results = []CheckResult{result}
+				// Explicit exceptions are not independent integrity evidence.
+				out[idx] = pc
+				return
+			}
 			for _, c := range checkers {
 				if ctx.Err() != nil {
 					pc.Results = append(pc.Results, CheckResult{
@@ -346,6 +360,27 @@ func CachedRun(ctx context.Context, checkers []Checker, packages []PackageRef, c
 	}
 	wg.Wait()
 	return out
+}
+
+// Explicit policy is terminal, with denies taking precedence regardless of
+// checker order. CachedRun still evaluates previously recorded integrity before
+// consulting exceptions; an allow entry cannot authorize changed bytes.
+func explicitPackagePolicy(checkers []Checker, ref PackageRef) (CheckResult, bool) {
+	var allowed *AllowlistChecker
+	for _, checker := range checkers {
+		if a, ok := checker.(*AllowlistChecker); ok && a.Config != nil {
+			if a.Config.IsDenied(ref) {
+				return a.Check(context.Background(), ref), true
+			}
+			if a.Config.IsAllowed(ref) {
+				allowed = a
+			}
+		}
+	}
+	if allowed != nil {
+		return allowed.Check(context.Background(), ref), true
+	}
+	return CheckResult{}, false
 }
 
 // Summarize collapses per-package results into a compact

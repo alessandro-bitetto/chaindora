@@ -1,104 +1,71 @@
-# Security controls and roadmap
+# Security hardening assessment
 
-Chaindora 0.0.3 focuses on strengthening the install boundary and the evidence
-behind detection in npm, PyPI, NuGet, Go modules and crates.io. Alternative
-managers are supported within that scope. The [README](../README.md#supported-scope)
-lists exact command and inventory coverage.
+Version 0.0.4 implements the audit milestone and follow-up policy/recovery fixes.
+The [README](../README.md#gate-command-coverage) states the narrower install contract;
+0.0.3 and earlier use the older partial interception behavior.
 
-## Current controls
+## Audit fixes
 
-| Control | Behavior |
-|---|---|
-| Current policy evaluation | `CachedRun` always executes the requested checker stack. Integrity history cannot authorize an install by itself. Registry clients have separate service-data caches. |
-| Independent verdict policy | Block always refuses. Warning and Unknown results each require their own override; empty evidence is Unknown. |
-| Persistent integrity evidence | Hash history survives approval TTL until cleared. Concurrent writes use unique temporary files. Integrity differences require review of artifact/platform identity. |
-| Bounded archive inspection | Downloads, decoded streams, individual files, entries and nesting have limits. Truncation, corruption, trailing payloads and exhausted limits are incomplete inspection, not approval. |
-| Credential-collection detection | JS/TS and Python rules combine collection and outbound HTTP in the same file. Dedicated npm/PyPI predictive checks run independently of version differences. |
-| Empty resolution and failed inventory | Empty gate trees refuse installation even under relaxed policy. CI parser/traversal failures emit structured findings and exit 2 without updating baselines or applying fixes. |
-| Resolver lifecycle and handoff regressions | Yarn chooses script-disabled commands by major version; Deno 2 disables node_modules during resolution. Dry-run prevents final handoff on all routes. These controls are not a process sandbox. |
+| Audit finding | Implemented control | Regression evidence |
+|---|---|---|
+| MAL advisories without CVSS could pass default CI | Treat every OSV MAL ID as Critical, including hydration failure | `internal/cli/audit_regression_test.go` |
+| npm aliases hid registry identity | Canonical name/version in v1/v2/v3 inventory, gate refs and installed-file checks | `internal/inventory/npm_alias_test.go`, offline CLI alias contract |
+| Checked graph/bytes differed from installed graph/bytes | Frozen actual-project lock, digest-authenticated snapshots, offline npm staging, final file/input comparison | `internal/gate/npm_transaction_test.go`, archive regressions |
+| Resolution could execute code before approval | No resolver subprocess in the accepted route; unsafe routes explicitly refused | Prepare with nonexistent manager succeeds without executing; real npm lifecycle sentinel |
+| Common install/run forms silently bypassed checks | Refuse everything outside frozen npm restores and exact help/version | Dispatcher table tests and manager-double CLI contracts |
+| Malformed policy failed open | Strict YAML with known fields, one document, propagated load errors | CLI/gate audit regressions |
+| Allow overrides did not match documented semantics | Structured terminal allow/deny, deny precedence, republish guard retained; no cached exceptions | Gate audit regressions |
+| Fleet reads exposed findings and inventory | Independent operator credential, disabled unauthenticated enrollment, loopback default, bounded request bodies | Server authentication tests and CLI token-file tests |
+| Installed source edits escaped metadata checks | Compare regular files against hash-verified npm artifact manifests; explicit missing-evidence result | Integrity contents tests and CLI clean/tampered/offline contracts |
+| Predictive failures disappeared | Structured incomplete-inspection findings; CI exit 2 before fixes/baseline writes | Predictive failure tests and CI coverage contracts |
+| CI severity typos silently disabled policy | Validate exact severity lists or standalone `any`/`none` before scanning | CLI invalid-policy regressions and contracts |
+| Expired or malformed exceptions hid findings | Enforce UTC expiry dates; reject invalid dates, unknown fields and extra YAML documents | Suppression boundary tests and CLI expired/invalid contracts |
+| Fresh-popular checks could ignore offline settings | Apply offline/skip-registry at the heuristic configuration boundary | Zero-request tests for scan, CI and project discovery |
+| Missing or broken incident packs disappeared | Report incomplete incident coverage, preserve it in JSON/SARIF and force CI exit 2 | Invalid-record tests and baseline/suppression CLI contracts |
+| Concurrent or interrupted installs could lose the previous tree | OS lock inherited by npm; private per-user journal; automatic recovery before preparation | Twelve subprocess-crash scenarios, competing transactions, inherited locks and untrusted-state regressions |
 
-The named signatures are `env-var-exfil-shape` and
-`credential-file-exfil-shape`. Each contributes weight 3 to the gate's static
-score. Predictive findings use High severity and Medium confidence, and can
-therefore fail the default CI severity policy. They identify suspicious
-combinations for review, not proven exfiltration: no AST or interprocedural
-data-flow analysis is performed. Single environment-variable reads, network
-calls without collection, and credential-file reads without network calls
-do not trigger these rules. Source snippets are not included in their evidence.
+`allow`, lenient and offline policy overrides never relax hash, identity,
+transaction-shape or staged-file checks. Static scans validate supplied hashes
+(SRI, SHA-256 hex and Go h1); a package check without a project digest cannot
+prove it inspected a particular project's artifact. Version/platform hashes can
+differ legitimately and require review.
 
-Predictive credential inspection downloads the registry artifact chosen by
-the existing probe; it does not inspect the installed copy or every wheel for
-every platform. Failed inspection emits a Low configuration finding instead
-of disappearing. Existing offline/skip-registry/skip-predictive options still
-disable this network-backed inspection. Other predictive checks retain their
-existing treatment of Unknown results.
+## Validation and efficacy
 
-Archive defaults are 50 MiB per download and decoded tar stream, 4 MiB per
-file, 10,000 entries, and three nested payload levels. Content and
-entry budgets are shared across nested payloads. Legitimate large artifacts
-can now produce Unknown and stop a strict/lenient install. Unsupported source
-languages, bytecode and binaries are not semantically inspected. A successfully
-parsed archive is not a clean bill of health.
+Run the ordinary race suite, vet, native/cross builds and website build. Run
+`python3 tests/offline_cli.py --binary <built-cli> --output <results-dir>` for the
+end-to-end JSON/SARIF/exit-code contracts. The frozen npm integration contract is
+opt-in with `CHAINDORA_TEST_NPM=<trusted-absolute-npm-path> go test ./internal/gate
+-run 'TestNPMFrozenInstall.*RealOffline' -count=1 -v`; it uses generated inert archives,
+a local in-process registry substitute and npm offline with lifecycle scripts off.
+For enforced network isolation, run `tests/run_environments.py --only frozen-npm
+cli --output <results-dir>` using the prepared container toolchains.
 
-The additional scans and removal of approval reuse increase work. A future
-performance cache should retain artifact bytes or explicitly versioned
-analysis results, while always reevaluating policy and current intelligence.
-It must include the artifact, analysis version, requested checks, and relevant
-configuration in its identity; historical verdicts alone are insufficient.
+The [credential-shape corpus](../testdata/detection/credential-shapes-v1.json)
+reports true/false positive counts from versioned
+inert fixtures. It establishes expected behavior for those shapes and benign
+controls only. Neither that corpus nor the existing resolver/environment matrix
+measures recall against real attacks or a representative false-positive rate.
+Legacy manager resolver tests remain useful implementation evidence, but do not
+mean their install routes are enabled or securely mediated.
 
-Republish history uses the existing `(ecosystem, name, version)` identity and
-compares recorded integrity strings. Different platform artifacts or hash
-representations can legitimately differ; the alert needs investigation. Artifact
-identity and digest normalization should accompany the transaction work below.
+## Remaining expansion work
 
-## Priorities and acceptance tests
+These are unsupported capabilities, not silently accepted install routes:
 
-These gaps remain open. The suggested acceptance tests define what “done”
-would mean; this change does not claim to implement them.
+1. Add equivalent frozen adapters for alternative npm managers, PyPI, NuGet, Go
+   and Cargo; prove the requested graph and artifact identity survive installation.
+2. Add workspaces, private registries, reviewed build-hook isolation and native
+   Windows installation with dedicated integration contracts.
+3. Extend installed-file manifests beyond public-registry npm and model legitimate
+   generated/native outputs separately from published content.
+4. Authenticate provenance signatures, subject digests and trusted builder identities.
+5. Build a separately labeled historical attack replay and representative benign
+   corpus. Publish measured detection/false-positive rates and evasions; do not
+   infer efficacy from passing unit tests.
+6. Add richer checked/skipped coverage summaries, including checks with no
+   applicable registry signal. Recovery now handles process interruptions;
+   full power-loss durability and arbitrary filesystem damage remain outside it.
 
-On Windows, use explicit `gate exec` invocations. Automatic wrapper generation
-still needs native command wrappers, quoting, activation and removal tests before
-it can be documented as reliable interception.
-
-| Priority | Work | Evidence in current code | Acceptance test |
-|---|---|---|---|
-| P0 | Bind approval to the exact install transaction | `ResolveNPMTree` resolves in a synthetic project; `gate_exec.go` later executes the original arguments in the real project. `StaticScan` asks registry probes for bytes rather than verifying them against `PackageRef.Integrity`. | Swap a registry response, range resolution, mirror, project manifest or lockfile between resolution and execution. Installation must refuse, or consume only the already verified, content-addressed artifacts and frozen resolution. Include transitive dependencies, workspaces and platform artifacts; distinct legitimate wheels must not be mislabeled as republishes. |
-| P0 | Prevent code execution during resolution | `ResolvePipTree` uses dry-run/report without a wheel-only restriction. Resolver flags are not a process sandbox. | Malicious metadata/build hooks, project plugins and user overrides cannot create a marker file, read an injected canary secret, or contact an unapproved endpoint before a verdict. Unsafe resolution must be isolated or refused explicitly. |
-| P0 | Cover common install paths and make unsupported paths explicit | `classifyGateArgs` passes bare `npm install` through; `npm ci` is not an install verb. Flags before verbs, aliases, local/git dependencies and resolver flag overrides need systematic adversarial coverage. | Every documented install/restore/update route either gates the actual tree or emits an explicit unsupported/refused result. Test with a fake package manager and hostile args/config; no unreviewed install is silently forwarded. |
-| P1 | Separate fetching from execution | After approval, `execReal` receives the original package-manager arguments. Install hooks inherit the user's process context. | Default restricted installs suppress hooks. Explicit build permission executes in an isolated environment with bounded filesystem/network access and a minimal secret-free environment. Native builds remain usable through a documented, narrow exception mechanism. |
-| P1 | Verify installed file contents | `lockdrift.go` compares package name/version and lockfile mirror integrity. It explicitly leaves file-content recomputation as future work. | Modify a dependency's `index.js` while leaving both lockfiles and `package.json` unchanged. Detection must report the exact changed path against a verified artifact manifest. Model legitimate generated/native-build outputs separately. |
-| P1 | Cryptographically verify provenance | npm `HasProvenance` checks registry metadata for attestation presence. Presence alone does not authenticate the artifact or builder. | Reject an invalid signature, wrong artifact digest, unexpected repository/workflow identity, or untrusted issuer. A syntactically present attestation must not pass these cases. |
-| P1 | Make coverage measurable | Several unsupported probes return Approve; most predictive Unknown results are suppressed. “No findings” does not mean all packages were inspected. | Machine-readable reports distinguish checked, unsupported, failed and skipped packages/checks. CI can require a minimum coverage policy independently of finding severity. |
-| P2 | Build an incident replay and benign-control corpus | Current tests cover individual mechanisms, but source heuristics cannot establish real-world recall or false-positive rates. | Versioned, inert fixtures for known attack shapes and representative legitimate tooling; publish per-rule detection/false-positive results and latency/resource costs. Expand based on measured misses. |
-| P2 | Fleet containment and authenticated incident updates | Fleet aggregation exists, but shared observations are useful only when they can lead to narrowly scoped action. | Reviewed/signed incident updates, package/digest-specific deny rules, affected-install reporting and reversible quarantine plans. Treat age/popularity as supporting evidence, never a substitute for artifact verification. |
-
-For safe package-manager semantics, consult the primary documentation:
-[pip secure installs](https://pip.pypa.io/en/latest/topics/secure-installs/)
-describes source-distribution code execution and wheel-only/hash-checked
-installs; [pip install](https://pip.pypa.io/en/latest/cli/pip_install/)
-describes dry-run/report behavior;
-[npm ci](https://docs.npmjs.com/cli/commands/npm-ci/)
-documents frozen lockfile installation and `ignore-scripts`. These options
-are useful components of a design, not equivalent to sandboxing.
-
-## Validation
-
-Regression tests cover mixed verdict policies, current-stack evaluation, expired
-integrity history, concurrent stores, malformed and oversized archives, checksum
-failures, hidden trailing payloads, nested archive budgets, benign credential
-controls and detection of unchanged suspicious behavior.
-
-Scope tests cover supported managers, unsupported argument/manager refusal,
-project discovery, ignored inventory formats and safe shim cleanup. Fixtures
-use local HTTP servers and inert source; no malicious payload is executed.
-
-The [environment validation report](environment-testing.md) records real tests
-of all 15 manager names, lifecycle sentinels, complete dependency graphs and
-CLI JSON/SARIF/exit-code contracts. Run `tests/run_environments.py` with the
-documented isolated toolchains; ordinary Go tests intentionally skip that
-opt-in matrix. CI now runs both the ordinary suite and the separate contracts.
-
-Run `go test ./... -race -count=1`, `go vet ./...`, native and cross-platform
-builds, and `npm run build` in `website/`. Browser checks should exercise
-installation navigation, repeated fragment links, mobile menu, keyboard tabs,
-CLI mode switching and command copying at desktop and narrow widths.
+The [threat model](threat-model.md) documents the trusted local OS/package-manager
+assumption, shim bypass, resource limits and the lack of runtime containment.

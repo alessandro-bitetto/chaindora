@@ -27,7 +27,7 @@ func TestLockDrift_VersionMismatch(t *testing.T) {
 	  "version": "4.17.20"
 	}`)
 
-	d := New([]string{dir})
+	d := newMetadataDetector([]string{dir})
 	out, _ := d.Detect(context.Background())
 	if !anyDetector(out, "integrity:lockfile-vs-disk-version") {
 		t.Fatalf("expected version-drift finding, got: %+v", out)
@@ -51,7 +51,7 @@ func TestLockDrift_NameMismatch(t *testing.T) {
 	  "version": "4.17.21"
 	}`)
 
-	d := New([]string{dir})
+	d := newMetadataDetector([]string{dir})
 	out, _ := d.Detect(context.Background())
 	if !anyDetector(out, "integrity:lockfile-vs-disk-name") {
 		t.Fatalf("expected name-drift finding, got: %+v", out)
@@ -80,7 +80,7 @@ func TestLockDrift_AliasNoFalsePositive(t *testing.T) {
 	  "version": "4.2.3"
 	}`)
 
-	d := New([]string{dir})
+	d := newMetadataDetector([]string{dir})
 	out, _ := d.Detect(context.Background())
 	if anyDetector(out, "integrity:lockfile-vs-disk-name") {
 		t.Fatalf("aliased install must not produce a name-drift finding, got: %+v", out)
@@ -106,7 +106,7 @@ func TestLockDrift_AliasSwapStillFires(t *testing.T) {
 	  "version": "4.2.3"
 	}`)
 
-	d := New([]string{dir})
+	d := newMetadataDetector([]string{dir})
 	out, _ := d.Detect(context.Background())
 	if !anyDetector(out, "integrity:lockfile-vs-disk-name") {
 		t.Fatalf("a swapped alias directory (disk name ≠ declared target) must still fire, got: %+v", out)
@@ -137,7 +137,7 @@ func TestLockDrift_MirrorIntegrityDrift(t *testing.T) {
 	  }
 	}`)
 
-	d := New([]string{dir})
+	d := newMetadataDetector([]string{dir})
 	out, _ := d.Detect(context.Background())
 	if !anyDetector(out, "integrity:lockfile-mirror-drift") {
 		t.Fatalf("expected mirror-drift finding, got: %+v", out)
@@ -179,7 +179,7 @@ func TestLockDrift_NestedDepsNoFalsePositive(t *testing.T) {
 	  "name": "eslint", "version": "8.0.0"
 	}`)
 
-	d := New([]string{dir})
+	d := newMetadataDetector([]string{dir})
 	out, _ := d.Detect(context.Background())
 	for _, f := range out {
 		if f.Detector == "integrity:lockfile-vs-disk-version" ||
@@ -207,7 +207,7 @@ func TestLockDrift_NestedRealDriftStillFires(t *testing.T) {
 	  "name": "semver", "version": "6.0.0"
 	}`)
 
-	d := New([]string{dir})
+	d := newMetadataDetector([]string{dir})
 	out, _ := d.Detect(context.Background())
 	if !anyDetector(out, "integrity:lockfile-vs-disk-version") {
 		t.Fatalf("expected drift finding for genuine nested-path mismatch, got %d findings", len(out))
@@ -236,7 +236,7 @@ semver@^7.0.0:
 	  "name": "semver", "version": "7.6.0"
 	}`)
 
-	d := New([]string{dir})
+	d := newMetadataDetector([]string{dir})
 	out, _ := d.Detect(context.Background())
 	for _, f := range out {
 		if f.Detector == "integrity:lockfile-vs-disk-version" {
@@ -268,7 +268,7 @@ func TestLockDrift_CleanProjectIsSilent(t *testing.T) {
 	  }
 	}`)
 
-	d := New([]string{dir})
+	d := newMetadataDetector([]string{dir})
 	out, _ := d.Detect(context.Background())
 	for _, f := range out {
 		if f.Detector == "integrity:lockfile-vs-disk-version" ||
@@ -305,7 +305,7 @@ string-width-cjs@npm:string-width@^4.2.0:
 	  "name": "string-width", "version": "4.2.3"
 	}`)
 
-	out, _ := New([]string{dir}).Detect(context.Background())
+	out, _ := newMetadataDetector([]string{dir}).Detect(context.Background())
 	if anyDetector(out, "integrity:lockfile-vs-disk-name") {
 		t.Fatalf("yarn aliased install must not produce a name-drift finding, got: %+v", out)
 	}
@@ -326,7 +326,7 @@ string-width-cjs@npm:string-width@^4.2.0:
 	  "name": "evil", "version": "4.2.3"
 	}`)
 
-	out, _ := New([]string{dir}).Detect(context.Background())
+	out, _ := newMetadataDetector([]string{dir}).Detect(context.Background())
 	if !anyDetector(out, "integrity:lockfile-vs-disk-name") {
 		t.Fatalf("a swapped yarn alias directory must still fire, got: %+v", out)
 	}
@@ -348,7 +348,7 @@ lodash@^4.17.21:
 	  "name": "lodash", "version": "4.17.20"
 	}`)
 
-	out, _ := New([]string{dir}).Detect(context.Background())
+	out, _ := newMetadataDetector([]string{dir}).Detect(context.Background())
 	f, ok := findingByDetector(out, "integrity:lockfile-vs-disk-version")
 	if !ok {
 		t.Fatalf("expected a version-drift finding, got: %+v", out)
@@ -381,7 +381,7 @@ func TestLockDrift_NpmVersionDriftMirrorAgreesIsMedium(t *testing.T) {
 	  "name": "lodash", "version": "4.17.20"
 	}`)
 
-	out, _ := New([]string{dir}).Detect(context.Background())
+	out, _ := newMetadataDetector([]string{dir}).Detect(context.Background())
 	f, ok := findingByDetector(out, "integrity:lockfile-vs-disk-version")
 	if !ok {
 		t.Fatalf("expected a version-drift finding, got: %+v", out)
@@ -407,7 +407,7 @@ func TestLockDrift_NpmVersionDriftNoMirrorIsCritical(t *testing.T) {
 	  "name": "lodash", "version": "4.17.20"
 	}`)
 
-	out, _ := New([]string{dir}).Detect(context.Background())
+	out, _ := newMetadataDetector([]string{dir}).Detect(context.Background())
 	f, ok := findingByDetector(out, "integrity:lockfile-vs-disk-version")
 	if !ok {
 		t.Fatalf("expected a version-drift finding, got: %+v", out)
@@ -453,7 +453,7 @@ packages:
 	// pnpm's own store recorded 4.17.20 — matches disk.
 	mustWrite(t, filepath.Join(dir, "node_modules", ".pnpm", "lodash@4.17.20", "node_modules", "lodash", "package.json"), `{"name":"lodash","version":"4.17.20"}`)
 
-	out, _ := New([]string{dir}).Detect(context.Background())
+	out, _ := newMetadataDetector([]string{dir}).Detect(context.Background())
 	f, ok := findingByDetector(out, "integrity:lockfile-vs-disk-version")
 	if !ok {
 		t.Fatalf("expected version-drift finding, got: %+v", out)
@@ -477,7 +477,7 @@ packages:
 	// Store only knows 4.17.21 — the on-disk 4.17.20 was never placed by pnpm.
 	mustWrite(t, filepath.Join(dir, "node_modules", ".pnpm", "lodash@4.17.21", "node_modules", "lodash", "package.json"), `{"name":"lodash","version":"4.17.21"}`)
 
-	out, _ := New([]string{dir}).Detect(context.Background())
+	out, _ := newMetadataDetector([]string{dir}).Detect(context.Background())
 	f, ok := findingByDetector(out, "integrity:lockfile-vs-disk-version")
 	if !ok {
 		t.Fatalf("expected version-drift finding, got: %+v", out)
@@ -504,4 +504,12 @@ func anyDetector(out []findings.Finding, want string) bool {
 		}
 	}
 	return false
+}
+
+// These tests isolate metadata drift. Byte verification is covered separately
+// with authenticated archives and an explicitly injected local HTTP transport.
+func newMetadataDetector(roots []string) *Detector {
+	d := New(roots)
+	d.SkipContents = true
+	return d
 }

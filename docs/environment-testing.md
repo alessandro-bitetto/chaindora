@@ -1,4 +1,47 @@
-# Environment validation — 2026-09-29
+# Environment validation
+
+## Audit hardening — 2026-09-30, version 0.0.4
+
+These local results validate the audit and follow-up fixes in 0.0.4. Windows
+cross-builds below do not establish Windows runtime validation.
+See the [audit fix matrix](security-hardening.md) and
+[current install scope](../README.md#gate-command-coverage).
+
+| Validation | Result |
+|---|---|
+| Full ordinary Go race suite, macOS arm64 and network-disabled Linux arm64 container | Passed |
+| Real frozen npm restores, native macOS and network-disabled Linux container | 3/3 passed on each: clean restore, canonical alias plus transitive graph, failure preserves old install |
+| Offline CLI JSON/SARIF/exit-code contracts, macOS and isolated Linux | 45/45 passed on each |
+| Frozen npm process interruptions, macOS and isolated Linux | All 12 swap/cleanup scenarios passed; repeated recovery preserves the expected tree |
+| Transaction locking and recovery authority | Competing transactions refused, surviving child retains lock, repository-supplied journals ignored, ambiguous states preserved |
+| Offline combined with fresh-popular | Zero HTTP requests across scan, CI and project discovery |
+| CI policy and suppression validation | Invalid thresholds/dates/YAML refused; expired exceptions no longer hide findings |
+| Incident-pack failures under suppression, severity override and baseline update | Exit 2, JSON/SARIF evidence retained, baseline unchanged |
+| Predictive failure under suppression, severity override and baseline update | Exit 2, evidence retained, baseline unchanged |
+| Versioned credential-shape corpus | 9 true positives, 7 true negatives, 0 false positives/negatives on these synthetic fixtures |
+| `go vet ./...`, native CLI and Linux/Windows amd64 cross builds | Passed; cross builds are not Windows runtime tests |
+| `golangci-lint` for changed Go code, including new files | 0 new issues; full-repository lint still has unrelated existing issues |
+| Angular production build | Passed |
+| Whitespace/diff checks | Passed |
+
+The tests use inert archives, local HTTP substitutes and harmless lifecycle
+sentinels. Package payloads are never executed. The accepted npm route disables
+scripts and confirms the staged files and installed graph match approval.
+This does not measure historical attack recall, field false-positive rates or
+OS-level containment. The earlier 15-manager resolver results below do not
+imply those installation routes remain enabled.
+
+Reproduce the enforced-isolation contracts with:
+
+```sh
+python3 tests/run_environments.py --only frozen-npm cli --output /tmp/chaindora-audit-results
+```
+
+The images must already be prepared; `--prepare` explicitly downloads the test
+toolchains before the network-disabled runs. The CI workflow now includes this
+frozen transaction group alongside legacy resolver tests.
+
+## Prior release validation — 2026-09-29
 
 **The reported failures are fixed on `main` and the expanded contracts pass in
 GitHub CI.** No malicious package was installed or executed. Tests use generated

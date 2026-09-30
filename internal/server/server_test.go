@@ -22,6 +22,12 @@ func TestEndToEnd_EnrollPushList(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := New(store, "shared-secret", "test")
+	srv.ReadToken = "operator-test-token"
+	get := func(url string) (*http.Response, error) {
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("Authorization", "Bearer "+srv.ReadToken)
+		return http.DefaultClient.Do(req)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
@@ -93,7 +99,7 @@ func TestEndToEnd_EnrollPushList(t *testing.T) {
 	}
 
 	// List agents → 1.
-	resp, err = http.Get(ts.URL + "/api/v1/agents")
+	resp, err = get(ts.URL + "/api/v1/agents")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +112,7 @@ func TestEndToEnd_EnrollPushList(t *testing.T) {
 	}
 
 	// Query findings → 1.
-	resp, err = http.Get(ts.URL + "/api/v1/findings?latest=1")
+	resp, err = get(ts.URL + "/api/v1/findings?latest=1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +125,7 @@ func TestEndToEnd_EnrollPushList(t *testing.T) {
 	}
 
 	// Summary.
-	resp, err = http.Get(ts.URL + "/api/v1/summary")
+	resp, err = get(ts.URL + "/api/v1/summary")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +141,7 @@ func TestEndToEnd_EnrollPushList(t *testing.T) {
 	}
 
 	// Dashboard at "/".
-	resp, err = http.Get(ts.URL + "/")
+	resp, err = get(ts.URL + "/")
 	if err != nil {
 		t.Fatal(err)
 	}

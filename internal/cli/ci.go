@@ -4,19 +4,17 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/heuristic"
-	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
+	"github.com/alessandro-bitetto/chaindora/internal/detectors/integrity"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/osvioc"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/predictive"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/gate"
-	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 	"github.com/alessandro-bitetto/chaindora/internal/osv"
 )
@@ -28,6 +26,7 @@ var (
 	ciIncidentsDir      string
 	ciSkipOSV           bool
 	ciSkipPredictive    bool
+	ciSkipIntegrity     bool
 	ciSkipIncidents     bool
 	ciSkipHeuristic     bool
 	ciFreshPopular      bool
@@ -76,6 +75,10 @@ continuous-integration use:
 			root = args[0]
 		}
 
+		if err := validateFailOn(ciFailOn); err != nil {
+			return err
+		}
+
 		if ciOffline {
 			ciSkipOSV = true
 			ciSkipRegistry = true
@@ -104,6 +107,7 @@ continuous-integration use:
 
 		ctx := context.Background()
 		var all []findings.Finding
+		var coverageFailures []findings.Finding
 		tally := newDetectorTally()
 
 		if !ciSkipOSV {
@@ -118,27 +122,13 @@ continuous-integration use:
 		}
 
 		if !ciSkipIncidents {
-			dir := incidents.ResolveDir([]string{
-				ciIncidentsDir,
-				"incidents",
-				filepath.Join(os.Getenv("HOME"), ".chaindora", "incidents"),
-			})
-			if dir != "" {
-				incs, err := incidents.LoadDir(dir)
-				if err != nil {
-					if ciVerbose {
-						fmt.Fprintln(os.Stderr, "warn: incident pack load failed:", err)
-					}
-				} else {
-					tally.Enable("incident-pack")
-					det := incident.New(incs, ciExcludes...)
-					results, err := det.Detect(ctx, inv, root)
-					if err != nil {
-						return fmt.Errorf("incident detector: %w", err)
-					}
-					tally.AbsorbFindings(results)
-					all = append(all, results...)
-				}
+			tally.Enable("incident-pack")
+			results, err := scanIncidents(ctx, inv, root, ciIncidentsDir, ciExcludes)
+			if err != nil {
+				coverageFailures = append(coverageFailures, incidentCoverageFailure(root, err))
+			} else {
+				tally.AbsorbFindings(results)
+				all = append(all, results...)
 			}
 		}
 
@@ -146,6 +136,7 @@ continuous-integration use:
 			tally.Enable("heuristic")
 			npm, pypi := buildRegistryProbes(ciSkipRegistry)
 			det := heuristic.New(heuristic.Config{
+				Offline:      ciSkipRegistry,
 				FreshPopular: heuristic.FreshPopularConfig{Enabled: ciFreshPopular},
 				Excludes:     ciExcludes,
 				NPMProbe:     npm,
@@ -179,6 +170,28 @@ continuous-integration use:
 			}
 		}
 
+		if !ciSkipIntegrity {
+			tally.Enable("integrity:files")
+			results := installedIntegrity(ctx, inv, ciSkipRegistry)
+			tally.AbsorbFindings(results)
+			for _, f := range results {
+				if f.VulnID == integrity.IncompleteID {
+					coverageFailures = append(coverageFailures, f)
+				} else {
+					all = append(all, f)
+				}
+			}
+		}
+		// Failed predictive checks must not disappear into suppression/baseline policy.
+		var completeFindings []findings.Finding
+		for _, f := range all {
+			if f.VulnID == predictive.IncompleteID {
+				coverageFailures = append(coverageFailures, f)
+			} else {
+				completeFindings = append(completeFindings, f)
+			}
+		}
+		all = completeFindings
 		tally.Print(os.Stderr)
 
 		// SonarQube-grade CI pipeline:
@@ -192,7 +205,7 @@ continuous-integration use:
 		//   - pre-existing tech-debt findings DON'T break new PRs
 		//   - explicitly-suppressed findings (with reason) DON'T break new PRs
 		//   - only ACTUAL NEW findings on this PR can fail the gate
-		suppressions, suppErr := findings.LoadSuppressions(ciSuppressFileOrDefault(root))
+		suppressions, suppErr := loadCISuppressions(root)
 		if suppErr != nil && !ciIgnoreSuppressions {
 			return fmt.Errorf("suppression file: %w", suppErr)
 		}
@@ -203,16 +216,19 @@ continuous-integration use:
 		// Coverage failures are operational errors, not suppressible accepted
 		// risk. Keep them in every report, independently of finding policy.
 		all = append(all, inventoryFailureFindings(root, inv.Errors)...)
+		all = append(all, coverageFailures...)
 		// Emit expired-suppression warning to stderr regardless of
 		// format — this is operational signal, not finding data.
 		expiredCount := 0
-		for _, s := range suppressed {
-			if s.Expired {
-				expiredCount++
+		if suppressions != nil && !ciIgnoreSuppressions {
+			for _, s := range suppressions.Suppress {
+				if s.Expired(time.Now()) {
+					expiredCount++
+				}
 			}
 		}
 		if expiredCount > 0 {
-			fmt.Fprintf(os.Stderr, "[chdora] WARNING: %d expired suppression entry(ies) in %s — review and refresh\n",
+			fmt.Fprintf(os.Stderr, "[chdora] WARNING: %d expired suppression entry(ies) in %s — ignored; findings remain subject to CI policy\n",
 				expiredCount, suppressions.Path)
 		}
 
@@ -287,8 +303,8 @@ continuous-integration use:
 			}
 		}
 
-		if len(inv.Errors) > 0 {
-			fmt.Fprintln(os.Stderr, "[chdora] inventory incomplete: CI refused; fixes and baseline updates were not applied")
+		if len(inv.Errors) > 0 || len(coverageFailures) > 0 {
+			fmt.Fprintln(os.Stderr, "[chdora] requested inspection incomplete: CI refused; fixes and baseline updates were not applied")
 			return SilentExit(2)
 		}
 
@@ -345,14 +361,14 @@ continuous-integration use:
 	},
 }
 
-// ciSuppressFileOrDefault picks the suppression-file location.
+// loadCISuppressions respects an explicit file without directory discovery.
 // Explicit --suppress-file wins; otherwise the standard
 // .chaindora-ignore.yml discovery walks up from the scan root.
-func ciSuppressFileOrDefault(root string) string {
+func loadCISuppressions(root string) (*findings.Suppressions, error) {
 	if ciSuppressFile != "" {
-		return ciSuppressFile
+		return findings.ReadSuppressions(ciSuppressFile)
 	}
-	return root
+	return findings.LoadSuppressions(root)
 }
 
 // detectCI returns a short identifier for the running CI, or "" if none of
@@ -389,6 +405,22 @@ func formatForCI(ci string) string {
 	return "text"
 }
 
+// validateFailOn rejects typos and ambiguous combinations before any scan work.
+func validateFailOn(value string) error {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "any" || value == "none" {
+		return nil
+	}
+	for _, token := range strings.Split(value, ",") {
+		switch strings.TrimSpace(token) {
+		case "critical", "high", "medium", "low", "unknown":
+		default:
+			return fmt.Errorf("invalid --fail-on value %q: use critical,high,medium,low,unknown or standalone any/none", value)
+		}
+	}
+	return nil
+}
+
 // shouldFail returns true if any finding meets the failure threshold.
 // threshold is a comma-separated severity list, "any", or "none".
 func shouldFail(fs []findings.Finding, threshold string) bool {
@@ -412,6 +444,7 @@ func shouldFail(fs []findings.Finding, threshold string) bool {
 }
 
 func init() {
+	ciCmd.Flags().BoolVar(&ciSkipIntegrity, "skip-integrity", false, "explicitly skip installed npm file verification")
 	ciCmd.Flags().StringVar(&ciFailOn, "fail-on", "critical,high",
 		"comma-separated severities causing exit 1, or 'any' / 'none'")
 	ciCmd.Flags().StringVar(&ciFormat, "format", "",

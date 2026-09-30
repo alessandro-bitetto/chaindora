@@ -18,6 +18,7 @@ import (
 // fall back to the Noop probe and reduce to "no evidence available" —
 // they don't fire false positives based on shape alone.
 type Config struct {
+	Offline      bool // dominates every network-backed heuristic, including FreshPopular
 	FreshPopular FreshPopularConfig
 	// Excludes are directory basenames to skip during the install-script
 	// filesystem walk. Same semantics as inventory.WithExcludes.
@@ -50,7 +51,13 @@ type Detector struct {
 	cfg Config
 }
 
-func New(cfg Config) *Detector { return &Detector{cfg: cfg} }
+func New(cfg Config) *Detector {
+	if cfg.Offline {
+		cfg.NPMProbe, cfg.PyPIProbe = nil, nil
+		cfg.FreshPopular.Enabled = false
+	}
+	return &Detector{cfg: cfg}
+}
 
 // Detect runs every sub-detector against the inventory and the scan tree.
 func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory, scanRoot string) ([]findings.Finding, error) {

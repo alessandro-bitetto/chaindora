@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alessandro-bitetto/chaindora/internal/artifacts"
+
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/registries"
 )
@@ -35,9 +37,12 @@ import (
 // Detector emits integrity findings for go.sum and Cargo.lock
 // files discovered under ProjectRoots.
 type Detector struct {
-	ProjectRoots []string
-	GoProbe      *registries.GoMod
-	HTTPClient   *http.Client
+	ProjectRoots      []string
+	GoProbe           *registries.GoMod
+	HTTPClient        *http.Client
+	ArtifactCacheRoot string
+	Offline           bool
+	SkipContents      bool
 }
 
 // New returns a Detector scanning the supplied project roots.
@@ -45,9 +50,10 @@ type Detector struct {
 // calling Detect.
 func New(roots []string) *Detector {
 	return &Detector{
-		ProjectRoots: roots,
-		GoProbe:      registries.NewGoMod(),
-		HTTPClient:   &http.Client{Timeout: 10 * time.Second},
+		ProjectRoots:      roots,
+		GoProbe:           registries.NewGoMod(),
+		HTTPClient:        &http.Client{Timeout: 10 * time.Second},
+		ArtifactCacheRoot: artifacts.DefaultCacheRoot(),
 	}
 }
 
@@ -71,8 +77,9 @@ func (d *Detector) Detect(ctx context.Context) ([]findings.Finding, error) {
 			base := filepath.Base(path)
 			switch base {
 			case "go.sum":
-				fs := d.checkGoSum(ctx, path)
-				out = append(out, fs...)
+				if !d.Offline {
+					out = append(out, d.checkGoSum(ctx, path)...)
+				}
 				// also do lockfile-vs-disk for go modules.
 				out = append(out, d.checkGoModulesLockfileVsDisk(ctx, path)...)
 			case "Cargo.lock":
@@ -94,6 +101,9 @@ func (d *Detector) Detect(ctx context.Context) ([]findings.Finding, error) {
 				// file-level access.
 				fs := d.checkNPMLockfileVsDisk(ctx, path)
 				out = append(out, fs...)
+				if !d.SkipContents {
+					out = append(out, d.VerifyNPMLock(ctx, path)...)
+				}
 			case "yarn.lock":
 				fs := d.checkYarnLockfileVsDisk(ctx, path)
 				out = append(out, fs...)

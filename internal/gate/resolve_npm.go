@@ -187,6 +187,7 @@ func parseNPMLockTree(data []byte, installArgs []string) ([]PackageRef, error) {
 func parseNPMLockTreeWithDirects(data []byte, directs map[string]bool) ([]PackageRef, error) {
 	var lock struct {
 		Packages map[string]struct {
+			Name      string `json:"name"`
 			Version   string `json:"version"`
 			Resolved  string `json:"resolved"`
 			Integrity string `json:"integrity"`
@@ -213,6 +214,10 @@ func parseNPMLockTreeWithDirects(data []byte, directs map[string]bool) ([]Packag
 		// want bar checked, so we strip every "node_modules/" prefix
 		// and the leading one and take the result.
 		name := stripNodeModulesPath(key)
+		installName := name
+		if entry.Name != "" {
+			name = entry.Name
+		}
 		if name == "" || entry.Version == "" {
 			continue
 		}
@@ -230,7 +235,7 @@ func parseNPMLockTreeWithDirects(data []byte, directs map[string]bool) ([]Packag
 				Ecosystem: "git",
 				Name:      name,
 				Version:   normalizeGitResolved(entry.Resolved),
-				Direct:    directs[name],
+				Direct:    directs[installName],
 			})
 			continue
 		}
@@ -243,7 +248,7 @@ func parseNPMLockTreeWithDirects(data []byte, directs map[string]bool) ([]Packag
 			Ecosystem: "npm",
 			Name:      name,
 			Version:   entry.Version,
-			Direct:    directs[name],
+			Direct:    directs[installName],
 			Integrity: entry.Integrity,
 		})
 	}

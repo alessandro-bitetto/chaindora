@@ -11,12 +11,10 @@ import (
 	"time"
 
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/heuristic"
-	"github.com/alessandro-bitetto/chaindora/internal/detectors/incident"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/osvioc"
 	"github.com/alessandro-bitetto/chaindora/internal/detectors/predictive"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/gate"
-	"github.com/alessandro-bitetto/chaindora/internal/incidents"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
 	"github.com/alessandro-bitetto/chaindora/internal/osv"
 	"github.com/alessandro-bitetto/chaindora/internal/progress"
@@ -36,6 +34,7 @@ type projectScanOpts struct {
 	// network setting — when SkipRegistry is on, predictive
 	// implicitly silences because every checker needs the registry.
 	SkipPredictive bool
+	SkipIntegrity  bool
 	SkipRegistry   bool
 	FreshPopular   bool
 	Verbose        bool
@@ -88,22 +87,18 @@ func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]find
 		}
 	}
 	if !opts.SkipIncidents {
-		dir := incidents.ResolveDir([]string{
-			opts.IncidentsDir,
-			filepath.Join(os.Getenv("HOME"), ".chaindora", "incidents"),
-			"incidents",
-		})
-		if dir != "" {
-			if incs, err := incidents.LoadDir(dir); err == nil {
-				det := incident.New(incs, opts.Excludes...)
-				if results, err := det.Detect(ctx, inv, root); err == nil {
-					all = append(all, results...)
-				}
-			}
+
+		results, err := scanIncidents(ctx, inv, root, opts.IncidentsDir, opts.Excludes)
+		if err != nil {
+			all = append(all, incidentCoverageFailure(root, err))
+		} else {
+
+			all = append(all, results...)
 		}
 	}
 	if !opts.SkipHeuristic {
 		det := heuristic.New(heuristic.Config{
+			Offline:      opts.SkipRegistry,
 			FreshPopular: heuristic.FreshPopularConfig{Enabled: opts.FreshPopular},
 			Excludes:     opts.Excludes,
 			NPMProbe:     opts.NPMProbe,
@@ -124,6 +119,9 @@ func scanProject(ctx context.Context, root string, opts projectScanOpts) ([]find
 		if results, err := det.Detect(ctx, inv); err == nil {
 			all = append(all, results...)
 		}
+	}
+	if !opts.SkipIntegrity && opts.PreInventory == nil {
+		all = append(all, installedIntegrity(ctx, inv, opts.SkipRegistry)...)
 	}
 	return all, nil
 }

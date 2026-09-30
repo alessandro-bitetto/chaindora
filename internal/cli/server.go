@@ -32,27 +32,31 @@ var serverCmd = &cobra.Command{
 
 Deployment posture: stick a TLS-terminating reverse proxy in
 front of this (nginx / caddy / Cloudflare Tunnel). The server
-itself doesn't speak TLS — set --enrollment-secret
-and run the listener on a private interface.
+itself doesn't speak TLS. It binds to loopback by default. Agent enrollment
+is disabled without --enrollment-secret. Dashboard/API reads require an
+independent operator token, generated in <data-dir>/read-token (mode 0600)
+or supplied with --read-token-file. In the browser use username viewer and
+the file's contents as password. API clients use Authorization: Bearer <token>.
 
 Quick start:
 
   # On the server box
-  chdora server start --addr :8080 --data-dir /var/lib/chdora --enrollment-secret SOME-LONG-RANDOM
+  chdora server start --addr 127.0.0.1:8080 --data-dir /var/lib/chdora --enrollment-secret SOME-LONG-RANDOM
 
   # On each agent
-  chdora agent enroll --server http://server:8080 \
+  chdora agent enroll --server https://fleet.example.com \
                        --name laptop-alice \
                        --enrollment-secret SOME-LONG-RANDOM
   chdora agent push   --findings ./findings.json
   # Or hook into watch:
-  chdora watch --server http://server:8080`,
+  chdora watch --server https://fleet.example.com`,
 }
 
 var (
 	serverAddr             string
 	serverDataDir          string
 	serverEnrollmentSecret string
+	serverReadTokenFile    string
 	serverReadTimeout      time.Duration
 	serverWriteTimeout     time.Duration
 )
@@ -71,6 +75,15 @@ var serverStartCmd = &cobra.Command{
 			return fmt.Errorf("open store: %w", err)
 		}
 		srv := server.New(store, serverEnrollmentSecret, Version)
+		tokenPath := serverReadTokenFile
+		if tokenPath == "" {
+			tokenPath = filepath.Join(serverDataDir, "read-token")
+		}
+		srv.ReadToken, err = loadServerReadToken(tokenPath, serverReadTokenFile == "")
+		if err != nil {
+			return fmt.Errorf("fleet read credential: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "[chdora server] dashboard username: viewer; password file: %s\n", tokenPath)
 
 		httpSrv := &http.Server{
 			Addr:         serverAddr,
@@ -82,7 +95,7 @@ var serverStartCmd = &cobra.Command{
 		fmt.Fprintf(os.Stderr, "[chdora server] listening on %s\n", serverAddr)
 		fmt.Fprintf(os.Stderr, "[chdora server] data dir %s\n", serverDataDir)
 		if serverEnrollmentSecret == "" {
-			fmt.Fprintln(os.Stderr, "[chdora server] WARNING: no --enrollment-secret — anyone with network access can enroll a fake agent")
+			fmt.Fprintln(os.Stderr, "[chdora server] agent enrollment disabled: configure --enrollment-secret to enable")
 		}
 
 		// Graceful shutdown: flush state on SIGTERM / SIGINT.
@@ -113,9 +126,10 @@ var serverStartCmd = &cobra.Command{
 }
 
 func init() {
-	serverStartCmd.Flags().StringVar(&serverAddr, "addr", ":8080", "address to listen on (host:port)")
+	serverStartCmd.Flags().StringVar(&serverAddr, "addr", "127.0.0.1:8080", "address to listen on (host:port)")
+	serverStartCmd.Flags().StringVar(&serverReadTokenFile, "read-token-file", "", "operator token file (default: generate a private read-token file in the data directory)")
 	serverStartCmd.Flags().StringVar(&serverDataDir, "data-dir", "", "directory for state.json (default: ~/.chaindora/server)")
-	serverStartCmd.Flags().StringVar(&serverEnrollmentSecret, "enrollment-secret", "", "shared secret agents must present in X-Chaindora-Enroll-Secret to enroll. Empty = open enrollment (only safe for closed networks).")
+	serverStartCmd.Flags().StringVar(&serverEnrollmentSecret, "enrollment-secret", "", "shared secret agents must present to enroll; empty disables enrollment")
 	serverStartCmd.Flags().DurationVar(&serverReadTimeout, "read-timeout", 30*time.Second, "HTTP read timeout per request")
 	serverStartCmd.Flags().DurationVar(&serverWriteTimeout, "write-timeout", 30*time.Second, "HTTP write timeout per request")
 	serverCmd.AddCommand(serverStartCmd)

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,6 +18,7 @@ type Server struct {
 	Store            *Store
 	EnrollmentSecret string // if set, /agents/enroll requires X-Chaindora-Enroll-Secret to match
 	ChdoraVersion    string
+	ReadToken        string // separate operator credential; empty disables protected reads
 }
 
 // New returns a Server with the supplied store.
@@ -50,7 +53,39 @@ func (s *Server) Handler() http.Handler {
 	// Dashboard — single HTML page that talks to the API above.
 	mux.HandleFunc("/", s.handleDashboard)
 
-	return loggingMiddleware(mux)
+	return loggingMiddleware(s.protectReads(mux))
+}
+
+func (s *Server) protectReads(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		// Agents authenticate writes with their own scoped credentials. All
+		// dashboard/API reads require the independent operator credential.
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			if r.URL.Path != "/healthz" && r.URL.Path != "/api/v1/version" {
+				if s.ReadToken == "" {
+					http.Error(w, "fleet read authentication is not configured", http.StatusServiceUnavailable)
+					return
+				}
+				token := ""
+				if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
+					token = strings.TrimPrefix(header, "Bearer ")
+				}
+				if user, password, ok := r.BasicAuth(); ok && user == "viewer" {
+					token = password
+				}
+				got, want := sha256.Sum256([]byte(token)), sha256.Sum256([]byte(s.ReadToken))
+				if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+					w.Header().Set("WWW-Authenticate", `Basic realm="Chaindora fleet", charset="UTF-8"`)
+					http.Error(w, "operator authentication required", http.StatusUnauthorized)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // loggingMiddleware emits a one-line access log per request so
@@ -101,6 +136,11 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if s.EnrollmentSecret == "" {
+		http.Error(w, "agent enrollment is disabled until an enrollment secret is configured", http.StatusServiceUnavailable)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var body struct {
 		Name          string `json:"name"`
 		Hostname      string `json:"hostname"`
@@ -124,9 +164,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAgents — GET /api/v1/agents → list. Auth: none (the
-// agent list is non-sensitive; auth-protect this if your fleet
-// inventory itself is sensitive).
+// handleAgents lists fleet metadata; protectReads requires operator authentication.
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -161,7 +199,7 @@ func (s *Server) handleAgentsScoped(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleAgentGet returns one agent's metadata. Auth: none.
+// handleAgentGet returns metadata after operator authentication in protectReads.
 func (s *Server) handleAgentGet(w http.ResponseWriter, r *http.Request, agentID string) {
 	for _, a := range s.Store.ListAgents() {
 		if a.ID == agentID {
@@ -208,6 +246,7 @@ func (s *Server) handleScanUpload(w http.ResponseWriter, r *http.Request, agentI
 	if !s.authAgent(w, r, agentID) {
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
 	var body struct {
 		Command       string                `json:"command"`
 		ChdoraVersion string                `json:"chdora_version"`

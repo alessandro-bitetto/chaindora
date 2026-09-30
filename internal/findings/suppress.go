@@ -1,8 +1,10 @@
 package findings
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,11 +43,8 @@ type Suppression struct {
 	// "why are we ignoring this?". Empty reason → parse error.
 	Reason string `yaml:"reason"`
 
-	// Expires is optional. After this date the suppression
-	// CONTINUES TO APPLY (so it doesn't surprise CI overnight)
-	// but the loader emits a Warn — and the renderer surfaces
-	// "expired suppression" as its own line in --format=text /
-	// pr-comment so it gets seen.
+	// Expires is optional and inclusive through the stated UTC calendar date.
+	// After that date the exception no longer suppresses findings.
 	Expires string `yaml:"expires,omitempty"`
 }
 
@@ -61,8 +60,8 @@ type Suppressions struct {
 
 // LoadSuppressions reads the suppression file. Returns nil + nil
 // when no file is found — that's the default "no suppressions"
-// state, not an error. Errors only for malformed YAML or for
-// entries missing a Reason.
+// state, not an error. Invalid YAML, fields, identities, reasons and expiry
+// dates are errors.
 func LoadSuppressions(startDir string) (*Suppressions, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
@@ -73,7 +72,7 @@ func LoadSuppressions(startDir string) (*Suppressions, error) {
 			candidate := filepath.Join(dir, name)
 			info, err := os.Stat(candidate)
 			if err == nil && !info.IsDir() {
-				return readSuppressions(candidate)
+				return ReadSuppressions(candidate)
 			}
 			if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("stat %s: %w", candidate, err)
@@ -87,19 +86,31 @@ func LoadSuppressions(startDir string) (*Suppressions, error) {
 	}
 }
 
-func readSuppressions(path string) (*Suppressions, error) {
+// ReadSuppressions reads exactly the requested policy file; missing files are errors.
+func ReadSuppressions(path string) (*Suppressions, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var s Suppressions
-	if err := yaml.Unmarshal(data, &s); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&s); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("parse %s: expected one YAML document", path)
 	}
 	s.Path = path
 	// Validate every entry has a reason. Silent suppression is
 	// the failure mode this file exists to prevent.
 	for i, entry := range s.Suppress {
+		if entry.Expires != "" {
+			if _, err := time.Parse("2006-01-02", entry.Expires); err != nil {
+				return nil, fmt.Errorf("%s: suppress[%d]: expires must be a valid YYYY-MM-DD date", path, i)
+			}
+		}
 		if strings.TrimSpace(entry.Reason) == "" {
 			return nil, fmt.Errorf("%s: suppress[%d]: reason is mandatory", path, i)
 		}
@@ -130,19 +141,17 @@ func (s Suppression) Matches(f Finding) bool {
 	return s.VulnID != "" || s.Package != "" || s.Version != ""
 }
 
-// Expired reports whether the suppression's Expires date is in
-// the past relative to now. False if Expires is empty or
-// unparseable (we don't want a malformed date to cause silent
-// expiration; the loader's stricter pass would have rejected it).
+// Expired uses the end of the specified UTC date. Invalid dates fail closed for
+// programmatically constructed entries; file loading rejects them outright.
 func (s Suppression) Expired(now time.Time) bool {
 	if s.Expires == "" {
 		return false
 	}
 	t, err := time.Parse("2006-01-02", s.Expires)
 	if err != nil {
-		return false
+		return true
 	}
-	return now.After(t)
+	return !now.Before(t.AddDate(0, 0, 1))
 }
 
 // FilterSuppressed splits a findings list into (kept, suppressed).
@@ -156,11 +165,11 @@ func FilterSuppressed(fs []Finding, supp *Suppressions, now time.Time) (kept []F
 	for _, f := range fs {
 		matched := false
 		for _, s := range supp.Suppress {
-			if s.Matches(f) {
+			if !s.Expired(now) && s.Matches(f) {
 				suppressed = append(suppressed, SuppressedFinding{
 					Finding:     f,
 					Suppression: s,
-					Expired:     s.Expired(now),
+					Expired:     false,
 				})
 				matched = true
 				break
@@ -174,9 +183,8 @@ func FilterSuppressed(fs []Finding, supp *Suppressions, now time.Time) (kept []F
 }
 
 // SuppressedFinding pairs a Finding with the Suppression entry
-// that matched and a precomputed Expired flag. Used by the
-// renderer to surface expired suppressions and by `--format json`
-// to keep the audit trail explicit.
+// that matched. Expired remains in the report schema for compatibility, but
+// FilterSuppressed now returns only active exceptions.
 type SuppressedFinding struct {
 	Finding     Finding     `json:"finding"`
 	Suppression Suppression `json:"suppression"`

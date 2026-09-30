@@ -1,9 +1,13 @@
 package incidents
 
 import (
+	"bytes"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -57,11 +61,17 @@ func LoadDir(dir string) ([]*Incident, error) {
 			return nil, err
 		}
 		var inc Incident
-		if err := yaml.Unmarshal(data, &inc); err != nil {
-			return nil, err
+		decoder := yaml.NewDecoder(bytes.NewReader(data))
+		decoder.KnownFields(true)
+		if err := decoder.Decode(&inc); err != nil {
+			return nil, fmt.Errorf("%s: %w", e.Name(), err)
 		}
-		if inc.ID == "" {
-			continue
+		var extra any
+		if err := decoder.Decode(&extra); err != io.EOF {
+			return nil, fmt.Errorf("%s: expected one YAML document", e.Name())
+		}
+		if strings.TrimSpace(inc.ID) == "" {
+			return nil, fmt.Errorf("%s: incident id is required", e.Name())
 		}
 		out = append(out, &inc)
 	}

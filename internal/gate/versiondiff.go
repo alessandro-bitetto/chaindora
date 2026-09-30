@@ -2,9 +2,12 @@ package gate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/alessandro-bitetto/chaindora/internal/artifacts"
 )
 
 // VersionBumpDiff catches the "previously clean, now malicious"
@@ -63,9 +66,16 @@ func (v *VersionBumpDiff) Check(ctx context.Context, ref PackageRef) CheckResult
 		return r
 	}
 	// Scan both versions.
-	newFindings, err := v.scanVersion(ctx, probe, ref.Name, ref.Version)
+	data, err := fetchPackageArchive(ctx, probe, ref, 50<<20)
+	var newFindings []StaticFinding
+	if err == nil {
+		newFindings, err = scanTarball(data, 50<<20)
+	}
 	if err != nil {
 		r.Verdict = VerdictUnknown
+		if errors.Is(err, artifacts.ErrMismatch) {
+			r.Verdict = VerdictBlock
+		}
 		r.Reason = fmt.Sprintf("new-version scan failed: %v", err)
 		return r
 	}

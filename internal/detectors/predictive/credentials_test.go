@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alessandro-bitetto/chaindora/internal/artifacts"
 	"github.com/alessandro-bitetto/chaindora/internal/findings"
 	"github.com/alessandro-bitetto/chaindora/internal/gate"
 	"github.com/alessandro-bitetto/chaindora/internal/inventory"
@@ -62,7 +63,7 @@ func TestCredentialDetectionWorksWithoutNewVersionDelta(t *testing.T) {
 	probes := gate.NewProbes()
 	probes.Register("npm", probe)
 	cache := gate.NewCache(t.TempDir(), 7*24*time.Hour)
-	ref := gate.PackageRef{Ecosystem: "npm", Name: "fixture", Version: "1.0.1", Integrity: "sha512-A"}
+	ref := gate.PackageRef{Ecosystem: "npm", Name: "fixture", Version: "1.0.1", Integrity: artifacts.SHA512(probe.data)}
 	if err := cache.Store(ref, gate.PackageCheck{Results: []gate.CheckResult{{Checker: "version-diff", Verdict: gate.VerdictApprove}}}); err != nil {
 		t.Fatal(err)
 	}

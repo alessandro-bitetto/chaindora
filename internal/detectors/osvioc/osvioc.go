@@ -118,6 +118,9 @@ func (d *Detector) Detect(ctx context.Context, inv *inventory.Inventory) ([]find
 				// needed; ask the user).
 				f.FixUpgradeTo = osv.MinFixedInMajor(v, osvEcosystem(p.Ecosystem), p.Version)
 			}
+			if strings.HasPrefix(vr.ID, "MAL-") {
+				f.Severity = findings.SeverityCritical
+			}
 			out = append(out, f)
 		}
 	}
@@ -172,6 +175,12 @@ func firstLine(s string) string {
 func severityFromVuln(v *osv.Vulnerability) findings.Severity {
 	if v == nil {
 		return findings.SeverityUnknown
+	}
+	// Malware advisories commonly have no CVSS vector. Their identity is
+	// sufficient to fail the default CI policy; absence of a score is not
+	// evidence that deliberately malicious code is low risk.
+	if strings.HasPrefix(v.ID, "MAL-") {
+		return findings.SeverityCritical
 	}
 	switch osv.HighestSeverityFromVulns(v.Severity) {
 	case "CRITICAL":

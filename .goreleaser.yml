@@ -66,11 +66,34 @@ release:
   header: |
     ## Chaindora {{ .Tag }}
 
-    Supply-chain prevention and detection for npm, PyPI, .NET/NuGet,
-    Go modules and Rust/crates.io, including alternative package managers.
+    Supply-chain detection for npm, PyPI, .NET/NuGet, Go modules and
+    Rust/crates.io, plus verified frozen npm installation on macOS/Linux.
+
+    ### Upgrade notes
+
+    - **Breaking install scope:** the gate accepts only frozen public-registry
+      npm restores from reviewed v2/v3 lockfiles. Other manager install/run/build
+      commands refuse; scanning and single-package checks remain available.
+    - Accepted installs verify artifact digests and identities, disable lifecycle
+      scripts, stage offline, compare installed files and use locks plus private
+      journals to recover process interruptions.
+    - OSV MAL advisories are Critical even without CVSS. npm aliases retain
+      canonical identities; installed npm source changes are detected.
+    - CI reports incomplete inventory, incident, integrity and predictive checks
+      as unsuppressible exit 2 errors. Invalid severity policies and suppression
+      YAML/dates fail validation; expired exceptions stop suppressing findings.
+    - Offline/skip-registry settings override fresh-popular requests. Fetch an
+      incident pack before offline use or explicitly select reduced coverage.
+    - Fleet dashboard/API reads require an independent operator credential;
+      enrollment is disabled until configured and listeners default to loopback.
+
+    Review the [changelog](https://github.com/alessandro-bitetto/chaindora/blob/{{ .Tag }}/CHANGELOG.md)
+    and [migration guidance](https://github.com/alessandro-bitetto/chaindora/blob/main/docs/troubleshooting.md)
+    before updating an existing gate or fleet deployment.
 
     Download the archive for your operating system and architecture, extract
-    `chdora` (`chdora.exe` on Windows), add it to PATH, and run `chdora scan .`.
+    `chdora` (`chdora.exe` on Windows), add it to PATH, then run `chdora update`
+    and `chdora scan .` from your project directory.
 
     Each archive has a SHA-256 entry in `chaindora_{{ .Version }}_checksums.txt`.
     Verify your downloaded archive against that entry before installation.

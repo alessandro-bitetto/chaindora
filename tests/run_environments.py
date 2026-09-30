@@ -26,6 +26,7 @@ IMAGES = {
     "dotnet": "mcr.microsoft.com/dotnet/sdk@sha256:fc69dc5e0c9789adaac5c8efce71ead4d016a51318667c4f26ce93574b1b9403",
 }
 GROUPS = {
+    "frozen-npm": ("node", "", ["-e", "CHAINDORA_TEST_NPM=/usr/local/bin/npm"]),
     "node": ("node", "npm,yarn,pnpm", []),
     "yarn-berry": ("node", "yarn", ["-e", "CHAINDORA_TEST_BIN_YARN=/opt/yarn-berry/node_modules/.bin/yarn"]),
     "python": ("python", "pip,pip3,poetry,uv,pipenv,pdm", []),
@@ -92,7 +93,8 @@ def main():
                     command += ["-e", "CHAINDORA_TEST_LIFECYCLE=1"]
                 command += extra + ["--mount", f"type=bind,src={binary},dst=/gate.test,readonly",
                                     "--entrypoint=/gate.test", IMAGES[image_name],
-                                    "-test.run=^TestReal", "-test.v", "-test.timeout=3m"]
+                                    "-test.run=" + ("TestNPMFrozenInstall.*RealOffline" if name == "frozen-npm" else "^TestReal"),
+                                    "-test.v", "-test.timeout=3m"]
             try:
                 with (output / (name+".log")).open("w") as log:
                     result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=210)

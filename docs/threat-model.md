@@ -1,108 +1,97 @@
 # Threat model
 
-Chaindora provides install-time policy checks and investigation signals for
-npm, PyPI, .NET/NuGet, Go modules and Rust/crates.io. Alternative managers remain
-within those ecosystems. Shared CI/container-reference and host checks remain.
-Other dependency registries are outside the supported scope.
+This document describes the controls in 0.0.4. Version 0.0.3 and earlier do not
+have all of these protections.
 
-## Attacker and protected assets
+## Scope and trust
 
-An attacker may publish a malicious package, compromise a maintainer account,
-change dependency resolution, swap registry content, introduce an unsafe CI
-reference, or persist after an install. Assets at risk include source code,
-package-publishing tokens, cloud credentials, SSH material, build outputs and
-the developer or CI account's execution privileges.
+Chaindora scans npm, PyPI, NuGet, Go modules and crates.io, plus CI references
+and selected host evidence. Its install boundary currently accepts only frozen
+public-registry npm restores on macOS/Linux. Other commands refuse except exact
+help/version requests. Windows scanning and package checks remain available.
 
-The package manager, local OS and Chaindora binary are assumed to be under the
-operator's control. A privileged attacker can bypass PATH shims, rewrite local
-policy/history or tamper with the scanner. Chaindora does not enforce an OS
-security boundary.
+An attacker may publish a malicious dependency, change registry bytes, disguise
+a package behind an alias, or modify an installed file. The local OS, package
+manager executable, operator policy and reviewed lockfile are trusted. A local
+attacker with the same user's privileges can alter policy/history or bypass PATH
+shims; Chaindora does not enforce an OS security boundary.
 
 ## Existing controls and limits
 
-| Attack surface | Current evidence/control | Material limit |
+| Surface | Control | Limit |
 |---|---|---|
-| Known malicious packages | OSV MAL entries and curated incident evidence | Intelligence lag and incomplete inventory; the gate blocks MAL hits and warns on CVEs |
-| Fresh release or publisher change | Cooldown, publisher and maintainer checks | Age/popularity are not safety; metadata is absent or project-level in some registries |
-| Suspicious package code | JS/TS patterns, Python credential-collection shapes, Go init and Rust build/source patterns | Regex heuristics; evasion, false positives, no full data flow or bytecode coverage |
-| Changed release content | Integrity history and republish alerts | Compares available integrity strings; platform variants/hash representations need investigation |
-| Installed modification | Name/version and lockfile integrity metadata drift | Does not verify every installed file against a trusted artifact manifest |
-| Build provenance | Available registry provenance signals | Presence is not signature, identity or digest verification |
-| CI and container references | Pinning, drift and incident heuristics | Not full workflow execution analysis or image scanning |
-| Host compromise | Persistence, trust-anchor, credential and extension checks | Snapshot evidence; not continuous EDR or runtime containment |
+| Known malware | OSV MAL hits are Critical without requiring CVSS; incident packs match canonical npm alias identities | Intelligence lag, unavailable feeds and inventory gaps |
+| Frozen npm restore | Lock graph, hash-verified artifact snapshots, script-disabled offline staging and installed-file comparison | Only public-registry v2/v3 npm locks; no workspace/local/git or custom-config transactions |
+| Registry substitution | Artifact hashes verified before source inspection and installation; cache revalidated on read | A matching hash authenticates locked bytes, not publisher intent or safety |
+| Installed modification | npm published files compared against verified archive manifests; missing/extra/changed paths reported | Generated/native outputs may differ legitimately; other ecosystems lack equivalent byte verification |
+| Metadata/source signals | Cooldown, publisher history, JS/TS/Python credential shapes, Go/Rust source patterns | Heuristics can miss attacks and flag legitimate behavior; bytecode/data flow not comprehensively analyzed |
+| Changed release content | Persistent integrity history | Hash/platform differences require review; local history is mutable |
+| Provenance | Available registry metadata | Presence alone is not signature, subject-digest or builder-identity verification |
+| Fleet data | Independent operator read credential; per-agent writes; disabled unauthenticated enrollment; loopback default | Remote deployment still needs TLS and protected storage |
+| Host compromise | Persistence, credential, trust-anchor and extension evidence | Snapshot investigation, not continuous EDR or containment |
 
 ## Install boundary
 
-The command dispatcher only mediates selected forms. Bare `npm install`,
-`npm ci`, `uv pip install`, restore/build/run paths and unrecognized verbs can
-pass through. Alternative-manager support is retained, but is not a claim that
-every current manager version, workspace or install form is covered. Deno's
-existing-state resolver and Paket's lockfile-only resolver do not model all
-requested changes. Deno raw HTTPS/JSR imports are outside the registry scope.
-Automatic Windows wrapper installation is incomplete; use explicit `gate exec`
-commands there. See [command coverage](../README.md#gate-command-coverage).
+The gate reads the actual manifest/lock and fetches artifacts without invoking
+resolvers. It rejects missing hashes, unsafe paths, archive links and unsupported
+configurations. An accepted transaction uses only private inspected snapshots,
+then invokes trusted npm with an isolated cache, empty user/global config,
+restricted environment, offline mode and lifecycle scripts disabled. It rechecks
+inputs and staged files before replacing `node_modules`.
 
-Resolution invokes external package managers. Dry-run, lockfile-only and
-ignore-script options do not constitute a sandbox. Python source metadata/build
-hooks and package-manager plugins or overrides can execute before approval.
-Even `gate exec --dry-run` runs the resolver. Do not expose valuable secrets to
-an untrusted resolution process on the assumption that the gate isolates it.
+The original command is never replayed. Bare `npm install` behaves as a frozen
+restore and cannot change versions. Additions, updates, workspaces, non-npm
+installs and arbitrary run/build commands refuse before package-manager execution.
+Lockfile generation and later builds outside this route remain outside protection.
+Dry-run performs downloads and policy checks but starts no package manager.
 
-After approval, the original command runs in the actual project with the user's
-privileges. Its graph, configuration, registry responses or artifact bytes may
-differ from those checked in a temporary project. Artifact inspection fetches
-registry content without yet binding it to the resolved integrity value.
-Exact transaction binding and isolated resolution are the highest-priority gaps.
+There is no process sandbox. Packages needing generated/native outputs may not
+work without a separate reviewed build. An OS lock serializes gated transactions;
+a surviving npm child retains it after the CLI exits. A private per-user journal
+allows the next transaction to recover process interruptions around the directory
+swap. Project-controlled journals are ignored, and ambiguous recovery preserves
+the staged and previous data. The swap is not crash-atomic and does not guarantee
+full power-loss durability. Direct manager commands bypass the cooperative lock;
+concurrent privileged tampering remains outside scope.
 
-## Failures and policy
+## Policy and failed inspection
 
-Strict gate policy refuses Block, Warn and Unknown. `--lenient` only permits
-Warn; `--allow-offline` separately permits Unknown and does not turn networking
-off. Block wins over both. Explicit allowlist entries bypass checks. Some
-checkers return Approve for unsupported signals, so approval is not proof that
-every check applied. Network and archive failures in implemented checks must
-not be represented as successful inspection.
+Strict policy refuses Block, Warn and Unknown. `--lenient` permits Warn;
+`--allow-offline` permits Unknown but does not disable networking. Neither
+relaxes artifact identity, digests, supported transaction shape or file checks.
+Explicit allow entries bypass signal checks, with deny and changed-integrity
+history taking precedence. Exceptions are not saved as normal approvals.
+Malformed YAML and unknown configuration fields are errors, never defaults.
+CI rejects invalid severity-policy tokens and suppression dates. Expired
+exceptions stop suppressing after their specified UTC calendar day.
 
-Current checks rerun for each gate invocation. Cached approvals are integrity
-history, not install authorization. Registry clients can cache service data;
-this does not guarantee immediate advisory freshness. History can be cleared or
-changed by the local user. It is not a signed transparency log.
+Cache history never authorizes a fresh install by itself. Registry service
+caches do not guarantee immediate advisory freshness. Some registry checks are
+not applicable or only supply project-level metadata; an approval is not evidence
+of equivalent coverage across all five registries.
 
-Detection is best-effort. Offline and skip flags reduce coverage. Credential
-inspection failure emits a Low configuration finding; most other predictive
-Unknown results are suppressed. CI severity thresholds alone cannot enforce a
-minimum inspection-coverage requirement. No findings does not mean no attack.
-
-Inventory parsing and traversal failures are an enforced exception: CI emits
-`CHDORA-INVENTORY-INCOMPLETE` and exits 2 even with severity overrides,
-suppressions or a baseline. It does not apply fixes or update baselines after
-an incomplete inventory. An empty gate resolution also refuses installation
-independently of relaxed policy. These checks do not establish full coverage of
-unsupported formats or disabled detectors.
+Predictive Unknowns are visible as `CHDORA-PREDICTIVE-INCOMPLETE`. Installed-file
+verification failures use `CHDORA-INTEGRITY-INCOMPLETE`; failed inventory uses
+`CHDORA-INVENTORY-INCOMPLETE`. Missing, empty or malformed incident packs use
+`CHDORA-INCIDENTS-INCOMPLETE`. CI reports these and exits 2 regardless of severity,
+suppressions or baselines, without applying fixes or updating a baseline.
+Explicit offline/skip flags reduce requested coverage. Offline and skip-registry
+override fresh-popular registry requests. An uninstalled project
+has no installed files to verify. A clean run does not establish attack absence.
 
 ## Resource and privacy boundaries
 
-Archive inspection caps downloads/decoded streams at 50 MiB, files at 4 MiB,
-entries at 10,000 and nested payload depth at three. Exceeding limits produces
-Unknown, including for legitimate large artifacts. Parsing succeeds without
-proving all contained languages or executable formats were understood.
+Archive limits: 50 MiB downloaded/decoded, 4 MiB per file, 10,000 entries, depth
+three for nested source inspection. Frozen transactions cap compressed unique
+artifacts at 512 MiB. Legitimate large archives can be refused. File readers do
+not traverse symlinked paths inside an npm installation. Offline npm verification
+needs previously verified artifacts in `~/.chaindora/artifacts`.
 
-There is no telemetry. Network checks send package identities to registry/OSV
-services. Artifact downloads expose ordinary network request metadata. Fleet
-reporting sends findings only through the configured, opt-in workflow. Finding
-output can contain sensitive paths and incident evidence; protect reports as
-part of the project's security data.
+There is no telemetry. Online checks disclose queried package identities to
+OSV/registries. Fleet reporting is opt-in, but findings can contain sensitive
+paths and evidence. Protect token files, saved reports, caches and fleet state.
+Only health/version fleet reads are unauthenticated; dashboard/API credentials
+must travel over TLS whenever the service is used beyond localhost.
 
-## Priorities
-
-1. Bind resolution, inspected digests and executed installation into one frozen
-   transaction, including transitive dependencies and platform artifacts.
-2. Isolate or refuse unsafe resolution and execution of install/build hooks.
-3. Cover common install/restore paths and explicitly report unsupported routes.
-4. Verify installed file contents and authenticate provenance.
-5. Report checked/failed/skipped coverage separately from findings; measure
-detection against inert attack replays and benign controls.
-
-The [hardening assessment](security-hardening.md) includes code-level evidence
-and acceptance tests. New ecosystem names are lower priority than establishing
-these properties for the five supported ecosystems.
+See [completed fixes and remaining work](security-hardening.md). Synthetic
+regressions establish specific behavior, not real-world recall or false-positive rates.

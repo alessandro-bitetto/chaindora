@@ -3,20 +3,22 @@ package gate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/alessandro-bitetto/chaindora/internal/artifacts"
 )
 
 // StaticScan inspects the actual bytes of a package version before
 // they ever land in node_modules. Layered defense against the
-// sleeper class of supply-chain attacks: shai-hulud, ctx, the
-// crypto-stealer of qix were all detectable by static analysis at
-// install time — the malware was right there in the published
-// tarball, just nobody was looking.
+// source patterns that may expose credential collection or suspicious install
+// behavior. The inert regression corpus does not establish historical attack
+// recall; avoid interpreting these signatures as a complete malware detector.
 //
 // We don't try to fully decompile or de-obfuscate. The bar is much
 // lower: catch the lazy obviously-malicious patterns. A patient
@@ -38,9 +40,8 @@ import (
 //   - Network calls to non-registry hosts inside install scripts
 //
 // Each pattern hit adds to a per-package score. Threshold 1+ →
-// Warn, 3+ → Block. Calibrated against shai-hulud / ctx / qix to
-// catch them all without false-positiving on common legitimate
-// packages (we tested against react, lodash, webpack, vite).
+// Warn, 3+ → Block. Thresholds are heuristic; the versioned synthetic corpus
+// checks known shapes and benign controls, not representative field efficacy.
 type StaticScan struct {
 	// CredentialsOnly restricts output to credential collection + outbound
 	// traffic. Detection uses this to avoid noise from generic eval patterns.
@@ -85,15 +86,12 @@ func (s *StaticScan) Check(ctx context.Context, ref PackageRef) CheckResult {
 		r.Reason = fmt.Sprintf("static-pattern: no probe for ecosystem %q", ref.Ecosystem)
 		return r
 	}
-	url, err := probe.TarballURL(ctx, ref.Name, ref.Version)
+	data, err := fetchPackageArchive(ctx, probe, ref, s.MaxBytes)
 	if err != nil {
 		r.Verdict = VerdictUnknown
-		r.Reason = fmt.Sprintf("tarball url lookup failed: %v", err)
-		return r
-	}
-	data, err := fetchArchive(ctx, probe, url, s.MaxBytes)
-	if err != nil {
-		r.Verdict = VerdictUnknown
+		if errors.Is(err, artifacts.ErrMismatch) {
+			r.Verdict = VerdictBlock
+		}
 		r.Reason = fmt.Sprintf("tarball download failed: %v", err)
 		return r
 	}

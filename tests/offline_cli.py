@@ -7,6 +7,10 @@ Failures are genuine failed contracts, not expected-failure passes.
 """
 
 import argparse
+import base64
+import hashlib
+import io
+import tarfile
 import json
 import os
 from pathlib import Path
@@ -111,6 +115,85 @@ def main():
             except (ValueError, KeyError, OSError, subprocess.TimeoutExpired) as error:
                 record(name, False, str(error))
 
+        policy_project = work / "npm-v3"
+        for value in ["critcal", "critical,", "none,high", ""]:
+            completed = run(policy_project, "ci", str(policy_project), "--fail-on="+value)
+            record("invalid-threshold-"+(value.replace(",", "_") or "empty"),
+                   completed.returncode == 2 and "invalid --fail-on" in completed.stderr,
+                   f"invalid threshold rejected before scanning; exit={completed.returncode}", completed)
+
+        suppression_path = policy_project / ".chaindora-ignore.yml"
+        suppression_path.write_text(json.dumps({"suppress": [{"vuln_id": INCIDENT, "reason": "expired fixture", "expires": "2000-01-01"}]}))
+        completed, findings, _ = scan(policy_project, "expired-suppression")
+        record("expired-suppression", completed.returncode == 1 and any(f.get("vuln_id") == INCIDENT for f in findings),
+               f"expired exception does not hide a finding; exit={completed.returncode}", completed)
+        suppression_path.write_text(json.dumps({"suppress": [{"vuln_id": INCIDENT, "reason": "invalid fixture", "expires": "not-a-date"}]}))
+        completed = run(policy_project, "ci", str(policy_project), "--offline", "--skip-heuristic", "--incidents", str(incident_dir))
+        record("invalid-suppression-date", completed.returncode == 2 and "expires must" in completed.stderr,
+               f"invalid expiry rejected; exit={completed.returncode}", completed)
+        suppression_path.unlink()
+
+        damaged_pack = work / "damaged-pack"
+        damaged_pack.mkdir()
+        (damaged_pack / "broken.yaml").write_text("id: [")
+        incomplete_baseline = work / "incident-baseline.json"
+        incomplete_baseline.write_text(json.dumps({"chdora_version": "fixture", "fingerprints": []}))
+        before = incomplete_baseline.read_bytes()
+        suppression_path.write_text(json.dumps({"suppress": [{"vuln_id": "CHDORA-INCIDENTS-INCOMPLETE", "reason": "attempted coverage bypass"}]}))
+        for label, pack in [("broken-incident-pack", damaged_pack), ("missing-explicit-incident-pack", work / "missing-pack")]:
+            completed, findings, sarif_results = scan(policy_project, label, "--incidents", str(pack), "--fail-on=none",
+                                                     "--baseline", str(incomplete_baseline), "--update-baseline")
+            record(label, completed.returncode == 2 and any(f.get("vuln_id") == "CHDORA-INCIDENTS-INCOMPLETE" for f in findings)
+                   and bool(sarif_results) and incomplete_baseline.read_bytes() == before,
+                   f"failed pack remains visible and preserves baseline; exit={completed.returncode}", completed)
+        suppression_path.unlink()
+
+        alias = work / "npm-alias"
+        alias.mkdir()
+        (alias / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": {
+            "node_modules/harmless-alias": {"name": LEAF, "version": "1.0.0"}}}))
+        completed, findings, sarif_results = scan(alias, "npm-alias")
+        record("npm-alias", completed.returncode == 1 and len(findings) == 1 and findings[0].get("name") == LEAF,
+               f"canonical identity retained; exit={completed.returncode}, findings={len(findings)}", completed)
+
+        # Every byte is inert. The cached archive is authenticated by the fixture
+        # lockfile, so this exercises the real CLI without a registry request.
+        content_project = work / "installed-content"
+        installed = content_project / "node_modules" / "content-fixture"
+        installed.mkdir(parents=True)
+        files = {"package.json": '{"name":"content-fixture","version":"1.0.0"}', "index.js": "module.exports=1;"}
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            for name, content in files.items():
+                payload = content.encode()
+                entry = tarfile.TarInfo("package/"+name)
+                entry.size = len(payload)
+                archive.addfile(entry, io.BytesIO(payload))
+                (installed / name).write_bytes(payload)
+        data = buffer.getvalue()
+        integrity = "sha512-"+base64.b64encode(hashlib.sha512(data).digest()).decode()
+        cached = home / ".chaindora" / "artifacts" / (hashlib.sha256(integrity.encode()).hexdigest()+".tgz")
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(data)
+        (content_project / "package-lock.json").write_text(json.dumps({"lockfileVersion": 3, "packages": {
+            "node_modules/content-fixture": {"version": "1.0.0", "integrity": integrity,
+            "resolved": "https://registry.npmjs.org/content-fixture/-/content-fixture-1.0.0.tgz"}}}))
+        completed, findings, _ = scan(content_project, "verified-clean-files")
+        record("verified-clean-files", completed.returncode == 0 and not findings,
+               f"authenticated clean files; exit={completed.returncode}", completed)
+        (installed / "index.js").write_text("module.exports=2;")
+        completed, findings, sarif_results = scan(content_project, "modified-installed-source")
+        record("modified-installed-source", completed.returncode == 1 and any(f.get("vuln_id") == "INTEGRITY-FILE-MISMATCH" and f.get("source_path", "").endswith("index.js") for f in findings),
+               f"source mutation detected; exit={completed.returncode}, findings={len(findings)}", completed)
+        cached.unlink()
+        completed, findings, _ = scan(content_project, "missing-integrity-evidence", "--fail-on=none")
+        record("missing-integrity-evidence", completed.returncode == 2 and any(f.get("vuln_id") == "CHDORA-INTEGRITY-INCOMPLETE" for f in findings),
+               f"incomplete inspection cannot pass severity override; exit={completed.returncode}", completed)
+        (content_project / ".chaindora-ignore.yml").write_text(json.dumps({"suppress": [{"vuln_id": "CHDORA-INTEGRITY-INCOMPLETE", "reason": "fixture"}]}))
+        completed, findings, _ = scan(content_project, "unsuppressible-integrity-failure", "--fail-on=none")
+        record("unsuppressible-integrity-failure", completed.returncode == 2 and any(f.get("vuln_id") == "CHDORA-INTEGRITY-INCOMPLETE" for f in findings),
+               f"coverage failure remains visible; exit={completed.returncode}", completed)
+
         clean = work / "clean"
         clean.mkdir()
         (clean / "requirements.txt").write_text(LEAF+"==2.0.0\n")
@@ -184,6 +267,11 @@ def main():
                 completed = run(empty, "gate", "exec", "--lenient", "--allow-offline", manager, *arguments)
                 record(manager+"-empty-relaxed", completed.returncode != 0 and not marker.exists(),
                        f"relaxed policy cannot authorize missing evidence; exit={completed.returncode}, handoff={marker.exists()}", completed)
+            for manager, arguments in [("npm", ["install", "fixture"]), ("npm", ["--prefix=/tmp", "install"]), ("deno", ["run", "file.ts"]), ("paket", ["restore"])]:
+                marker.unlink(missing_ok=True)
+                completed = run(empty, "gate", "exec", manager, *arguments)
+                record("refused-"+manager+"-"+arguments[0].replace("/", "_"), completed.returncode != 0 and not marker.exists(),
+                       f"unsupported commands never execute; exit={completed.returncode}, handoff={marker.exists()}", completed)
             marker.unlink(missing_ok=True)
             completed = run(empty, "gate", "exec", "--dry-run", "npm", "ci")
             record("passthrough-dry-run", not marker.exists(),

@@ -1,9 +1,11 @@
 package gate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,8 +105,14 @@ func readConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var c Config
-	if err := yaml.Unmarshal(data, &c); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&c); err != nil && err != io.EOF {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("parse %s: expected exactly one YAML document", path)
 	}
 	return &c, nil
 }
