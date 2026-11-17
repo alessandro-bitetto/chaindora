@@ -8,7 +8,7 @@ import { RouterLink } from '@angular/router';
       <a routerLink="/" class="brand" aria-label="Chaindora home"><img src="assets/logo-symbol.png" alt="" width="48" height="46"><span>chaindora<span class="brand-period">.</span></span></a>
       <button type="button" class="menu-button" [attr.aria-expanded]="open" aria-controls="site-navigation" (click)="open = !open">{{ open ? 'Close −' : 'Menu +' }}</button>
       <nav id="site-navigation" aria-label="Main navigation" [class.open]="open">
-        <a routerLink="/" fragment="protection" (click)="open = false">Protection</a><a routerLink="/" fragment="ecosystems" (click)="open = false">Ecosystems</a>
+        <a routerLink="/" fragment="where" (click)="open = false">Where it runs</a><a routerLink="/" fragment="protection" (click)="open = false">Protection</a><a routerLink="/" fragment="ecosystems" (click)="open = false">Ecosystems</a>
         <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/README.md">Docs ↗</a>
         <a routerLink="/" fragment="install" class="nav-cta" (click)="open = false">Get Chaindora <span aria-hidden="true">↓</span></a>
       </nav>

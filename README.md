@@ -4,7 +4,7 @@
 
 Latest version: **0.0.4**, including the audit hardening and recovery fixes.
 
-**Your code. Your rules.** Supply-chain detection for npm, PyPI, .NET/NuGet,
+**Before it lands. After it’s in.** Supply-chain detection for npm, PyPI, .NET/NuGet,
 Go modules and Rust/crates.io, plus verified frozen npm installs. The CLI is `chdora`: one Go binary for macOS, Linux, and Windows.
 
 [Website](https://chaindora.dev) · [Documentation](docs/README.md)
