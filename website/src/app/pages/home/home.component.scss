@@ -59,9 +59,7 @@ h1 span { color: var(--cd-red); }
 .where-card h3 { font-size: 24px; font-weight: 650; margin-bottom: 4px; }
 .where-card > p { font-size: 14px; color: var(--cd-muted); line-height: 1.7; }
 .where-card > p code { font-size: 12.5px; color: var(--cd-ink); overflow-wrap: anywhere; }
-.where-limit { margin-top: auto; background: var(--cd-wash); padding: 13px 15px; font-size: 13px; line-height: 1.6; }
-.where-limit > span { display: block; font: 600 11px var(--cd-mono); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4px; }
-.where-cmd { display: block; border-top: 1px solid var(--cd-line); padding-top: 16px; margin-top: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.where-cmd { display: block; border-top: 1px solid var(--cd-line); padding-top: 16px; margin-top: auto; font-size: 12px; overflow-wrap: anywhere; }
 .where-cmd::before { content: '$ '; color: var(--cd-red); }
 .incident-strip { border-block: 1px solid var(--cd-line); }
 .incident-strip-inner { display: flex; align-items: center; gap: 36px; min-height: 116px; padding-block: 22px; }

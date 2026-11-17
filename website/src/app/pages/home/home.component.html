@@ -57,14 +57,13 @@
 </section>
 
 <section class="where-section container" id="where" aria-labelledby="where-title">
-  <div class="section-heading"><p class="eyebrow">01 / Where it runs</p><div><h2 id="where-title">Once per machine.<br>Rules per project.</h2><p>Chaindora works at three levels. Each one says what it covers, and what it doesn’t.</p></div></div>
+  <div class="section-heading"><p class="eyebrow">01 / Where it runs</p><div><h2 id="where-title">Once per machine.<br>Rules per project.</h2><p>Chaindora works at three levels: your machine, each project, and, if you want it, your whole fleet.</p></div></div>
   <div class="where-grid">
     <article class="where-card">
       <span class="where-scope">On your machine</span>
       <h3>Set up once per user</h3>
       <p><code>chdora gate install</code> adds shims to <code>~/.chaindora/bin</code> and a PATH block to your shell. From then on, <code>npm ci</code> in any project goes through the gate first.</p>
       <p><code>chdora forensics</code> checks the machine itself for stored credentials, shell-startup changes and unexpected persistence. <code>chdora audit</code> scans every project under your home folder.</p>
-      <div class="where-limit"><span>Limit</span>Covers your user account, in shells that load the PATH block. IDEs, other users and full-path calls skip the shims.</div>
       <code class="where-cmd">chdora gate install</code>
     </article>
     <article class="where-card">
@@ -72,7 +71,6 @@
       <h3>Rules travel with the repo</h3>
       <p>Commit a <code>chaindora.yml</code> and the gate applies the same policy for anyone running Chaindora in that repo: cooldown, allow and deny lists, and how strict to be.</p>
       <p><code>chdora scan .</code> inspects dependencies in all five ecosystems. <code>chdora ci</code> brings the same checks into your pipeline with JSON and SARIF.</p>
-      <div class="where-limit"><span>Limit</span>The gate installs only frozen npm restores on macOS and Linux. Other install commands are refused.</div>
       <code class="where-cmd">chdora scan .</code>
     </article>
     <article class="where-card">
@@ -80,7 +78,6 @@
       <h3>One view of every machine</h3>
       <p>Run your own <code>chdora server</code>, enroll each machine with <code>chdora agent</code>, and push scan findings to one dashboard.</p>
       <p>Nothing leaves a machine unless you set this up. There is no telemetry.</p>
-      <div class="where-limit"><span>Limit</span>Collects findings. It doesn’t enforce the gate on other machines.</div>
       <code class="where-cmd">chdora agent enroll --server URL</code>
     </article>
   </div>
