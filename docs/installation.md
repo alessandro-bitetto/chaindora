@@ -5,6 +5,22 @@
 Chaindora 0.0.4 ships as one executable, `chdora`, for macOS, Linux and Windows.
 The package managers you want to wrap must be installed separately.
 
+## What gets installed where
+
+Chaindora is set up once per machine and takes its rules from each project.
+Nothing here is shared between user accounts or enforced device-wide.
+
+| Item | Scope | Location |
+|---|---|---|
+| `chdora` executable | Machine, or one user if installed in a user directory | A directory on your PATH |
+| Incident pack | User | `~/.chaindora/incidents`, written by `chdora update` |
+| Gate shims (macOS/Linux) | User | `~/.chaindora/bin`, plus a marked PATH block in `~/.zshrc`, `~/.bashrc` (`~/.bash_profile` for bash on macOS when it exists) or `~/.config/fish/config.fish` |
+| Gate history, artifact cache, install recovery records | User | `~/.chaindora/gate-cache`, `~/.chaindora/artifacts`, `~/.chaindora/install-transactions` |
+| Gate policy | Project | `chaindora.yml`, `.chaindora.yml` or `chaindora.yaml`, found by walking up from the current directory |
+| CI suppressions | Project | `.chaindora-ignore.yml` |
+
+Fleet reporting is optional and separate; see [the fleet service](architecture.md#fleet-service).
+
 ## Download a release
 
 Choose an archive from [release 0.0.4](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.4)
@@ -166,6 +182,12 @@ chdora gate install
 # Open a new terminal, then:
 chdora gate status
 ```
+
+The wrappers are per user. They cover `npm` started from any shell that loads
+the PATH block, in any project, and each project's `chaindora.yml` sets the
+policy. They do not cover other user accounts, IDEs or tools that start npm by
+full path, or shells that do not load the block. `chdora gate status` shows
+which package managers are currently gated.
 
 Windows supports scanning and `gate check`; frozen installation and automatic
 wrappers are currently unsupported.

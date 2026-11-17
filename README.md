@@ -13,19 +13,26 @@ Go modules and Rust/crates.io, plus verified frozen npm installs. The CLI is `ch
 
 ## Start here
 
-Follow the [installation guide](docs/installation.md) for platform downloads,
-checksum verification and PATH setup. With a supported Go toolchain (minimum
-Go 1.22), install the CLI and fetch its incident data:
+Download [release 0.0.4](https://github.com/alessandro-bitetto/chaindora/releases/tag/v0.0.4)
+for your platform, check it against `chaindora_0.0.4_checksums.txt`, and put
+`chdora` on your PATH. The [installation guide](docs/installation.md) walks
+through each platform. Then fetch the incident data and scan a project:
 
 ```sh
-go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.4
 chdora update
 chdora scan .
 ```
 
+`chdora update` refreshes the curated incident pack; it does not upgrade the CLI.
+
+With Go 1.22 or later you can install from source instead:
+
+```sh
+go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.4
+```
+
 Add your Go binary directory to PATH. To build a checkout, run
 `go build -o chdora ./cmd/chdora` and use `./chdora`.
-`chdora update` refreshes the curated incident pack; it does not upgrade the CLI.
 
 ## What you can do
 
@@ -39,6 +46,37 @@ Add your Go binary directory to PATH. To build a checkout, run
   not proof that the machine is clean or compromised.
 - **Enforce in CI:** `chdora ci .` supports JSON/SARIF, severity thresholds,
   baselines, suppressions, and PR annotations. See [CI recipes](docs/ci-integration.md).
+
+## Where it runs
+
+Chaindora works at three levels: set up once per machine, with rules that live
+in each project, and optional reporting across machines. None of these levels
+enforces anything device-wide.
+
+**On your machine, once per user.** On macOS/Linux, `chdora gate install`
+writes shims to `~/.chaindora/bin` and a marked PATH block to your shell
+profile. From then on, `npm ci` and bare `npm install` in any project go through
+the gate first, in shells that load that block. `chdora forensics` inspects the
+host itself, and `chdora audit` scans every project under `$HOME`.
+
+- *Limit:* the shims cover your user account only. Other accounts, IDEs and
+  tools that start npm by full path, and shells without the PATH block bypass
+  them. Frozen installation requires macOS or Linux.
+
+**In each project.** A committed `chaindora.yml` sets the gate's policy
+(cooldown, allow and deny rules, how strict to be) for anyone running Chaindora
+in that repository. `chdora scan .` inspects the project's dependencies in all
+five ecosystems, and `chdora ci .` applies the same checks in a pipeline.
+
+- *Limit:* the policy applies only where Chaindora runs. It does not stop an
+  install on a machine without the gate.
+
+**Across your fleet (opt-in).** Run your own `chdora server`, enroll each
+machine with `chdora agent enroll`, and upload findings with
+`chdora agent push`. See the [fleet service](docs/architecture.md#fleet-service).
+
+- *Limit:* fleet mode collects findings. It does not install or enforce the
+  gate on other machines.
 
 There is no telemetry. Online checks contact OSV and package registries;
 package identities can therefore be disclosed to those services. Fleet reporting
