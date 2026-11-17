@@ -25,7 +25,7 @@ h2 { font-size: clamp(32px, 4.3vw, 52px); line-height: 1.08; letter-spacing: -.0
 h3 { letter-spacing: -.035em; line-height: 1.15; }
 code { font-family: var(--cd-mono); }
 .container { width: min(1200px, calc(100% - 96px)); margin-inline: auto; }
-.eyebrow, .small-label { font-family: var(--cd-mono); text-transform: uppercase; font-size: 10px; font-weight: 600; letter-spacing: .13em; }
+.eyebrow, .small-label { font-family: var(--cd-mono); text-transform: uppercase; font-size: 11px; font-weight: 600; letter-spacing: .13em; }
 .eyebrow { display: flex; align-items: center; gap: 10px; }
 .small-label { color: var(--cd-muted); display: block; }
 .button { display: inline-flex; align-items: center; justify-content: space-between; gap: 28px; min-height: 50px; padding: 12px 22px; font-size: 13px; font-weight: 650; border: 1px solid transparent; transition: background .2s, transform .2s; }

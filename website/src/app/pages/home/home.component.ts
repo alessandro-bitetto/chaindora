@@ -2,6 +2,8 @@ import { CommonModule } from '@angular/common';
 import { Component, OnDestroy } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
+type Incident = { name: string; scope: string; year: number; file: string };
+
 type Ecosystem = {
   name: string;
   registry: string;
@@ -20,7 +22,17 @@ type Ecosystem = {
 })
 export class HomeComponent implements OnDestroy {
   readonly github = 'https://github.com/alessandro-bitetto/chaindora';
-  readonly sourceInstall = 'go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v0.0.4';
+  /** Single source for the advertised release; update on each release. */
+  readonly version = '0.0.4';
+  readonly releaseUrl = `${this.github}/releases/tag/v${this.version}`;
+  readonly sourceInstall = `go install github.com/alessandro-bitetto/chaindora/cmd/chdora@v${this.version}`;
+  readonly incidents: Incident[] = [
+    { name: 'Shai-Hulud npm worm', scope: 'npm', year: 2025, file: 'shai-hulud-2025.yaml' },
+    { name: 'chalk & debug hijack', scope: 'npm', year: 2025, file: 'qix-compromise-2025.yaml' },
+    { name: 'xz-utils backdoor', scope: 'Host', year: 2024, file: 'xz-utils-cve-2024-3094.yaml' },
+    { name: 'colors & faker sabotage', scope: 'npm', year: 2022, file: 'colors-faker-sabotage-2022.yaml' },
+    { name: 'jeIlyfish typosquats', scope: 'PyPI', year: 2019, file: 'pypi-typosquats-2019.yaml' },
+  ];
   readonly ecosystems: Ecosystem[] = [
     { name: 'npm', registry: 'JavaScript & TypeScript', managers: 'npm · Yarn · pnpm · Bun · Deno', command: 'chdora gate check lodash@4.17.21', inventory: 'package-lock.json · yarn.lock · pnpm-lock.yaml · deno.lock', note: 'Registry signals and package-source patterns. Frozen npm restores have an install adapter; other managers retain scanning and package checks. Bun has no lockfile inventory parser. Deno coverage is limited to npm dependencies.' },
     { name: 'PyPI', registry: 'Python', managers: 'pip · pip3 · Poetry · uv · Pipenv · PDM', command: 'chdora gate check requests@2.32.3 --ecosystem pypi', inventory: 'requirements.txt · poetry.lock · uv.lock · Pipfile.lock · pdm.lock · pyproject.toml', note: 'Inspect registry artifacts and Python credential-collection patterns. Python install commands are refused until a verified adapter exists.' },

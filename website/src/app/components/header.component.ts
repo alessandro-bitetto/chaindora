@@ -10,7 +10,7 @@ import { RouterLink } from '@angular/router';
       <nav id="site-navigation" aria-label="Main navigation" [class.open]="open">
         <a routerLink="/" fragment="protection" (click)="open = false">Protection</a><a routerLink="/" fragment="ecosystems" (click)="open = false">Ecosystems</a>
         <a href="https://github.com/alessandro-bitetto/chaindora/blob/main/README.md">Docs ↗</a>
-        <a routerLink="/" fragment="install" class="nav-cta" (click)="open = false">Get Chaindora <span aria-hidden="true">↗</span></a>
+        <a routerLink="/" fragment="install" class="nav-cta" (click)="open = false">Get Chaindora <span aria-hidden="true">↓</span></a>
       </nav>
     </div></header>`,
   styles: [`

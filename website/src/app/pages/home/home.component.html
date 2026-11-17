@@ -1,47 +1,77 @@
 <section class="hero container" aria-labelledby="hero-title">
   <div class="hero-copy">
-    <p class="eyebrow"><span class="status-dot"></span> Open-source supply-chain security</p>
+    <div class="hero-eyebrow-row">
+      <p class="eyebrow"><span class="status-dot"></span> Open-source supply-chain security</p>
+      <a class="release-badge" [href]="github + '/blob/main/CHANGELOG.md'">What’s new in v{{ version }} <span aria-hidden="true">↗</span></a>
+    </div>
     <h1 id="hero-title">Your code.<br><span>Your rules.</span></h1>
     <p class="hero-description">A security checkpoint for the packages you install.<br class="desktop-break"> A closer look at the ones already inside.</p>
     <p class="hero-detail">Chaindora brings prevention and detection to npm, PyPI, .NET, Go, and Rust. One CLI. A deliberately focused scope.</p>
     <div class="hero-actions">
-      <a class="button button-red" routerLink="/" fragment="install">Start with a scan <span aria-hidden="true">↗</span></a>
+      <a class="button button-red" routerLink="/" fragment="install">Get Chaindora <span aria-hidden="true">↓</span></a>
       <a class="text-link" routerLink="/" fragment="protection">See how it works <span aria-hidden="true">↓</span></a>
     </div>
+    <dl class="hero-scope">
+      <div><dt>Install gate</dt><dd>Frozen npm restores on macOS and Linux</dd></div>
+      <div><dt>Scanning</dt><dd>All five ecosystems, on every platform</dd></div>
+    </dl>
     <div class="hero-meta"><span>Apache-2.0</span><span>No telemetry</span><span>macOS / Linux / Windows</span></div>
   </div>
 
-  <div class="guard-visual" aria-label="Illustration of Chaindora checking dependencies between the registry and your project">
-    <div class="visual-topline"><span>THE DEPENDENCY CHECKPOINT</span><span>CH / 01</span></div>
-    <div class="route-line" aria-hidden="true"><span>REGISTRY</span><i></i><span class="checkpoint">CHDORA</span><i></i><span>YOUR PROJECT</span></div>
-    <div class="guardian">
-      <div class="guardian-frame" aria-hidden="true"></div>
-      <img src="assets/logo-symbol.png" alt="Chaindora ninja mascot" width="320" height="308" fetchpriority="high">
-      <div class="visual-label label-left"><span class="label-number">01</span> Check before install</div>
-      <div class="visual-label label-right"><span class="label-number">02</span> Investigate after</div>
+  <figure class="hero-terminal" aria-labelledby="hero-terminal-caption">
+    <div class="term-bar">
+      <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <div class="term-tabs" role="group" aria-label="Example command">
+        <button type="button" [class.active]="mode === 'prevent'" [attr.aria-pressed]="mode === 'prevent'" (click)="mode = 'prevent'">gate</button>
+        <button type="button" [class.active]="mode === 'detect'" [attr.aria-pressed]="mode === 'detect'" (click)="mode = 'detect'">scan</button>
+      </div>
+      <span class="term-path" aria-hidden="true">~/acme-app</span>
     </div>
-    <div class="visual-terminal">
-      <div class="terminal-caption"><span class="terminal-dot"></span> Illustrative gate result</div>
-      <code><span class="prompt">$</span> chdora gate check example&#64;1.0.0</code>
-      <div class="terminal-result"><span class="block-icon">×</span><div><strong>INSTALL REFUSED</strong><span>Suspicious credential-collection pattern</span></div><span class="result-arrow" aria-hidden="true">↗</span></div>
-    </div>
-  </div>
+    @if (mode === 'prevent') {
+      <div class="term-body" role="img" aria-label="Example terminal session: chdora gate exec npm ci resolves 142 packages, blocks one for a suspicious pattern score, and refuses the install.">
+        <div class="term-line term-cmd" aria-hidden="true"><span class="prompt">$</span><span class="typed" style="--n: 23">chdora gate exec npm ci</span></div>
+        <div class="term-line dim" style="--i: 1">[chdora] verifying artifacts from the frozen npm lockfile (lifecycle scripts disabled)</div>
+        <div class="term-line dim" style="--i: 2">[chdora] tree resolved: 142 unique (name, version) tuple(s)</div>
+        <div class="term-line term-pkg" style="--i: 3">npm:example-utils&#64;2.0.1 <span class="dim">direct=false</span></div>
+        <div class="term-line term-hit" style="--i: 4"><span class="flag">!!</span><span>[static-pattern] <b>block</b> — suspicious-pattern score 5 ≥ block threshold 3</span></div>
+        <div class="term-line dim term-gap" style="--i: 5">[chdora] gate summary: approve=141 <span class="red">block=1</span></div>
+        <div class="term-line term-error" style="--i: 6"><span class="red">error:</span> install refused by gate: blocked=1 warned=0 unknown=0</div>
+        <div class="term-line term-cmd term-idle" style="--i: 7"><span class="prompt">$</span><span class="cursor"></span></div>
+      </div>
+      <figcaption class="term-foot" id="hero-terminal-caption"><span><span class="terminal-dot"></span> Illustrative output</span><span class="term-verdict" style="--i: 6">Install refused <span aria-hidden="true">×</span></span></figcaption>
+    } @else {
+      <div class="term-body" role="img" aria-label="Example terminal session: chdora scan . finds debug 4.4.2 from the September 2025 qix maintainer compromise in package-lock.json.">
+        <div class="term-line term-cmd" aria-hidden="true"><span class="prompt">$</span><span class="typed" style="--n: 13">chdora scan .</span></div>
+        <div class="term-line term-section" style="--i: 1"><span class="red">SUPPLY-CHAIN ATTACK SIGNALS</span>  (1 finding — 1 critical)</div>
+        <div class="term-line red term-gap" style="--i: 2">CRITICAL  (1 finding)</div>
+        <div class="term-line term-pkg" style="--i: 3">#1  incident-pack | NPM-QIX-COMPROMISE-2025-09 | pkg:npm/debug&#64;4.4.2</div>
+        <div class="term-line term-indent" style="--i: 4">qix npm maintainer compromise (chalk/debug crypto wallet stealer)</div>
+        <div class="term-line term-indent" style="--i: 5"><span class="dim">source:</span>  package-lock.json</div>
+        <div class="term-line term-indent term-clip" style="--i: 5"><span class="dim">refs:</span>    https://socket.dev/blog/npm-author-qix-compromised-in-major-supply-chain-attack</div>
+        <div class="term-line dim term-gap" style="--i: 6">DEPENDENCY VULNERABILITIES (OSV.dev)  (✓ 0 findings — no known CVEs in scanned dependencies)</div>
+        <div class="term-line term-cmd term-idle" style="--i: 7"><span class="prompt">$</span><span class="cursor"></span></div>
+      </div>
+      <figcaption class="term-foot" id="hero-terminal-caption"><span><span class="terminal-dot"></span> Illustrative output</span><span class="term-verdict" style="--i: 6">1 critical finding</span></figcaption>
+    }
+  </figure>
 </section>
 
-<section class="ecosystem-strip" aria-label="Five supported dependency ecosystems">
-  <div class="container ecosystem-strip-inner"><span class="strip-label">FIVE ECOSYSTEMS.<br>ONE FOCUSED TOOL.</span><div class="ecosystem-word" *ngFor="let eco of ecosystems; index as i"><span class="ecosystem-index">0{{ i + 1 }}</span>{{ eco.name }}</div></div>
+<section class="incident-strip" aria-labelledby="incident-strip-label">
+  <div class="container incident-strip-inner">
+    <p class="strip-label" id="incident-strip-label">Checks for the attacks <br>you’ve heard of</p>
+    <ul class="incident-list">
+      <li *ngFor="let inc of incidents"><a [href]="github + '/blob/main/incidents/' + inc.file"><span class="incident-meta">{{ inc.scope }} · {{ inc.year }}</span><span class="incident-name">{{ inc.name }}</span></a></li>
+    </ul>
+    <a class="strip-more" [href]="github + '/tree/main/incidents'">Full incident pack <span aria-hidden="true">↗</span></a>
+  </div>
 </section>
 
 <section class="protection-section" id="protection" aria-labelledby="protection-title">
   <div class="container">
-    <div class="section-heading"><p class="eyebrow">01 / Two sides of protection</p><div><h2 id="protection-title">Before it lands.<br>After it’s installed.</h2><p>Prevention and detection share the same evidence.<br>Version 0.0.4 adds verified frozen npm restores and crash recovery.</p></div></div>
+    <div class="section-heading"><p class="eyebrow">01 / Two sides of protection</p><div><h2 id="protection-title">Before it lands.<br>After it’s installed.</h2><p>Prevention and detection share the same evidence, from one binary.</p></div></div>
     <div class="protection-grid">
       <article class="protection-card" id="prevention"><span class="card-index">01 — PREVENT</span><h3>Make installs<br>answer to your policy.</h3><p>Restore a reviewed npm lockfile from verified artifacts. Check policy, install offline with scripts disabled, then verify staged files.</p><ul><li>Evaluate direct and transitive dependencies</li><li>Refuse incomplete checks under strict policy</li><li>Recheck approvals against the current rules</li></ul><code>chdora gate exec npm ci</code></article>
       <article class="protection-card" id="detection"><span class="card-index">02 — DETECT</span><h3>Find the signals<br>worth investigating.</h3><p>Audit existing projects for known malicious packages, suspicious changes, installed npm file changes and signs of host compromise.</p><ul><li>Check inventory against OSV and incident packs</li><li>Look for credential-collection patterns</li><li>Bring findings into CI with JSON and SARIF</li></ul><code>chdora scan .</code></article>
-    </div>
-    <div class="workflow-preview">
-      <div class="preview-controls"><span>MEET THE CLI</span><div class="mode-switch" role="group" aria-label="Command example"><button type="button" [class.active]="mode === 'prevent'" [attr.aria-pressed]="mode === 'prevent'" (click)="mode = 'prevent'">Gate</button><button type="button" [class.active]="mode === 'detect'" [attr.aria-pressed]="mode === 'detect'" (click)="mode = 'detect'">Scan</button></div></div>
-      <div class="preview-body" aria-live="polite"><span class="prompt">$</span><code>{{ mode === 'prevent' ? 'chdora gate exec --dry-run npm ci' : 'chdora scan . --format sarif > findings.sarif' }}</code><p>{{ mode === 'prevent' ? 'Evaluate the install and inspect the verdict before running the package manager.' : 'Inspect a project and export findings for your security workflow.' }}</p></div>
     </div>
   </div>
 </section>
@@ -61,8 +91,8 @@
 </section>
 
 <section class="install-section container" id="install" aria-labelledby="install-title">
-  <div class="install-intro"><p class="eyebrow">04 / Put it to work</p><h2 id="install-title">Start with<br>a closer look.</h2><p>Download a release, verify its checksum, and run a scan in your project. Enable the install gate when you’re ready.</p><a class="button button-red" [href]="github + '/releases/latest'">Download Chaindora <span aria-hidden="true">↗</span></a><span class="download-note">macOS · Linux · Windows</span></div>
-  <div class="install-steps"><article><div class="step-title"><span>01</span><h3>Install from source</h3><span class="step-detail">Go 1.22+</span></div><div class="command-row"><code>{{ sourceInstall }}</code><button type="button" class="copy-button" (click)="copy(sourceInstall, 'install')">{{ copied === 'install' ? 'Copied ✓' : 'Copy' }}</button></div><p>Add your Go binary directory to PATH, or use a prebuilt release.</p></article><article><div class="step-title"><span>02</span><h3>Inspect a project</h3></div><div class="command-row"><code>chdora update &amp;&amp; chdora scan .</code><button type="button" class="copy-button" (click)="copy('chdora update && chdora scan .', 'scan')">{{ copied === 'scan' ? 'Copied ✓' : 'Copy' }}</button></div><p>Fetch the incident pack, then scan from your project directory. Use <code>--offline</code> for local checks after the pack is available.</p></article><article><div class="step-title"><span>03</span><h3>Add the install checkpoint</h3></div><div class="command-row"><code>chdora gate install</code><button type="button" class="copy-button" (click)="copy('chdora gate install', 'gate')">{{ copied === 'gate' ? 'Copied ✓' : 'Copy' }}</button></div><p>macOS/Linux only. Restore a reviewed npm lockfile with verified artifacts and scripts disabled. Other install routes refuse.</p></article></div>
+  <div class="install-intro"><p class="eyebrow">04 / Put it to work</p><h2 id="install-title">Start with<br>a closer look.</h2><p>Download a release, verify its checksum, and run a scan in your project. Enable the install gate when you’re ready.</p><a class="text-link" [href]="github + '/blob/main/docs/installation.md'">Step-by-step install guide <span aria-hidden="true">↗</span></a></div>
+  <div class="install-steps"><article><div class="step-title"><span>01</span><h3>Download a release</h3><span class="step-detail">v{{ version }}</span></div><p class="step-lead">Pick the archive for your platform, compare its SHA-256 with <code>chaindora_{{ version }}_checksums.txt</code>, then put <code>chdora</code> on your PATH.</p><div class="download-row"><a class="button button-red" [href]="releaseUrl">Download v{{ version }} <span aria-hidden="true">↗</span></a><span class="download-note">macOS · Linux · Windows</span></div><details class="alt-install"><summary>Have Go 1.22+? Install from source</summary><div class="command-row"><code>{{ sourceInstall }}</code><button type="button" class="copy-button" (click)="copy(sourceInstall, 'install')">{{ copied === 'install' ? 'Copied ✓' : 'Copy' }}</button></div><p>Add your Go binary directory to PATH.</p></details></article><article><div class="step-title"><span>02</span><h3>Inspect a project</h3></div><div class="command-row"><code>chdora update &amp;&amp; chdora scan .</code><button type="button" class="copy-button" (click)="copy('chdora update && chdora scan .', 'scan')">{{ copied === 'scan' ? 'Copied ✓' : 'Copy' }}</button></div><p>Fetch the incident pack, then scan from your project directory. Use <code>--offline</code> for local checks after the pack is available.</p></article><article><div class="step-title"><span>03</span><h3>Add the install checkpoint</h3></div><div class="command-row"><code>chdora gate install</code><button type="button" class="copy-button" (click)="copy('chdora gate install', 'gate')">{{ copied === 'gate' ? 'Copied ✓' : 'Copy' }}</button></div><p>macOS/Linux only. Restore a reviewed npm lockfile with verified artifacts and scripts disabled. Other install routes refuse.</p></article></div>
 </section>
 <div class="copy-status container" role="status" aria-live="polite">{{ copyError || (copied ? 'Command copied to clipboard.' : '') }}</div>
 <section class="closing-band"><div class="container"><p>Small footprint.<br><strong>Sharper focus.</strong></p><a [href]="github">Built in the open.<br><span>Join us on GitHub ↗</span></a></div></section>
